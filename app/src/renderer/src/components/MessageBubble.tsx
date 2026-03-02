@@ -1,4 +1,3 @@
-import ReactMarkdown from 'react-markdown'
 import { ChatMessage, Citation } from '../../../../../shared/src/types'
 import SourceCard from './SourceCard'
 
@@ -24,6 +23,129 @@ function GavelAvatar(): JSX.Element {
       </svg>
     </div>
   )
+}
+
+// ── Lightweight markdown renderer (no external deps) ─────────────────────────
+// Handles bold, italic, inline code, fenced code blocks, bullet + numbered lists.
+function renderMarkdown(text: string): JSX.Element {
+  const lines = text.split('\n')
+  const elements: JSX.Element[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Fenced code block
+    if (line.startsWith('```')) {
+      const lang = line.slice(3).trim()
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        codeLines.push(lines[i])
+        i++
+      }
+      elements.push(
+        <pre key={i} style={{ background: '#060606', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '10px 14px', overflowX: 'auto', margin: '6px 0' }}>
+          <code style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.82em', color: 'rgba(255,255,255,0.8)' }} data-lang={lang}>
+            {codeLines.join('\n')}
+          </code>
+        </pre>
+      )
+      i++
+      continue
+    }
+
+    // Bullet list item
+    if (/^[-*•]\s/.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^[-*•]\s/.test(lines[i])) {
+        items.push(lines[i].replace(/^[-*•]\s+/, ''))
+        i++
+      }
+      elements.push(
+        <ul key={i} style={{ listStyle: 'disc', paddingLeft: '1.25em', margin: '4px 0 6px' }}>
+          {items.map((item, j) => (
+            <li key={j} style={{ marginBottom: '0.15em' }}>{inlineMarkdown(item)}</li>
+          ))}
+        </ul>
+      )
+      continue
+    }
+
+    // Numbered list item
+    if (/^\d+\.\s/.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        items.push(lines[i].replace(/^\d+\.\s+/, ''))
+        i++
+      }
+      elements.push(
+        <ol key={i} style={{ listStyle: 'decimal', paddingLeft: '1.25em', margin: '4px 0 6px' }}>
+          {items.map((item, j) => (
+            <li key={j} style={{ marginBottom: '0.15em' }}>{inlineMarkdown(item)}</li>
+          ))}
+        </ol>
+      )
+      continue
+    }
+
+    // Headings
+    const headingMatch = line.match(/^(#{1,3})\s+(.+)/)
+    if (headingMatch) {
+      const level = headingMatch[1].length
+      const content = headingMatch[2]
+      const style: React.CSSProperties = { fontWeight: 600, color: '#fff', margin: '8px 0 3px', lineHeight: 1.3, fontSize: level === 1 ? '1.05em' : level === 2 ? '0.98em' : '0.93em' }
+      elements.push(<p key={i} style={style}>{inlineMarkdown(content)}</p>)
+      i++
+      continue
+    }
+
+    // Blank line
+    if (line.trim() === '') {
+      // Only add spacing if there's content above
+      if (elements.length > 0) {
+        elements.push(<div key={i} style={{ height: '0.4em' }} />)
+      }
+      i++
+      continue
+    }
+
+    // Normal paragraph line
+    elements.push(
+      <p key={i} style={{ margin: 0 }}>{inlineMarkdown(line)}</p>
+    )
+    i++
+  }
+
+  return <>{elements}</>
+}
+
+// Inline markdown: **bold**, *italic*, `code`
+function inlineMarkdown(text: string): (string | JSX.Element)[] {
+  const parts: (string | JSX.Element)[] = []
+  // Combined regex: **bold**, *italic*, `code`
+  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g
+  let last = 0
+  let m: RegExpExecArray | null
+
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    if (m[0].startsWith('**')) {
+      parts.push(<strong key={m.index} style={{ color: '#fff', fontWeight: 600 }}>{m[2]}</strong>)
+    } else if (m[0].startsWith('*')) {
+      parts.push(<em key={m.index}>{m[3]}</em>)
+    } else {
+      parts.push(
+        <code key={m.index} style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.85em', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 4, padding: '0.1em 0.35em' }}>
+          {m[4]}
+        </code>
+      )
+    }
+    last = m.index + m[0].length
+  }
+
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
 }
 
 export default function MessageBubble({ message, onViewCitation }: Props): JSX.Element {
@@ -90,8 +212,8 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
               borderLeft: '2px solid rgba(201,168,76,0.22)',
             }}
           >
-            <div className="prose-bubble text-[13.5px] text-white leading-[1.75]">
-              <ReactMarkdown>{message.content}</ReactMarkdown>
+            <div className="text-[13.5px] text-white leading-[1.75]">
+              {renderMarkdown(message.content)}
             </div>
           </div>
         )}
