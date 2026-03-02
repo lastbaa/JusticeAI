@@ -28,6 +28,12 @@ Rules you must never break:
 Context from loaded documents:
 {context}`
 
+// Minimum similarity score to include a chunk (0–1 scale)
+const SCORE_THRESHOLD = 0.35
+
+// Max chunks from any single (file, page) pair to ensure diversity
+const MAX_CHUNKS_PER_PAGE = 2
+
 interface ChunkMetadata extends DocumentChunk {
   itemId: string
 }
@@ -52,10 +58,8 @@ export class RagPipeline {
       await this.index.createIndex()
     }
 
-    // Load existing items from the index to rebuild registries on startup
     try {
       const allItems = await this.index.listItems()
-      // Track unique documents to rebuild fileRegistry
       const docMap = new Map<string, { meta: ChunkMetadata; count: number }>()
 
       for (const item of allItems) {
@@ -66,7 +70,6 @@ export class RagPipeline {
           existing.push(meta.itemId)
           this.docChunkIds.set(meta.documentId, existing)
 
-          // Track docs for fileRegistry rebuild
           if (!docMap.has(meta.documentId)) {
             docMap.set(meta.documentId, { meta, count: 1 })
           } else {
@@ -75,23 +78,20 @@ export class RagPipeline {
         }
       }
 
-      // Rebuild fileRegistry from chunk metadata
       for (const [docId, { meta, count }] of docMap) {
         if (!this.fileRegistry.has(docId)) {
-          // We don't have totalPages/wordCount in chunk metadata, use defaults
           this.fileRegistry.set(docId, {
             id: docId,
             fileName: meta.fileName,
             filePath: meta.filePath,
-            totalPages: meta.pageNumber, // approximation: highest page seen
-            wordCount: 0, // not stored in chunk metadata
+            totalPages: meta.pageNumber,
+            wordCount: 0,
             loadedAt: Date.now(),
             chunkCount: count,
           })
         }
       }
 
-      // Second pass: fix totalPages to be the max pageNumber per doc
       for (const item of allItems) {
         const meta = item.metadata as unknown as ChunkMetadata
         if (meta && meta.documentId && this.fileRegistry.has(meta.documentId)) {
@@ -102,14 +102,12 @@ export class RagPipeline {
         }
       }
     } catch {
-      // Index may be empty or not yet created — that is fine
+      // Index may be empty — that's fine
     }
   }
 
   async addDocument(doc: ParsedDocument, settings: AppSettings): Promise<FileInfo> {
-    if (!this.index) {
-      throw new Error('RagPipeline not initialized')
-    }
+    if (!this.index) throw new Error('RagPipeline not initialized')
 
     const chunks = this.chunkDocument(doc, settings.chunkSize, settings.chunkOverlap)
     const itemIds: string[] = []
@@ -123,7 +121,11 @@ export class RagPipeline {
         )
         const itemId = uuidv4()
         const meta: ChunkMetadata = { ...chunk, itemId }
-        await this.index.insertItem({ id: itemId, vector: embedding, metadata: meta as unknown as Record<string, MetadataTypes> })
+        await this.index.insertItem({
+          id: itemId,
+          vector: embedding,
+          metadata: meta as unknown as Record<string, MetadataTypes>,
+        })
         this.chunkRegistry.set(itemId, meta)
         itemIds.push(itemId)
       } catch (err) {
@@ -148,9 +150,7 @@ export class RagPipeline {
   }
 
   async removeDocument(fileId: string): Promise<void> {
-    if (!this.index) {
-      throw new Error('RagPipeline not initialized')
-    }
+    if (!this.index) throw new Error('RagPipeline not initialized')
 
     const itemIds = this.docChunkIds.get(fileId) || []
     for (const id of itemIds) {
@@ -167,9 +167,10 @@ export class RagPipeline {
   }
 
   async query(question: string, settings: AppSettings): Promise<QueryResult> {
-    if (!this.index) {
-      throw new Error('RagPipeline not initialized')
-    }
+    if (!this.index) throw new Error('RagPipeline not initialized')
+
+    // Retrieve more candidates than topK so we can filter and diversify
+    const candidateK = settings.topK * 3
 
     let queryEmbedding: number[]
     try {
@@ -182,27 +183,48 @@ export class RagPipeline {
       throw new Error(`Failed to embed query: ${err}`)
     }
 
-    let results: Array<{ item: { metadata: Record<string, MetadataTypes> }; score: number }> = []
+    let rawResults: Array<{ item: { metadata: Record<string, MetadataTypes> }; score: number }> = []
     try {
-      results = await this.index.queryItems(queryEmbedding, question, settings.topK)
+      rawResults = await this.index.queryItems(queryEmbedding, question, candidateK)
     } catch {
-      results = []
+      rawResults = []
     }
+
+    // 1. Filter by score threshold
+    const filtered = rawResults.filter((r) => r.score >= SCORE_THRESHOLD)
+
+    // 2. Diversity: cap chunks per (filePath, pageNumber) pair
+    const pageCount = new Map<string, number>()
+    const diverse = filtered.filter((r) => {
+      const meta = r.item.metadata as unknown as ChunkMetadata
+      const key = `${meta.filePath}::${meta.pageNumber}`
+      const count = pageCount.get(key) ?? 0
+      if (count >= MAX_CHUNKS_PER_PAGE) return false
+      pageCount.set(key, count + 1)
+      return true
+    })
+
+    // 3. Take topK after diversification
+    const results = diverse.slice(0, settings.topK)
 
     const retrievedChunks = results.map((r) => {
       const meta = r.item.metadata as unknown as ChunkMetadata
       return { ...meta, score: r.score }
     })
 
-    // Build context
-    const contextParts = retrievedChunks.map((chunk, idx) => {
-      return `[${idx + 1}] File: ${chunk.fileName} | Page: ${chunk.pageNumber}\n${chunk.text}`
-    })
-    const context =
-      contextParts.length > 0
-        ? contextParts.join('\n\n---\n\n')
-        : 'No relevant document excerpts were found.'
+    if (retrievedChunks.length === 0) {
+      return {
+        answer: 'I could not find information about this in your loaded documents. Please ensure the relevant files are loaded.',
+        citations: [],
+        notFound: true,
+      }
+    }
 
+    // Build context — include filename, page, and full chunk text
+    const contextParts = retrievedChunks.map((chunk, idx) => {
+      return `[${idx + 1}] File: "${chunk.fileName}" | Page ${chunk.pageNumber}\n${chunk.text}`
+    })
+    const context = contextParts.join('\n\n---\n\n')
     const systemWithContext = SYSTEM_PROMPT.replace('{context}', context)
 
     let answer: string
@@ -214,16 +236,18 @@ export class RagPipeline {
 
     const notFound =
       answer.toLowerCase().includes('i could not find') ||
-      answer.toLowerCase().includes('no relevant') ||
-      contextParts.length === 0
+      answer.toLowerCase().includes('no relevant')
 
-    const citations: Citation[] = retrievedChunks.map((chunk) => ({
-      fileName: chunk.fileName,
-      filePath: chunk.filePath,
-      pageNumber: chunk.pageNumber,
-      excerpt: chunk.text.slice(0, 300) + (chunk.text.length > 300 ? '...' : ''),
-      score: chunk.score,
-    }))
+    // Build citations with best-sentence excerpts, sorted by score
+    const citations: Citation[] = retrievedChunks
+      .sort((a, b) => b.score - a.score)
+      .map((chunk) => ({
+        fileName: chunk.fileName,
+        filePath: chunk.filePath,
+        pageNumber: chunk.pageNumber,
+        excerpt: this.bestExcerpt(chunk.text, question),
+        score: chunk.score,
+      }))
 
     return { answer, citations: notFound ? [] : citations, notFound }
   }
@@ -242,6 +266,46 @@ export class RagPipeline {
     return texts.join(' ')
   }
 
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Extract the single most relevant sentence from a chunk given the query.
+   * Falls back to the first 280 chars if no good match.
+   */
+  private bestExcerpt(text: string, query: string): string {
+    const sentences = text
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 20)
+
+    if (sentences.length === 0) {
+      return text.slice(0, 280) + (text.length > 280 ? '…' : '')
+    }
+
+    const queryWords = new Set(
+      query.toLowerCase().split(/\W+/).filter((w) => w.length > 3)
+    )
+
+    let best = sentences[0]
+    let bestScore = 0
+
+    for (const sentence of sentences) {
+      const words = sentence.toLowerCase().split(/\W+/)
+      const hits = words.filter((w) => queryWords.has(w)).length
+      const score = hits / Math.sqrt(words.length)
+      if (score > bestScore) {
+        bestScore = score
+        best = sentence
+      }
+    }
+
+    return best.length > 320 ? best.slice(0, 320) + '…' : best
+  }
+
+  /**
+   * Sentence-boundary aware chunker.
+   * Tries to break at sentence endings rather than mid-word.
+   */
   private chunkDocument(
     doc: ParsedDocument,
     chunkSize: number,
@@ -254,11 +318,14 @@ export class RagPipeline {
       const text = page.text
       if (!text || text.trim().length === 0) continue
 
-      let start = 0
-      while (start < text.length) {
-        const end = Math.min(start + chunkSize, text.length)
-        const chunkText = text.slice(start, end).trim()
+      // Split into sentences, recombine into chunks respecting sentence boundaries
+      const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 0)
 
+      let currentChunk = ''
+      const sentenceBuffer: string[] = []
+
+      const flush = () => {
+        const chunkText = currentChunk.trim()
         if (chunkText.length > 0) {
           chunks.push({
             id: uuidv4(),
@@ -271,11 +338,26 @@ export class RagPipeline {
             tokenCount: Math.ceil(chunkText.length / 4),
           })
         }
-
-        if (end === text.length) break
-        start = end - chunkOverlap
-        if (start < 0) start = 0
       }
+
+      for (const sentence of sentences) {
+        if (currentChunk.length + sentence.length + 1 > chunkSize && currentChunk.length > 0) {
+          flush()
+          // Overlap: carry last N chars worth of sentences into next chunk
+          let overlapText = ''
+          for (let i = sentenceBuffer.length - 1; i >= 0; i--) {
+            const candidate = sentenceBuffer[i] + ' ' + overlapText
+            if (candidate.length > chunkOverlap) break
+            overlapText = candidate
+          }
+          currentChunk = overlapText.trim()
+          sentenceBuffer.length = 0
+        }
+        currentChunk += (currentChunk ? ' ' : '') + sentence
+        sentenceBuffer.push(sentence)
+      }
+
+      flush()
     }
 
     return chunks

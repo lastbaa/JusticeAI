@@ -91,9 +91,9 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   hfToken: '',
   embedModel: 'nomic-embed-text',
-  chunkSize: 500,
-  chunkOverlap: 50,
-  topK: 5,
+  chunkSize: 1000,
+  chunkOverlap: 150,
+  topK: 6,
   ollamaBaseUrl: 'http://localhost:11434',
 };
 
