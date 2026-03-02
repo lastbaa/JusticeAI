@@ -81,20 +81,16 @@ export interface OllamaStatus {
 
 export interface AppSettings {
   hfToken: string;
-  embedModel: string;
   chunkSize: number;
   chunkOverlap: number;
   topK: number;
-  ollamaBaseUrl: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   hfToken: '',
-  embedModel: 'nomic-embed-text',
   chunkSize: 1000,
   chunkOverlap: 150,
   topK: 6,
-  ollamaBaseUrl: 'http://localhost:11434',
 };
 
 // ─── IPC Channel Names ─────────────────────────────────────────────────────────

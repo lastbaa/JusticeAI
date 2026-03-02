@@ -9,60 +9,6 @@ interface Props {
   onCheckStatus: () => Promise<void>
 }
 
-function CopyButton({ text }: { text: string }): JSX.Element {
-  const [copied, setCopied] = useState(false)
-
-  function handleCopy(): void {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1800)
-    })
-  }
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="shrink-0 flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-all"
-      style={{
-        background: copied ? 'rgba(63,185,80,0.12)' : 'rgba(255,255,255,0.05)',
-        border: `1px solid ${copied ? 'rgba(63,185,80,0.3)' : 'rgba(255,255,255,0.08)'}`,
-        color: copied ? '#3fb950' : 'rgba(255,255,255,0.4)',
-      }}
-    >
-      {copied ? (
-        <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
-          <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ) : (
-        <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z" />
-          <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
-        </svg>
-      )}
-      {copied ? 'Copied' : 'Copy'}
-    </button>
-  )
-}
-
-function CommandRow({ label, command }: { label: string; command: string }): JSX.Element {
-  return (
-    <div className="flex items-center gap-3">
-      <span className="shrink-0 text-[10px] font-semibold w-5 text-right" style={{ color: 'rgba(201,168,76,0.5)' }}>
-        {label}
-      </span>
-      <div
-        className="flex flex-1 items-center justify-between gap-3 rounded-lg px-3 py-2"
-        style={{ background: '#060606', border: '1px solid rgba(255,255,255,0.06)' }}
-      >
-        <code className="text-[11.5px] font-mono" style={{ color: 'rgba(255,255,255,0.65)' }}>
-          {command}
-        </code>
-        <CopyButton text={command} />
-      </div>
-    </div>
-  )
-}
-
 function Field({
   label,
   description,
@@ -75,32 +21,58 @@ function Field({
   return (
     <div>
       <label className="block text-[12px] font-medium text-white mb-1">{label}</label>
-      {description && <p className="text-[11px] mb-2" style={{ color: 'rgba(255,255,255,0.35)' }}>{description}</p>}
+      {description && (
+        <p className="text-[11px] mb-2" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          {description}
+        </p>
+      )}
       {children}
     </div>
   )
 }
 
-function TextInput({
+function HfTokenInput({
   value,
   onChange,
-  placeholder,
 }: {
   value: string
   onChange: (v: string) => void
-  placeholder?: string
 }): JSX.Element {
+  const [visible, setVisible] = useState(false)
   return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full rounded-lg px-3 py-2 text-[12px] text-white placeholder-white/20 outline-none transition-colors"
-      style={{ background: '#060606', border: '1px solid rgba(255,255,255,0.08)' }}
-      onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = 'rgba(201,168,76,0.4)' }}
-      onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = 'rgba(255,255,255,0.08)' }}
-    />
+    <div className="relative flex items-center">
+      <input
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="hf_••••••••••••••••••••"
+        className="w-full rounded-lg px-3 py-2 pr-10 text-[12px] text-white placeholder-white/20 outline-none transition-colors font-mono"
+        style={{ background: '#060606', border: '1px solid rgba(255,255,255,0.08)' }}
+        onFocus={(e) => {
+          ;(e.target as HTMLInputElement).style.borderColor = 'rgba(201,168,76,0.4)'
+        }}
+        onBlur={(e) => {
+          ;(e.target as HTMLInputElement).style.borderColor = 'rgba(255,255,255,0.08)'
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        className="absolute right-2.5 flex h-5 w-5 items-center justify-center"
+        style={{ color: 'rgba(255,255,255,0.3)' }}
+      >
+        {visible ? (
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M.143 2.31a.75.75 0 0 1 1.047-.167l14.5 10.5a.75.75 0 1 1-.88 1.214l-2.248-1.628C11.346 12.769 9.792 13 8 13c-3.73 0-6.849-2.07-8.123-5.062a.75.75 0 0 1 0-.876C.515 5.796 1.48 4.57 2.72 3.65L.31 2.007A.75.75 0 0 1 .143 2.31zm5.56 4.036a2.5 2.5 0 0 0 3.408 3.408l-3.408-3.408z" />
+            <path d="M12.034 9.512A2.5 2.5 0 0 0 8.488 5.966l-.68-.492A3.99 3.99 0 0 1 12 8c0 .553-.107 1.082-.304 1.566l.338.245-.001-.001z" />
+          </svg>
+        ) : (
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 2c3.73 0 6.849 2.07 8.123 5.062a.75.75 0 0 1 0 .876C14.849 11.93 11.73 14 8 14c-3.73 0-6.849-2.07-8.123-5.062a.75.75 0 0 1 0-.876C1.151 5.07 4.27 3 8 3zm0 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z" />
+          </svg>
+        )}
+      </button>
+    </div>
   )
 }
 
@@ -124,62 +96,34 @@ function NumberInput({
       max={max}
       className="w-full rounded-lg px-3 py-2 text-[12px] text-white outline-none transition-colors"
       style={{ background: '#060606', border: '1px solid rgba(255,255,255,0.08)' }}
-      onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = 'rgba(201,168,76,0.4)' }}
-      onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = 'rgba(255,255,255,0.08)' }}
+      onFocus={(e) => {
+        ;(e.target as HTMLInputElement).style.borderColor = 'rgba(201,168,76,0.4)'
+      }}
+      onBlur={(e) => {
+        ;(e.target as HTMLInputElement).style.borderColor = 'rgba(255,255,255,0.08)'
+      }}
     />
-  )
-}
-
-function HfTokenInput({
-  value,
-  onChange,
-}: {
-  value: string
-  onChange: (v: string) => void
-}): JSX.Element {
-  const [visible, setVisible] = useState(false)
-  return (
-    <div className="relative flex items-center">
-      <input
-        type={visible ? 'text' : 'password'}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="hf_••••••••••••••••••••"
-        className="w-full rounded-lg px-3 py-2 pr-10 text-[12px] text-white placeholder-white/20 outline-none transition-colors font-mono"
-        style={{ background: '#060606', border: '1px solid rgba(255,255,255,0.08)' }}
-        onFocus={(e) => { (e.target as HTMLInputElement).style.borderColor = 'rgba(201,168,76,0.4)' }}
-        onBlur={(e) => { (e.target as HTMLInputElement).style.borderColor = 'rgba(255,255,255,0.08)' }}
-      />
-      <button
-        type="button"
-        onClick={() => setVisible((v) => !v)}
-        className="absolute right-2.5 flex h-5 w-5 items-center justify-center"
-        style={{ color: 'rgba(255,255,255,0.3)' }}
-      >
-        {visible ? (
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M.143 2.31a.75.75 0 0 1 1.047-.167l14.5 10.5a.75.75 0 1 1-.88 1.214l-2.248-1.628C11.346 12.769 9.792 13 8 13c-3.73 0-6.849-2.07-8.123-5.062a.75.75 0 0 1 0-.876C.515 5.796 1.48 4.57 2.72 3.65L.31 2.007A.75.75 0 0 1 .143 2.31zm5.56 4.036a2.5 2.5 0 0 0 3.408 3.408l-3.408-3.408z" />
-            <path d="M12.034 9.512A2.5 2.5 0 0 0 8.488 5.966l-.68-.492A3.99 3.99 0 0 1 12 8c0 .553-.107 1.082-.304 1.566l.338.245-.001-.001z" />
-          </svg>
-        ) : (
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 2c3.73 0 6.849 2.07 8.123 5.062a.75.75 0 0 1 0 .876C14.849 11.93 11.73 14 8 14c-3.73 0-6.849-2.07-8.123-5.062a.75.75 0 0 1 0-.876C1.151 5.07 4.27 3 8 3zm0 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z" />
-          </svg>
-        )}
-      </button>
-    </div>
   )
 }
 
 function SectionHeader({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-4 pb-2 border-b" style={{ color: 'rgba(255,255,255,0.3)', borderColor: 'rgba(255,255,255,0.06)' }}>
+    <h3
+      className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-4 pb-2 border-b"
+      style={{ color: 'rgba(255,255,255,0.3)', borderColor: 'rgba(255,255,255,0.06)' }}
+    >
       {children}
     </h3>
   )
 }
 
-export default function Settings({ settings, ollamaStatus, onSave, onClose, onCheckStatus }: Props): JSX.Element {
+export default function Settings({
+  settings,
+  ollamaStatus,
+  onSave,
+  onClose,
+  onCheckStatus,
+}: Props): JSX.Element {
   const [local, setLocal] = useState<AppSettings>({ ...settings })
   const [isChecking, setIsChecking] = useState(false)
 
@@ -199,48 +143,54 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
 
   const hasToken = local.hfToken.trim().length > 0
 
-  // Derive status display
   const statusInfo = (() => {
-    if (!hasToken) return {
-      dot: '#f85149',
-      label: 'HuggingFace token missing',
-      detail: 'Add your token below to enable answer generation.',
-      ready: false,
-    }
-    if (!ollamaStatus) return {
-      dot: '#e3b341',
-      label: 'Ollama not checked',
-      detail: 'Click "Check Connection" to verify embeddings are available.',
-      ready: false,
-    }
-    if (!ollamaStatus.running) return {
-      dot: '#e3b341',
-      label: 'Ollama not running',
-      detail: 'Start Ollama with: ollama serve (needed for embeddings).',
-      ready: false,
-    }
-    if (!ollamaStatus.hasEmbedModel) return {
-      dot: '#e3b341',
-      label: 'Embedding model missing',
-      detail: `Pull ${local.embedModel} using the command below.`,
-      ready: false,
-    }
+    if (!hasToken)
+      return {
+        dot: '#f85149',
+        label: 'HuggingFace token required',
+        detail: 'Add your free token below to get started.',
+        ready: false,
+      }
+    if (!ollamaStatus)
+      return {
+        dot: '#e3b341',
+        label: 'Not verified',
+        detail: 'Click "Check Connection" to verify your token.',
+        ready: false,
+      }
+    if (!ollamaStatus.running)
+      return {
+        dot: '#e3b341',
+        label: 'Cannot reach HuggingFace',
+        detail: 'Check your internet connection and try again.',
+        ready: false,
+      }
     return {
       dot: '#3fb950',
       label: 'Ready',
-      detail: `Saul-7B via HuggingFace · ${ollamaStatus.embedModelName} embeddings`,
+      detail: 'Saul-7B-Instruct · all-MiniLM-L6-v2 embeddings · via HuggingFace',
       ready: true,
     }
   })()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
+    >
       <div
         className="w-full max-w-lg rounded-2xl overflow-hidden"
-        style={{ background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 40px 100px rgba(0,0,0,0.8)' }}
+        style={{
+          background: '#0a0a0a',
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: '0 40px 100px rgba(0,0,0,0.8)',
+        }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div
+          className="flex items-center justify-between px-6 py-4"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+        >
           <div className="flex items-center gap-2.5">
             <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
               <rect x="1" y="3" width="11" height="4" rx="1.25" fill="#c9a84c" transform="rotate(45 6.5 5)" />
@@ -253,8 +203,12 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
             onClick={onClose}
             className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"
             style={{ color: 'rgba(255,255,255,0.3)' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.7)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.3)' }}
+            onMouseEnter={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.7)'
+            }}
+            onMouseLeave={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.3)'
+            }}
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z" />
@@ -263,48 +217,65 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto px-6 py-5 flex flex-col gap-6" style={{ maxHeight: '65vh' }}>
-
-          {/* ── First-run setup guide ── */}
+        <div
+          className="overflow-y-auto px-6 py-5 flex flex-col gap-6"
+          style={{ maxHeight: '65vh' }}
+        >
+          {/* ── First-run guide ── */}
           {!hasToken && (
             <div
               className="rounded-xl px-4 py-4 flex flex-col gap-3"
               style={{ background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.18)' }}
             >
-              <p className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: 'rgba(201,168,76,0.8)' }}>
-                Quick Setup — 3 Steps
+              <p
+                className="text-[11px] font-bold uppercase tracking-[0.14em]"
+                style={{ color: 'rgba(201,168,76,0.8)' }}
+              >
+                One-Time Setup — 2 Steps
               </p>
-              <div className="flex flex-col gap-2.5">
-                {[
-                  {
-                    n: '1',
-                    title: 'Get a HuggingFace token',
-                    detail: 'huggingface.co/settings/tokens — free account, read access.',
-                  },
-                  {
-                    n: '2',
-                    title: 'Paste your token below',
-                    detail: 'Enables Saul-7B-Instruct for answer generation.',
-                  },
-                  {
-                    n: '3',
-                    title: 'Install Ollama + pull embedding model',
-                    detail: 'brew install ollama  →  ollama pull nomic-embed-text  →  ollama serve',
-                  },
-                ].map((step) => (
-                  <div key={step.n} className="flex items-start gap-3">
-                    <span
-                      className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
-                      style={{ background: 'rgba(201,168,76,0.15)', color: '#c9a84c' }}
+              <div className="flex flex-col gap-3">
+                <div className="flex items-start gap-3">
+                  <span
+                    className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
+                    style={{ background: 'rgba(201,168,76,0.15)', color: '#c9a84c' }}
+                  >
+                    1
+                  </span>
+                  <div>
+                    <p className="text-[11px] font-semibold text-white mb-0.5">
+                      Create a free HuggingFace account
+                    </p>
+                    <p
+                      className="text-[10px] leading-relaxed"
+                      style={{ color: 'rgba(255,255,255,0.35)' }}
                     >
-                      {step.n}
-                    </span>
-                    <div>
-                      <p className="text-[11px] font-semibold text-white mb-0.5">{step.title}</p>
-                      <p className="text-[10px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.35)' }}>{step.detail}</p>
-                    </div>
+                      Go to{' '}
+                      <span style={{ color: 'rgba(201,168,76,0.7)' }}>
+                        huggingface.co/settings/tokens
+                      </span>{' '}
+                      and create a token with Read access. It&apos;s free.
+                    </p>
                   </div>
-                ))}
+                </div>
+                <div className="flex items-start gap-3">
+                  <span
+                    className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
+                    style={{ background: 'rgba(201,168,76,0.15)', color: '#c9a84c' }}
+                  >
+                    2
+                  </span>
+                  <div>
+                    <p className="text-[11px] font-semibold text-white mb-0.5">
+                      Paste your token below
+                    </p>
+                    <p
+                      className="text-[10px] leading-relaxed"
+                      style={{ color: 'rgba(255,255,255,0.35)' }}
+                    >
+                      That&apos;s it. No installs. No command line. Justice AI handles the rest.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -316,7 +287,6 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
               className="rounded-xl p-4 flex flex-col gap-3"
               style={{ background: '#060606', border: '1px solid rgba(255,255,255,0.06)' }}
             >
-              {/* Status row */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="w-2 h-2 rounded-full shrink-0" style={{ background: statusInfo.dot }} />
@@ -326,12 +296,21 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
                   onClick={handleCheckStatus}
                   disabled={isChecking}
                   className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all disabled:opacity-50"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)' }}
+                  style={{
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: 'rgba(255,255,255,0.6)',
+                  }}
                 >
                   {isChecking ? (
                     <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
                       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.2" />
-                      <path d="M12 2a10 10 0 0110 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      <path
+                        d="M12 2a10 10 0 0110 10"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                      />
                     </svg>
                   ) : (
                     <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
@@ -342,25 +321,34 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
                 </button>
               </div>
 
-              {/* Detail text */}
-              <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              <p
+                className="text-[11px] leading-relaxed"
+                style={{ color: 'rgba(255,255,255,0.35)' }}
+              >
                 {statusInfo.detail}
               </p>
 
-              {/* Model chips when ready */}
-              {statusInfo.ready && ollamaStatus && (
+              {statusInfo.ready && (
                 <div className="flex gap-2 flex-wrap">
                   <span
                     className="text-[10px] font-medium px-2 py-1 rounded-md"
-                    style={{ background: 'rgba(63,185,80,0.08)', border: '1px solid rgba(63,185,80,0.2)', color: '#3fb950' }}
+                    style={{
+                      background: 'rgba(63,185,80,0.08)',
+                      border: '1px solid rgba(63,185,80,0.2)',
+                      color: '#3fb950',
+                    }}
                   >
                     ✓ Saul-7B via HuggingFace
                   </span>
                   <span
                     className="text-[10px] font-medium px-2 py-1 rounded-md"
-                    style={{ background: 'rgba(63,185,80,0.08)', border: '1px solid rgba(63,185,80,0.2)', color: '#3fb950' }}
+                    style={{
+                      background: 'rgba(63,185,80,0.08)',
+                      border: '1px solid rgba(63,185,80,0.2)',
+                      color: '#3fb950',
+                    }}
                   >
-                    ✓ {ollamaStatus.embedModelName} (Ollama)
+                    ✓ Embeddings via HuggingFace
                   </span>
                 </div>
               )}
@@ -380,70 +368,32 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
                 </svg>
                 <div>
                   <p className="text-[11px] font-semibold mb-0.5" style={{ color: '#c9a84c' }}>
-                    Saul-7B-Instruct runs via HuggingFace
+                    All AI runs via HuggingFace — no local installs
                   </p>
-                  <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.32)' }}>
+                  <p
+                    className="text-[11px] leading-relaxed"
+                    style={{ color: 'rgba(255,255,255,0.32)' }}
+                  >
                     Get a free token at{' '}
-                    <span style={{ color: 'rgba(201,168,76,0.7)' }}>huggingface.co/settings/tokens</span>
-                    {' '}(read access is enough).
+                    <span style={{ color: 'rgba(201,168,76,0.7)' }}>
+                      huggingface.co/settings/tokens
+                    </span>{' '}
+                    (read access is enough). Both Saul-7B and embeddings use this token.
                   </p>
                 </div>
               </div>
               <Field
                 label="HuggingFace Token"
-                description="Used to call Saul-7B-Instruct for answer generation."
+                description="Used for Saul-7B-Instruct answers and document embeddings."
               >
-                <HfTokenInput
-                  value={local.hfToken}
-                  onChange={(v) => update('hfToken', v)}
-                />
-              </Field>
-            </div>
-          </div>
-
-          {/* ── Embedding Setup ── */}
-          <div>
-            <SectionHeader>Embedding Setup (Ollama)</SectionHeader>
-            <div className="flex flex-col gap-2.5">
-              <p className="text-[11px] mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                Embeddings still run locally via Ollama:
-              </p>
-              <CommandRow label="1." command="brew install ollama" />
-              <CommandRow label="2." command={`ollama pull ${local.embedModel || 'nomic-embed-text'}`} />
-              <CommandRow label="3." command="ollama serve" />
-            </div>
-          </div>
-
-          {/* ── Model Configuration ── */}
-          <div>
-            <SectionHeader>Model Configuration</SectionHeader>
-            <div className="flex flex-col gap-4">
-              <Field
-                label="Embedding Model"
-                description="Model used to embed document chunks and queries for semantic search (runs locally via Ollama)."
-              >
-                <TextInput
-                  value={local.embedModel}
-                  onChange={(v) => update('embedModel', v)}
-                  placeholder="nomic-embed-text"
-                />
-              </Field>
-              <Field
-                label="Ollama Base URL"
-                description="URL where Ollama is running (for embeddings)."
-              >
-                <TextInput
-                  value={local.ollamaBaseUrl}
-                  onChange={(v) => update('ollamaBaseUrl', v)}
-                  placeholder="http://localhost:11434"
-                />
+                <HfTokenInput value={local.hfToken} onChange={(v) => update('hfToken', v)} />
               </Field>
             </div>
           </div>
 
           {/* ── RAG Configuration ── */}
           <div>
-            <SectionHeader>RAG Configuration</SectionHeader>
+            <SectionHeader>Search Configuration</SectionHeader>
             <div className="grid grid-cols-3 gap-4">
               <Field label="Chunk Size" description="Characters per chunk (100–2000)">
                 <NumberInput
@@ -477,28 +427,62 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
             className="rounded-xl px-4 py-3 flex items-start gap-3"
             style={{ background: 'rgba(63,185,80,0.04)', border: '1px solid rgba(63,185,80,0.12)' }}
           >
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="shrink-0 mt-0.5">
-              <path d="M8.533.133a1.75 1.75 0 0 0-1.066 0l-5.25 1.68A1.75 1.75 0 0 0 1 3.48V7c0 1.566.832 3.125 2.561 4.608.458.391.978.752 1.535 1.078a11.865 11.865 0 0 0 2.904 1.218c1.11 0 3.028-.877 4.439-2.296C13.168 10.125 14 8.566 14 7V3.48a1.75 1.75 0 0 0-1.217-1.667L8.533.133zm-.61 1.429a.25.25 0 0 1 .153 0l5.25 1.68a.25.25 0 0 1 .174.237V7c0 1.32-.69 2.6-2.249 3.933C10.157 12.022 8.63 12.75 8 12.75c-.63 0-2.157-.728-3.251-1.817C3.19 9.6 2.5 8.32 2.5 7V3.48a.25.25 0 0 1 .174-.238z" stroke="#3fb950" strokeWidth="0.3" fill="#3fb950" opacity="0.7" />
-              <path d="M5.5 8l2 2 3-3" stroke="#3fb950" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 16 16"
+              fill="none"
+              className="shrink-0 mt-0.5"
+            >
+              <path
+                d="M8.533.133a1.75 1.75 0 0 0-1.066 0l-5.25 1.68A1.75 1.75 0 0 0 1 3.48V7c0 1.566.832 3.125 2.561 4.608.458.391.978.752 1.535 1.078a11.865 11.865 0 0 0 2.904 1.218c1.11 0 3.028-.877 4.439-2.296C13.168 10.125 14 8.566 14 7V3.48a1.75 1.75 0 0 0-1.217-1.667L8.533.133zm-.61 1.429a.25.25 0 0 1 .153 0l5.25 1.68a.25.25 0 0 1 .174.237V7c0 1.32-.69 2.6-2.249 3.933C10.157 12.022 8.63 12.75 8 12.75c-.63 0-2.157-.728-3.251-1.817C3.19 9.6 2.5 8.32 2.5 7V3.48a.25.25 0 0 1 .174-.238z"
+                stroke="#3fb950"
+                strokeWidth="0.3"
+                fill="#3fb950"
+                opacity="0.7"
+              />
+              <path
+                d="M5.5 8l2 2 3-3"
+                stroke="#3fb950"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
             <div>
-              <p className="text-[11px] font-semibold mb-0.5" style={{ color: '#3fb950' }}>Privacy Guarantee</p>
-              <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.32)' }}>
-                Your documents are never uploaded — parsing and semantic search run entirely on your machine. Only your query text is sent to HuggingFace for answer generation.
+              <p className="text-[11px] font-semibold mb-0.5" style={{ color: '#3fb950' }}>
+                Privacy Guarantee
+              </p>
+              <p
+                className="text-[11px] leading-relaxed"
+                style={{ color: 'rgba(255,255,255,0.32)' }}
+              >
+                Your documents are never uploaded — they stay on your machine. Only your query text
+                is sent to HuggingFace for processing.
               </p>
             </div>
           </div>
-
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        <div
+          className="flex items-center justify-end gap-3 px-6 py-4"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+        >
           <button
             onClick={onClose}
             className="rounded-lg px-4 py-2 text-[12px] font-medium transition-colors"
-            style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.4)' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.7)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.4)' }}
+            style={{
+              background: 'transparent',
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: 'rgba(255,255,255,0.4)',
+            }}
+            onMouseEnter={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.7)'
+            }}
+            onMouseLeave={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.4)'
+            }}
           >
             Cancel
           </button>
@@ -506,8 +490,12 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
             onClick={handleSave}
             className="rounded-lg px-5 py-2 text-[12px] font-semibold transition-colors"
             style={{ background: '#c9a84c', color: '#080808' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#e8c97e' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#c9a84c' }}
+            onMouseEnter={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.background = '#e8c97e'
+            }}
+            onMouseLeave={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.background = '#c9a84c'
+            }}
           >
             Save Settings
           </button>

@@ -2,71 +2,30 @@
   "name": "@justice-ai/app",
   "version": "1.0.0",
   "description": "Justice AI — Private Legal Research Desktop App",
-  "main": "out/main/index.js",
   "private": true,
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
-    "package": "electron-vite build && electron-builder"
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "dev:vite": "vite",
+    "build:vite": "vite build",
+    "tauri": "tauri"
   },
   "dependencies": {
-    "@huggingface/inference": "^4.13.14",
-    "electron-store": "^8.2.0",
-    "mammoth": "^1.8.0",
-    "pdf-parse": "^1.1.1",
-    "pdfjs-dist": "^5.5.207",
-    "uuid": "^9.0.0",
-    "vectra": "^0.12.3"
+    "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "pdfjs-dist": "^5.5.207"
   },
   "devDependencies": {
-    "@electron-toolkit/preload": "^3.0.1",
-    "@electron-toolkit/tsconfig": "^2.0.0",
-    "@electron-toolkit/utils": "^3.0.0",
-    "@types/node": "^20.14.0",
-    "@types/pdf-parse": "^1.1.4",
+    "@tauri-apps/cli": "^2.10.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@types/uuid": "^9.0.8",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
-    "electron": "^31.7.7",
-    "electron-builder": "^24.13.3",
-    "electron-vite": "^2.3.0",
     "postcss": "^8.4.39",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwindcss": "^3.4.6",
     "typescript": "^5.5.2",
     "vite": "^5.3.3"
-  },
-  "build": {
-    "appId": "com.justiceai.app",
-    "productName": "Justice AI",
-    "electronVersion": "31.7.7",
-    "mac": {
-      "category": "public.app-category.productivity",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        }
-      ]
-    },
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "!**/.vscode/*",
-      "!src/*",
-      "!electron.vite.config.*",
-      "!{.eslintignore,.eslintrc*,.prettierignore,.prettierrc*}",
-      "!{.env,.env.*,.npmrc}",
-      "!tailwind.config.*",
-      "!postcss.config.*",
-      "!tsconfig*"
-    ]
   }
 }

@@ -168,7 +168,7 @@ export default function App(): JSX.Element {
       const errorMessage: ChatMessage = {
         id: uuidv4(),
         role: 'assistant',
-        content: `Unable to get a response. ${err instanceof Error ? err.message : 'Check your HuggingFace token in Settings and that Ollama is running for embeddings.'}`,
+        content: `Unable to get a response. ${err instanceof Error ? err.message : 'Check your HuggingFace token in Settings.'}`,
         citations: [],
         notFound: true,
         timestamp: Date.now(),

@@ -1,0 +1,29 @@
+[package]
+name = "justice-ai"
+version = "1.0.0"
+description = "Justice AI — Private Legal Research Desktop App"
+authors = ["Justice AI"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.10.0", features = ["macos-private-api"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+lopdf = "0.32"
+zip = "2"
+roxmltree = "0.19"
+log = "0.4"
+tauri-plugin-log = "2"

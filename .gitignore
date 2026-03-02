@@ -13,8 +13,10 @@ dist/
 build/
 app/out/
 
-# Electron
+# Electron / Tauri
 app/dist/
+app/src-tauri/target/
+app/src-tauri/gen/
 
 # Vercel
 .vercel/
