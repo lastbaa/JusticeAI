@@ -22,51 +22,77 @@ interface HighlightRect {
   h: number
 }
 
+/**
+ * Finds canvas-space bounding boxes for the excerpt within the page's text items.
+ *
+ * Key design: we build a single normalized string from the PDF text items,
+ * tracking each item's [start, end) in that *same* string. Then we search
+ * the excerpt (also normalized) in the same string — so positions always match.
+ */
 function findHighlightRects(
   items: TextItem[],
   excerpt: string,
   viewport: pdfjsLib.PageViewport
 ): HighlightRect[] {
-  // Build full concatenated string and track each item's start position
-  let fullText = ''
-  const itemMeta: { start: number; end: number; item: TextItem }[] = []
+  // Build a normalized string from items, tracking each item's position in it.
+  let norm = ''
+  const meta: { start: number; end: number; item: TextItem }[] = []
 
   for (const item of items) {
-    const start = fullText.length
-    fullText += item.str
-    itemMeta.push({ start, end: fullText.length, item })
-    // pdfjs items sometimes don't include spaces; add one if needed
-    if (!item.str.endsWith(' ')) fullText += ' '
+    if (!item.str) continue
+    // Normalize this item's whitespace before adding to norm
+    const s = item.str.replace(/\s+/g, ' ')
+    if (!s.trim()) continue
+    // Ensure words from adjacent items don't merge
+    if (norm.length > 0 && !norm.endsWith(' ') && !s.startsWith(' ')) {
+      norm += ' '
+    }
+    const start = norm.length
+    norm += s
+    meta.push({ start, end: norm.length, item })
   }
 
-  // Search for the first ~80 chars of the excerpt (trim whitespace/newlines)
-  const needle = excerpt
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 80)
-    .toLowerCase()
-  const haystack = fullText.replace(/\s+/g, ' ').toLowerCase()
-  const foundAt = haystack.indexOf(needle)
+  const haystack = norm.toLowerCase()
+
+  // Try progressively shorter needles so partial PDF-text differences still match
+  const rawNeedle = excerpt.replace(/\s+/g, ' ').trim().toLowerCase()
+  const candidates = [
+    rawNeedle.slice(0, 200),
+    rawNeedle.slice(0, 120),
+    rawNeedle.slice(0, 60),
+  ]
+
+  let foundAt = -1
+  let needle = ''
+  for (const c of candidates) {
+    if (c.length < 10) break
+    const idx = haystack.indexOf(c)
+    if (idx !== -1) {
+      foundAt = idx
+      needle = c
+      break
+    }
+  }
   if (foundAt === -1) return []
 
   const foundEnd = foundAt + needle.length
   const rects: HighlightRect[] = []
 
-  for (const { start, end, item } of itemMeta) {
+  for (const { start, end, item } of meta) {
     if (end <= foundAt || start >= foundEnd) continue
 
-    // Compute canvas coords from the item transform
+    // Compute canvas coordinates from the item's affine transform
     const tx = pdfjsLib.Util.transform(viewport.transform, item.transform)
-    // tx = [a, b, c, d, e, f] — standard affine matrix
+    // tx = [a, b, c, d, e, f]
     const x = tx[4]
     const y = tx[5]
-    // Height: magnitude of the y-scale column
+    // Vertical scale → glyph height in canvas pixels
     const h = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3])
-    // Width: scale item.width by the x-scale magnitude
+    // Horizontal scale → used to convert item.width (user units) → canvas pixels
     const xScale = Math.sqrt(tx[0] * tx[0] + tx[1] * tx[1])
     const w = item.width * xScale
 
-    // y is the baseline; move up by h to get the top of the glyph
+    // y is the text baseline; move up by h to get the top of the glyph
     rects.push({ x, y: y - h, w, h: h * 1.3 })
   }
 
@@ -76,6 +102,7 @@ function findHighlightRects(
 // ── PDF Viewer ───────────────────────────────────────────────────────────────
 function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading')
   const [totalPages, setTotalPages] = useState<number>(0)
   const SCALE = 1.6
@@ -123,9 +150,9 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
 
         if (rects.length > 0) {
           ctx.save()
-          ctx.fillStyle = 'rgba(201, 168, 76, 0.28)'
-          ctx.strokeStyle = 'rgba(201, 168, 76, 0.55)'
-          ctx.lineWidth = 1
+          ctx.fillStyle = 'rgba(201, 168, 76, 0.32)'
+          ctx.strokeStyle = 'rgba(201, 168, 76, 0.7)'
+          ctx.lineWidth = 1.5
           for (const r of rects) {
             ctx.fillRect(r.x, r.y, r.w, r.h)
             ctx.strokeRect(r.x, r.y, r.w, r.h)
@@ -134,6 +161,18 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
         }
 
         setStatus('done')
+
+        // After React paints the canvas as visible, scroll to the first highlight
+        if (rects.length > 0) {
+          const firstRect = rects[0]
+          requestAnimationFrame(() => {
+            if (!cancelled && scrollRef.current && canvasRef.current) {
+              const cssScale = canvasRef.current.clientWidth / canvasRef.current.width
+              // Scroll so the highlight is roughly 1/4 from the top
+              scrollRef.current.scrollTop = Math.max(0, firstRect.y * cssScale - 100)
+            }
+          })
+        }
       } catch (err) {
         console.error('DocumentViewer render error:', err)
         if (!cancelled) setStatus('error')
@@ -145,7 +184,7 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
   }, [citation.filePath, citation.pageNumber, citation.excerpt])
 
   return (
-    <div className="flex-1 overflow-auto" style={{ background: '#111' }}>
+    <div ref={scrollRef} className="flex-1 overflow-auto" style={{ background: '#111' }}>
       {status === 'loading' && (
         <div className="flex h-full items-center justify-center">
           <div className="flex flex-col items-center gap-3">
@@ -212,7 +251,7 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
   }
 
   // Highlight the excerpt in the text
-  const needle = citation.excerpt.replace(/\s+/g, ' ').trim().slice(0, 120)
+  const needle = citation.excerpt.replace(/\s+/g, ' ').trim().slice(0, 200)
   const parts = text.split(new RegExp(`(${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'))
 
   return (
@@ -249,7 +288,7 @@ export default function DocumentViewer({ citation, onClose }: Props): JSX.Elemen
       style={{
         width: citation ? 520 : 0,
         minWidth: citation ? 520 : 0,
-        borderLeft: '1px solid rgba(255,255,255,0.06)',
+        borderLeft: citation ? '1px solid rgba(255,255,255,0.06)' : 'none',
         background: '#0a0a0a',
         overflow: 'hidden',
         transition: 'width 0.25s ease, min-width 0.25s ease',
@@ -304,17 +343,23 @@ export default function DocumentViewer({ citation, onClose }: Props): JSX.Elemen
             </button>
           </div>
 
-          {/* Excerpt strip */}
+          {/* Excerpt strip — shows exactly what text is highlighted */}
           <div
             className="shrink-0 px-4 py-2.5"
             style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: '#070707' }}
           >
-            <p
-              className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-1"
-              style={{ color: 'rgba(201,168,76,0.45)' }}
-            >
-              Cited excerpt
-            </p>
+            <div className="flex items-center gap-1.5 mb-1">
+              <div
+                className="w-2 h-2 rounded-sm shrink-0"
+                style={{ background: 'rgba(201,168,76,0.45)' }}
+              />
+              <p
+                className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+                style={{ color: 'rgba(201,168,76,0.55)' }}
+              >
+                Highlighted in document
+              </p>
+            </div>
             <p
               className="text-[11px] leading-relaxed italic"
               style={{ color: 'rgba(255,255,255,0.35)' }}
@@ -325,7 +370,7 @@ export default function DocumentViewer({ citation, onClose }: Props): JSX.Elemen
 
           {/* Document body */}
           {isPdf ? (
-            <PdfViewer key={`${citation.filePath}-${citation.pageNumber}`} citation={citation} />
+            <PdfViewer key={`${citation.filePath}-${citation.pageNumber}-${citation.excerpt.slice(0,40)}`} citation={citation} />
           ) : (
             <TextViewer key={`${citation.filePath}-${citation.pageNumber}`} citation={citation} />
           )}

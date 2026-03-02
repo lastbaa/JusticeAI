@@ -6,6 +6,7 @@ interface Props {
   citations: Citation[]
   isQuerying: boolean
   isLoading: boolean
+  collapsed: boolean
   onAddFiles: () => void
   onRemoveFile: (id: string) => void
   onViewCitation: (citation: Citation) => void
@@ -177,6 +178,7 @@ export default function ContextPanel({
   citations,
   isQuerying,
   isLoading,
+  collapsed,
   onAddFiles,
   onRemoveFile,
   onViewCitation,
@@ -185,8 +187,15 @@ export default function ContextPanel({
 
   return (
     <aside
-      className="flex h-screen w-[300px] shrink-0 flex-col"
-      style={{ borderRight: '1px solid rgba(255,255,255,0.05)', background: '#050505' }}
+      className="flex h-screen shrink-0 flex-col"
+      style={{
+        width: collapsed ? 0 : 300,
+        minWidth: collapsed ? 0 : 300,
+        borderRight: collapsed ? 'none' : '1px solid rgba(255,255,255,0.05)',
+        background: '#050505',
+        overflow: 'hidden',
+        transition: 'width 0.25s ease, min-width 0.25s ease',
+      }}
     >
       {/* Header — matches other panels' h-11 drag region */}
       <div

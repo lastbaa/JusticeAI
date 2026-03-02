@@ -265,6 +265,50 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
         {/* Body */}
         <div className="overflow-y-auto px-6 py-5 flex flex-col gap-6" style={{ maxHeight: '65vh' }}>
 
+          {/* ── First-run setup guide ── */}
+          {!hasToken && (
+            <div
+              className="rounded-xl px-4 py-4 flex flex-col gap-3"
+              style={{ background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.18)' }}
+            >
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: 'rgba(201,168,76,0.8)' }}>
+                Quick Setup — 3 Steps
+              </p>
+              <div className="flex flex-col gap-2.5">
+                {[
+                  {
+                    n: '1',
+                    title: 'Get a HuggingFace token',
+                    detail: 'huggingface.co/settings/tokens — free account, read access.',
+                  },
+                  {
+                    n: '2',
+                    title: 'Paste your token below',
+                    detail: 'Enables Saul-7B-Instruct for answer generation.',
+                  },
+                  {
+                    n: '3',
+                    title: 'Install Ollama + pull embedding model',
+                    detail: 'brew install ollama  →  ollama pull nomic-embed-text  →  ollama serve',
+                  },
+                ].map((step) => (
+                  <div key={step.n} className="flex items-start gap-3">
+                    <span
+                      className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
+                      style={{ background: 'rgba(201,168,76,0.15)', color: '#c9a84c' }}
+                    >
+                      {step.n}
+                    </span>
+                    <div>
+                      <p className="text-[11px] font-semibold text-white mb-0.5">{step.title}</p>
+                      <p className="text-[10px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.35)' }}>{step.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* ── Connection Status ── */}
           <div>
             <SectionHeader>Connection Status</SectionHeader>
@@ -440,7 +484,7 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
             <div>
               <p className="text-[11px] font-semibold mb-0.5" style={{ color: '#3fb950' }}>Privacy Guarantee</p>
               <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.32)' }}>
-                All data stays on your machine. The only network request made is to your local Ollama instance. Your documents and queries never leave your device.
+                Your documents are never uploaded — parsing and semantic search run entirely on your machine. Only your query text is sent to HuggingFace for answer generation.
               </p>
             </div>
           </div>

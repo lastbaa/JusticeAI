@@ -239,6 +239,7 @@ export default function App(): JSX.Element {
         citations={lastCitations}
         isQuerying={isQuerying}
         isLoading={isLoading}
+        collapsed={viewerCitation !== null}
         onAddFiles={handleAddFiles}
         onRemoveFile={handleRemoveFile}
         onViewCitation={setViewerCitation}

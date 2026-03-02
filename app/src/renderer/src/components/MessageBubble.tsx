@@ -1,3 +1,4 @@
+import ReactMarkdown from 'react-markdown'
 import { ChatMessage, Citation } from '../../../../../shared/src/types'
 import SourceCard from './SourceCard'
 
@@ -89,9 +90,9 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
               borderLeft: '2px solid rgba(201,168,76,0.22)',
             }}
           >
-            <p className="text-[13.5px] text-white leading-[1.75] whitespace-pre-wrap">
-              {message.content}
-            </p>
+            <div className="prose-bubble text-[13.5px] text-white leading-[1.75]">
+              <ReactMarkdown>{message.content}</ReactMarkdown>
+            </div>
           </div>
         )}
 

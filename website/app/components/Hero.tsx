@@ -3,8 +3,8 @@
 import { Typewriter } from './Typewriter'
 
 const stats = [
-  { value: '100%', label: 'Local Execution' },
-  { value: '0', label: 'Bytes Sent Externally' },
+  { value: '100%', label: 'Local Document Storage' },
+  { value: '0', label: 'Documents Uploaded' },
   { value: '∞', label: 'Documents Supported' },
 ]
 
@@ -143,8 +143,9 @@ export default function Hero() {
           style={{ color: 'rgba(255,255,255,0.36)' }}
         >
           Attorney-client privilege demands that your case files never touch a cloud server.
-          Justice AI runs the entire AI pipeline locally — document parsing, semantic search,
-          and answer generation — so your clients stay protected and your research stays fast.
+          Justice AI keeps all your documents local — parsing and semantic search run on your
+          machine, while answers are generated via HuggingFace API, so your clients stay
+          protected and your research stays fast.
         </p>
 
         {/* Disclaimer */}
