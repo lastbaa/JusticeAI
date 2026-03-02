@@ -376,9 +376,9 @@ export default function ChatInterface({
           <div className="flex items-center gap-2.5 mt-8 flex-wrap justify-center">
             {[
               { label: 'Cited answers' },
-              { label: '100% local' },
-              { label: 'No hallucinations' },
-              { label: 'Air-gapped safe' },
+              { label: 'Documents local' },
+              { label: 'Source-grounded' },
+              { label: 'Privacy-first' },
             ].map((f) => (
               <div
                 key={f.label}

@@ -25,14 +25,17 @@ const ollamaService = new OllamaService()
 const docParser = new DocParser()
 const ragPipeline = new RagPipeline(ollamaService)
 
-let isInitialized = false
+// Promise-based lock so concurrent IPC calls never double-initialize
+let initPromise: Promise<void> | null = null
 
-async function ensureInitialized(): Promise<void> {
-  if (!isInitialized) {
-    const settings = store.get('settings', DEFAULT_SETTINGS)
-    await ragPipeline.initialize(settings)
-    isInitialized = true
+function ensureInitialized(): Promise<void> {
+  if (!initPromise) {
+    initPromise = (async () => {
+      const settings = store.get('settings', DEFAULT_SETTINGS)
+      await ragPipeline.initialize(settings)
+    })()
   }
+  return initPromise
 }
 
 // ── Window ──────────────────────────────────────────────────────────────────
@@ -226,8 +229,8 @@ ipcMain.handle(IPC.GET_SETTINGS, async () => {
 // Save settings
 ipcMain.handle(IPC.SAVE_SETTINGS, async (_event, settings: AppSettings) => {
   store.set('settings', settings)
-  // Re-initialize with new settings
-  isInitialized = false
+  // Reset the init lock so the pipeline re-initializes with new settings
+  initPromise = null
   await ensureInitialized()
 })
 
@@ -264,8 +267,13 @@ ipcMain.handle(IPC.GET_SESSIONS, async () => {
 
 // Return a file's raw bytes as base64 (for PDF viewer in renderer)
 ipcMain.handle(IPC.GET_FILE_DATA, (_event, filePath: string) => {
-  const buf = readFileSync(filePath)
-  return buf.toString('base64')
+  try {
+    const buf = readFileSync(filePath)
+    return buf.toString('base64')
+  } catch (err) {
+    console.error('GET_FILE_DATA error:', err)
+    throw new Error(`Could not read file: ${filePath}`)
+  }
 })
 
 // Return the extracted text for a specific page (used by DOCX viewer)

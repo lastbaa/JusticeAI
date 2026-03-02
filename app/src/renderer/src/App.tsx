@@ -32,6 +32,7 @@ export default function App(): JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null)
   const [chatMode, setChatMode] = useState(false)
+  const [sessionCreatedAt, setSessionCreatedAt] = useState<number>(() => Date.now())
   const [isLoading, setIsLoading] = useState(false)
   const [isQuerying, setIsQuerying] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -40,8 +41,10 @@ export default function App(): JSX.Element {
 
   const messagesRef = useRef(messages)
   const sessionIdRef = useRef(currentSessionId)
+  const sessionCreatedAtRef = useRef(sessionCreatedAt)
   messagesRef.current = messages
   sessionIdRef.current = currentSessionId
+  sessionCreatedAtRef.current = sessionCreatedAt
 
   async function checkOllamaStatus(): Promise<void> {
     try {
@@ -80,7 +83,7 @@ export default function App(): JSX.Element {
         id: sessionIdRef.current,
         name: makeSessionName(messagesRef.current),
         messages: messagesRef.current,
-        createdAt: Date.now(),
+        createdAt: sessionCreatedAtRef.current,
         updatedAt: Date.now(),
       }
       try {
@@ -181,13 +184,18 @@ export default function App(): JSX.Element {
     setChatMode(false)
     setMessages([])
     setCurrentSessionId(uuidv4())
+    setSessionCreatedAt(Date.now())
+    setLastCitations([])
+    setViewerCitation(null)
     setView('main')
   }
 
   // ── Sessions ──────────────────────────────────────────────────
   function handleNewChat(): void {
+    const newId = uuidv4()
     setMessages([])
-    setCurrentSessionId(uuidv4())
+    setCurrentSessionId(newId)
+    setSessionCreatedAt(Date.now())
     setChatMode(true)
     setLastCitations([])
     setViewerCitation(null)
@@ -197,6 +205,11 @@ export default function App(): JSX.Element {
   async function handleLoadSession(session: ChatSession): Promise<void> {
     setMessages(session.messages)
     setCurrentSessionId(session.id)
+    setSessionCreatedAt(session.createdAt)
+    setChatMode(true)
+    setLastCitations([])
+    setViewerCitation(null)
+    setView('main')
   }
 
   async function handleDeleteSession(sessionId: string): Promise<void> {

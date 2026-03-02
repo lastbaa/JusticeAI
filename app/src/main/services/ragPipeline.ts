@@ -169,8 +169,12 @@ export class RagPipeline {
   async query(question: string, settings: AppSettings): Promise<QueryResult> {
     if (!this.index) throw new Error('RagPipeline not initialized')
 
+    if (!settings.hfToken?.trim()) {
+      throw new Error('HuggingFace token is not configured. Open Settings to add your token.')
+    }
+
     // Retrieve more candidates than topK so we can filter and diversify
-    const candidateK = settings.topK * 3
+    const candidateK = Math.min(settings.topK * 3, 30)
 
     let queryEmbedding: number[]
     try {

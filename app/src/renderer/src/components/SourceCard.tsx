@@ -77,7 +77,9 @@ export default function SourceCard({ citation, onView }: Props): JSX.Element {
           borderLeft: '1.5px solid rgba(201,168,76,0.2)',
         }}
       >
-        "{citation.excerpt}"
+        "{citation.excerpt.length > 160
+          ? citation.excerpt.slice(0, 160) + '…'
+          : citation.excerpt}"
       </blockquote>
     </div>
   )

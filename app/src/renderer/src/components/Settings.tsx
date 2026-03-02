@@ -354,13 +354,13 @@ export default function Settings({ settings, ollamaStatus, onSave, onClose, onCh
                     className="text-[10px] font-medium px-2 py-1 rounded-md"
                     style={{ background: 'rgba(63,185,80,0.08)', border: '1px solid rgba(63,185,80,0.2)', color: '#3fb950' }}
                   >
-                    ✓ {ollamaStatus.llmModelName}
+                    ✓ Saul-7B via HuggingFace
                   </span>
                   <span
                     className="text-[10px] font-medium px-2 py-1 rounded-md"
                     style={{ background: 'rgba(63,185,80,0.08)', border: '1px solid rgba(63,185,80,0.2)', color: '#3fb950' }}
                   >
-                    ✓ {ollamaStatus.embedModelName}
+                    ✓ {ollamaStatus.embedModelName} (Ollama)
                   </span>
                 </div>
               )}
