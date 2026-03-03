@@ -44,7 +44,6 @@ pub struct QueryResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
-    pub hf_token: String,
     pub chunk_size: usize,
     pub chunk_overlap: usize,
     pub top_k: usize,
@@ -53,12 +52,19 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            hf_token: String::new(),
             chunk_size: 1000,
             chunk_overlap: 150,
             top_k: 6,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStatus {
+    pub llm_ready: bool,
+    pub llm_size_gb: f32,
+    pub download_required_gb: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,17 +139,20 @@ pub struct RagState {
     pub doc_chunk_ids: HashMap<String, Vec<String>>,
     pub embedded_chunks: Vec<EmbeddedChunkEntry>,
     pub data_dir: PathBuf,
+    pub model_dir: PathBuf,
     pub settings: AppSettings,
     pub sessions: Vec<ChatSession>,
 }
 
 impl RagState {
     pub fn new(data_dir: PathBuf) -> Self {
+        let model_dir = data_dir.join("models");
         Self {
             file_registry: HashMap::new(),
             chunk_registry: HashMap::new(),
             doc_chunk_ids: HashMap::new(),
             embedded_chunks: Vec::new(),
+            model_dir,
             data_dir,
             settings: AppSettings::default(),
             sessions: Vec::new(),

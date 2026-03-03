@@ -5,7 +5,6 @@ import {
   ChatSession,
   DEFAULT_SETTINGS,
   FileInfo,
-  OllamaStatus,
 } from '../../../../shared/src/types'
 import { v4 as uuidv4 } from 'uuid'
 import Sidebar from './components/Sidebar'
@@ -13,6 +12,7 @@ import ContextPanel from './components/ContextPanel'
 import ChatInterface from './components/ChatInterface'
 import Settings from './components/Settings'
 import DocumentViewer from './components/DocumentViewer'
+import ModelSetup from './components/ModelSetup'
 
 type View = 'main' | 'settings'
 
@@ -30,7 +30,7 @@ export default function App(): JSX.Element {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => uuidv4())
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
-  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null)
+  const [showModelSetup, setShowModelSetup] = useState(false)
   const [chatMode, setChatMode] = useState(false)
   const [sessionCreatedAt, setSessionCreatedAt] = useState<number>(() => Date.now())
   const [isLoading, setIsLoading] = useState(false)
@@ -46,21 +46,11 @@ export default function App(): JSX.Element {
   sessionIdRef.current = currentSessionId
   sessionCreatedAtRef.current = sessionCreatedAt
 
-  async function checkOllamaStatus(): Promise<void> {
-    try {
-      const status = await window.api.checkOllama()
-      setOllamaStatus(status)
-    } catch {
-      setOllamaStatus(null)
-    }
-  }
-
   useEffect(() => {
     async function init(): Promise<void> {
       try {
         const savedSettings = await window.api.getSettings()
         setSettings(savedSettings)
-        if (!savedSettings.hfToken) setView('settings')
       } catch { }
       try {
         const existingFiles = await window.api.getFiles()
@@ -70,7 +60,10 @@ export default function App(): JSX.Element {
         const saved = await window.api.getSessions()
         setSessions(saved)
       } catch { }
-      await checkOllamaStatus()
+      try {
+        const modelStatus = await window.api.checkModels()
+        if (!modelStatus.llmReady) setShowModelSetup(true)
+      } catch { }
     }
     init()
   }, [])
@@ -168,7 +161,7 @@ export default function App(): JSX.Element {
       const errorMessage: ChatMessage = {
         id: uuidv4(),
         role: 'assistant',
-        content: `Unable to get a response. ${err instanceof Error ? err.message : 'Check your HuggingFace token in Settings.'}`,
+        content: `Unable to get a response. ${err instanceof Error ? err.message : 'Please try again.'}`,
         citations: [],
         notFound: true,
         timestamp: Date.now(),
@@ -227,7 +220,6 @@ export default function App(): JSX.Element {
       await window.api.saveSettings(newSettings)
       setSettings(newSettings)
       setView('main')
-      await checkOllamaStatus()
     } catch (err) {
       console.error('Failed to save settings:', err)
     }
@@ -281,13 +273,15 @@ export default function App(): JSX.Element {
         onClose={() => setViewerCitation(null)}
       />
 
+      {showModelSetup && (
+        <ModelSetup onComplete={() => setShowModelSetup(false)} />
+      )}
+
       {view === 'settings' && (
         <Settings
           settings={settings}
-          ollamaStatus={ollamaStatus}
           onSave={handleSaveSettings}
           onClose={() => setView('main')}
-          onCheckStatus={checkOllamaStatus}
         />
       )}
     </div>

@@ -1,14 +1,18 @@
 use crate::state::{
     AppSettings, ChatSession, ChunkMetadata, Citation, DocumentPage, EmbeddedChunkEntry, FileInfo,
-    QueryResult, RagState,
+    ModelStatus, QueryResult, RagState,
 };
 use base64::Engine;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 const SCORE_THRESHOLD: f32 = 0.35;
 const MAX_CHUNKS_PER_PAGE: usize = 2;
+const GGUF_MIN_SIZE: u64 = 4_000_000_000;
+
+const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instruct-v1-GGUF/resolve/main/Saul-Instruct-v1.Q4_K_M.gguf";
 
 const SYSTEM_PROMPT: &str = r#"You are Justice AI, a secure legal research assistant designed for legal professionals.
 
@@ -25,6 +29,256 @@ Rules you must never break:
 Context from loaded documents:
 {context}"#;
 
+// ── Model Management ─────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn check_models(
+    state: tauri::State<'_, Arc<Mutex<RagState>>>,
+) -> Result<ModelStatus, String> {
+    let gguf_path = {
+        let s = state.lock().await;
+        s.model_dir.join("saul.gguf")
+    };
+    let size = gguf_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
+    Ok(ModelStatus {
+        llm_ready: size > GGUF_MIN_SIZE,
+        llm_size_gb: size as f32 / 1e9,
+        download_required_gb: 4.5,
+    })
+}
+
+#[tauri::command]
+pub async fn download_models(
+    window: tauri::Window,
+    state: tauri::State<'_, Arc<Mutex<RagState>>>,
+) -> Result<(), String> {
+    let model_dir = {
+        let s = state.lock().await;
+        s.model_dir.clone()
+    };
+
+    tokio::fs::create_dir_all(&model_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let gguf_path = model_dir.join("saul.gguf");
+    let tmp_path = model_dir.join("saul.gguf.tmp");
+
+    // Already complete — emit done immediately
+    if gguf_path
+        .metadata()
+        .map(|m| m.len() > GGUF_MIN_SIZE)
+        .unwrap_or(false)
+    {
+        window
+            .emit(
+                "download-progress",
+                serde_json::json!({"percent": 100, "downloadedBytes": 0, "totalBytes": 0, "done": true}),
+            )
+            .ok();
+        return Ok(());
+    }
+
+    // Resume partial download if tmp file exists
+    let already_downloaded = tmp_path.metadata().map(|m| m.len()).unwrap_or(0);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(7200))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut request = client.get(SAUL_GGUF_URL);
+    if already_downloaded > 0 {
+        request = request.header("Range", format!("bytes={}-", already_downloaded));
+    }
+
+    let mut response = request.send().await.map_err(|e| e.to_string())?;
+
+    let status = response.status();
+    if !status.is_success() && status.as_u16() != 206 {
+        return Err(format!("Download failed: HTTP {status}"));
+    }
+
+    // Determine total file size
+    let total_bytes: u64 = if already_downloaded > 0 && status.as_u16() == 206 {
+        // Content-Range: bytes 1234-5678/TOTAL
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split('/').last())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0)
+    } else {
+        response.content_length().unwrap_or(0)
+    };
+
+    use tokio::io::AsyncWriteExt;
+
+    let mut file = if already_downloaded > 0 {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&tmp_path)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        tokio::fs::File::create(&tmp_path)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    let mut downloaded = already_downloaded;
+
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
+
+        let percent: u8 = if total_bytes > 0 {
+            (downloaded * 100 / total_bytes).min(99) as u8
+        } else {
+            0
+        };
+
+        window
+            .emit(
+                "download-progress",
+                serde_json::json!({
+                    "percent": percent,
+                    "downloadedBytes": downloaded,
+                    "totalBytes": total_bytes,
+                    "done": false
+                }),
+            )
+            .ok();
+    }
+
+    file.flush().await.map_err(|e| e.to_string())?;
+    drop(file);
+
+    tokio::fs::rename(&tmp_path, &gguf_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    window
+        .emit(
+            "download-progress",
+            serde_json::json!({
+                "percent": 100,
+                "downloadedBytes": downloaded,
+                "totalBytes": total_bytes,
+                "done": true
+            }),
+        )
+        .ok();
+
+    Ok(())
+}
+
+// ── Local Embedding via fastembed ─────────────────────────────────────────────
+
+pub async fn embed_text(text: &str, model_dir: &std::path::Path) -> Result<Vec<f32>, String> {
+    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+
+    let cache_dir = model_dir.join("fastembed");
+    let text_owned = text.to_string();
+
+    tokio::task::spawn_blocking(move || {
+        let model = TextEmbedding::try_new(
+            InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+                .with_cache_dir(cache_dir)
+                .with_show_download_progress(false),
+        )
+        .map_err(|e| e.to_string())?;
+
+        let embeddings = model
+            .embed(vec![text_owned], None)
+            .map_err(|e| e.to_string())?;
+
+        embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No embedding returned".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── Local LLM via llama-cpp-2 ─────────────────────────────────────────────────
+
+async fn ask_saul(
+    system_prompt: &str,
+    user_question: &str,
+    model_dir: &std::path::Path,
+) -> Result<String, String> {
+    use llama_cpp_2::{
+        context::params::LlamaContextParams,
+        llama_backend::LlamaBackend,
+        llama_batch::LlamaBatch,
+        model::{params::LlamaModelParams, AddBos, LlamaModel, Special},
+        sampling::LlamaSampler,
+    };
+    use std::num::NonZeroU32;
+
+    let gguf_path = model_dir.join("saul.gguf");
+    let prompt = format!("[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n{user_question} [/INST]");
+
+    tokio::task::spawn_blocking(move || {
+        let backend = LlamaBackend::init().map_err(|e| e.to_string())?;
+        let model_params = LlamaModelParams::default();
+        let model = LlamaModel::load_from_file(&backend, &gguf_path, &model_params)
+            .map_err(|e| e.to_string())?;
+
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(NonZeroU32::new(4096));
+        let mut ctx = model
+            .new_context(&backend, ctx_params)
+            .map_err(|e| e.to_string())?;
+
+        let tokens = model
+            .str_to_token(&prompt, AddBos::Always)
+            .map_err(|e| e.to_string())?;
+
+        let n_tokens = tokens.len();
+        let max_new_tokens = 1024usize;
+
+        let mut batch = LlamaBatch::new(n_tokens + max_new_tokens, 1);
+
+        for (pos, token) in tokens.iter().enumerate() {
+            let is_last = pos == n_tokens - 1;
+            batch.add(*token, pos as i32, &[0], is_last).map_err(|e| e.to_string())?;
+        }
+
+        ctx.decode(&mut batch).map_err(|e| e.to_string())?;
+
+        let mut sampler = LlamaSampler::chain_simple([LlamaSampler::greedy()]);
+        let mut response = String::new();
+        let mut pos = n_tokens;
+
+        for _ in 0..max_new_tokens {
+            let token = sampler.sample(&ctx, batch.n_tokens() - 1);
+            sampler.accept(token);
+
+            if model.is_eog_token(token) {
+                break;
+            }
+
+            let output_bytes = model
+                .token_to_bytes(token, Special::Tokenize)
+                .map_err(|e| e.to_string())?;
+            response.push_str(&String::from_utf8_lossy(&output_bytes));
+
+            batch.clear();
+            batch.add(token, pos as i32, &[0], true).map_err(|e| e.to_string())?;
+            ctx.decode(&mut batch).map_err(|e| e.to_string())?;
+            pos += 1;
+        }
+
+        Ok(response)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ── File Loading ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -32,9 +286,9 @@ pub async fn load_files(
     file_paths: Vec<String>,
     state: tauri::State<'_, Arc<Mutex<RagState>>>,
 ) -> Result<Vec<FileInfo>, String> {
-    let settings = {
+    let (settings, model_dir) = {
         let s = state.lock().await;
-        s.settings.clone()
+        (s.settings.clone(), s.model_dir.clone())
     };
 
     // Expand directories to files
@@ -56,7 +310,7 @@ pub async fn load_files(
     let mut results: Vec<FileInfo> = Vec::new();
 
     for file_path in expanded {
-        match process_file(&file_path, &settings, &state).await {
+        match process_file(&file_path, &settings, &model_dir, &state).await {
             Ok(info) => results.push(info),
             Err(e) => log::error!("Failed to load {}: {}", file_path, e),
         }
@@ -68,6 +322,7 @@ pub async fn load_files(
 async fn process_file(
     file_path: &str,
     settings: &AppSettings,
+    model_dir: &PathBuf,
     state: &tauri::State<'_, Arc<Mutex<RagState>>>,
 ) -> Result<FileInfo, String> {
     use super::doc_parser;
@@ -103,7 +358,7 @@ async fn process_file(
     let mut item_ids: Vec<String> = Vec::new();
 
     for chunk in &chunks {
-        match embed_text(&chunk.text, &settings.hf_token).await {
+        match embed_text(&chunk.text, model_dir).await {
             Ok(vector) => {
                 let item_id = Uuid::new_v4().to_string();
                 let entry = EmbeddedChunkEntry {
@@ -196,7 +451,7 @@ fn chunk_document(
             if !current.is_empty() && current.len() + sentence.len() + 1 > settings.chunk_size {
                 flush(&current, &mut global_idx, &mut chunks, page.page_number);
 
-                // Overlap: carry last N chars of sentences into next chunk (in forward order)
+                // Overlap: carry last N chars of sentences into next chunk
                 let mut overlap_parts: Vec<&str> = Vec::new();
                 let mut overlap_len = 0usize;
                 for s in sentence_buf.iter().rev() {
@@ -226,7 +481,7 @@ fn chunk_document(
 
 fn split_sentences(text: &str) -> Vec<&str> {
     let mut sentences = Vec::new();
-    let mut start = 0; // byte offset of current sentence start
+    let mut start = 0;
 
     let bytes = text.as_bytes();
     let len = bytes.len();
@@ -235,12 +490,10 @@ fn split_sentences(text: &str) -> Vec<&str> {
     while i < len {
         let b = bytes[i];
         if (b == b'.' || b == b'!' || b == b'?') && i + 1 < len && bytes[i + 1].is_ascii_whitespace() {
-            // Sentence ends at i (inclusive). Slice up to and including the punctuation.
             let s = text[start..=i].trim();
             if !s.is_empty() {
                 sentences.push(s);
             }
-            // Skip whitespace to find next sentence start
             let mut j = i + 1;
             while j < len && bytes[j].is_ascii_whitespace() {
                 j += 1;
@@ -252,115 +505,12 @@ fn split_sentences(text: &str) -> Vec<&str> {
         }
     }
 
-    // Remainder after last sentence boundary
     let remainder = text[start..].trim();
     if !remainder.is_empty() {
         sentences.push(remainder);
     }
 
     sentences
-}
-
-// ── Embedding via HuggingFace ────────────────────────────────────────────────
-
-const EMBED_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
-
-pub async fn embed_text(text: &str, hf_token: &str) -> Result<Vec<f32>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let url = format!(
-        "https://api-inference.huggingface.co/pipeline/feature-extraction/{}",
-        EMBED_MODEL
-    );
-
-    let body = serde_json::json!({
-        "inputs": text,
-        "options": { "wait_for_model": true }
-    });
-
-    let resp = client
-        .post(&url)
-        .bearer_auth(hf_token)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("HF embed request error: {e}"))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let err = resp.text().await.unwrap_or_default();
-        return Err(format!("HF embed ({status}): {err}"));
-    }
-
-    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-
-    // HF feature-extraction returns [[f32]] or [f32] depending on model
-    let embedding: Vec<f32> = match &data {
-        serde_json::Value::Array(outer) if !outer.is_empty() => {
-            match &outer[0] {
-                serde_json::Value::Array(inner) => {
-                    // [[f32, ...]] — take first row
-                    inner.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect()
-                }
-                serde_json::Value::Number(_) => {
-                    // [f32, ...] — flat array
-                    outer.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect()
-                }
-                _ => return Err("Unexpected HF embedding format".to_string()),
-            }
-        }
-        _ => return Err("HF returned no embedding data".to_string()),
-    };
-
-    if embedding.is_empty() {
-        return Err("HF returned empty embedding".to_string());
-    }
-
-    Ok(embedding)
-}
-
-// ── HuggingFace LLM ───────────────────────────────────────────────────────────
-
-async fn ask_saul(system_prompt: &str, user_question: &str, hf_token: &str) -> Result<String, String> {
-    const HF_API_URL: &str =
-        "https://api-inference.huggingface.co/models/Equall/Saul-7B-Instruct-v1/v1/chat/completions";
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let body = serde_json::json!({
-        "model": "Equall/Saul-7B-Instruct-v1",
-        "messages": [
-            { "role": "system", "content": system_prompt },
-            { "role": "user", "content": user_question }
-        ],
-        "max_tokens": 1024
-    });
-
-    let resp = client
-        .post(HF_API_URL)
-        .bearer_auth(hf_token)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("HuggingFace request error: {e}"))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let err = resp.text().await.unwrap_or_default();
-        return Err(format!("HuggingFace API ({status}): {err}"));
-    }
-
-    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    data["choices"][0]["message"]["content"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| "No response content from HuggingFace".to_string())
 }
 
 // ── RAG Query ─────────────────────────────────────────────────────────────────
@@ -370,19 +520,13 @@ pub async fn query(
     question: String,
     state: tauri::State<'_, Arc<Mutex<RagState>>>,
 ) -> Result<QueryResult, String> {
-    let settings = {
+    let (settings, model_dir) = {
         let s = state.lock().await;
-        s.settings.clone()
+        (s.settings.clone(), s.model_dir.clone())
     };
 
-    if settings.hf_token.trim().is_empty() {
-        return Err(
-            "HuggingFace token is not configured. Open Settings to add your token.".to_string(),
-        );
-    }
-
     // Embed the query
-    let query_vec = embed_text(&question, &settings.hf_token).await?;
+    let query_vec = embed_text(&question, &model_dir).await?;
 
     // Search vector store
     let candidate_k = (settings.top_k * 3).min(30);
@@ -443,7 +587,7 @@ pub async fn query(
     let context = context_parts.join("\n\n---\n\n");
     let system_with_context = SYSTEM_PROMPT.replace("{context}", &context);
 
-    let answer = ask_saul(&system_with_context, &question, &settings.hf_token).await?;
+    let answer = ask_saul(&system_with_context, &question, &model_dir).await?;
 
     let not_found = answer.to_lowercase().contains("i could not find")
         || answer.to_lowercase().contains("no relevant");

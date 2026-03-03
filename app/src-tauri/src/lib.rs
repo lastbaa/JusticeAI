@@ -29,6 +29,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ollama::check_ollama,
+            commands::rag::check_models,
+            commands::rag::download_models,
             commands::rag::load_files,
             commands::rag::get_files,
             commands::rag::remove_file,

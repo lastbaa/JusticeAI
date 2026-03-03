@@ -3,17 +3,27 @@
  * that the React components already use. No component changes needed.
  */
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import type {
   AppSettings,
   ChatSession,
+  DownloadProgress,
   FileInfo,
+  ModelStatus,
   OllamaStatus,
   QueryResult,
 } from '../../../../shared/src/types'
 
 export const api = {
   checkOllama: (): Promise<OllamaStatus> => invoke('check_ollama'),
+
+  checkModels: (): Promise<ModelStatus> => invoke('check_models'),
+
+  downloadModels: (): Promise<void> => invoke('download_models'),
+
+  onDownloadProgress: (cb: (p: DownloadProgress) => void): Promise<() => void> =>
+    listen('download-progress', (e) => cb(e.payload as DownloadProgress)),
 
   openFileDialog: async (): Promise<string[]> => {
     const result = await open({

@@ -22,8 +22,8 @@ const platforms: {
     installSteps: [
       'Open the .dmg and drag Justice AI to Applications',
       'Right-click → Open on first launch (macOS security prompt)',
-      'Open Settings and paste your HuggingFace token',
-      'Load your documents and start searching',
+      'The app automatically downloads the Saul AI model on first launch (~4.5 GB, one time only)',
+      'Load your documents and start searching — no accounts or API keys needed',
     ],
     icon: (
       <svg width="17" height="21" viewBox="0 0 18 22" fill="currentColor">
@@ -39,8 +39,8 @@ const platforms: {
     installSteps: [
       'Run JusticeAI-Setup.exe and follow the installer',
       'Launch Justice AI from Start Menu',
-      'Open Settings and paste your HuggingFace token',
-      'Load your documents and start searching',
+      'The app automatically downloads the Saul AI model on first launch (~4.5 GB, one time only)',
+      'Load your documents and start searching — no accounts or API keys needed',
     ],
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -56,8 +56,8 @@ const platforms: {
     installSteps: [
       'chmod +x JusticeAI.AppImage then run it',
       'Launch Justice AI',
-      'Open Settings and paste your HuggingFace token',
-      'Load your documents and start searching',
+      'The app automatically downloads the Saul AI model on first launch (~4.5 GB, one time only)',
+      'Load your documents and start searching — no accounts or API keys needed',
     ],
     icon: (
       <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
@@ -72,25 +72,25 @@ const requirements = [
   { label: 'Windows', value: 'Windows 10 / 11 · 64-bit' },
   { label: 'Linux', value: 'Any modern distro · x86_64 AppImage' },
   { label: 'RAM', value: '8 GB minimum · 16 GB recommended' },
-  { label: 'Storage', value: '~500 MB for the app' },
-  { label: 'Network', value: 'Required for AI answers (HuggingFace API) · Documents stay local' },
+  { label: 'Storage', value: '~5 GB total (app + Saul model, one-time download)' },
+  { label: 'Network', value: 'Only on first launch to download model · All AI runs offline after that' },
 ]
 
 const setupSteps = [
   {
     number: '01',
     title: 'Download & Install',
-    body: 'Click your platform below. Open the installer and drag Justice AI to Applications (macOS) or run the setup wizard (Windows).',
+    body: 'Open the DMG and drag Justice AI to Applications. No dependencies, no command line, no external installs.',
   },
   {
     number: '02',
-    title: 'Get a HuggingFace Token',
-    body: 'Sign up free at huggingface.co → Settings → Access Tokens → New Token (Read). Paste it in Justice AI Settings on first launch.',
+    title: 'First Launch Setup',
+    body: 'On first open, Justice AI automatically downloads Saul — the legal AI model (~4.5 GB). No accounts or API keys required.',
   },
   {
     number: '03',
     title: 'Load & Search',
-    body: 'Drag in your PDFs or Word documents, then ask any question in plain English. Every answer includes the filename, page number, and exact quoted text.',
+    body: 'Drag in PDFs or Word documents. Ask any legal question. Get cited answers grounded in your files — all running on your device.',
   },
 ]
 
@@ -332,7 +332,7 @@ export default function Download() {
 
               <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.3)' }}>
                 <span className="text-white font-medium">Small and fast.</span>{' '}
-                The app is under 200 MB. Document parsing and semantic search run entirely on-device — your files never leave your machine. AI answers are generated via HuggingFace's secure API.
+                The app is under 200 MB. On first launch it downloads the Saul legal model (~4.5 GB, one time). After that, document parsing, embeddings, and AI answers all run entirely on your device — completely offline, no API keys, no data ever sent to the cloud.
               </p>
             </div>
           </div>

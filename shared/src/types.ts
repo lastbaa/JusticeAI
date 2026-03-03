@@ -80,18 +80,31 @@ export interface OllamaStatus {
 // ─── Settings Types ────────────────────────────────────────────────────────────
 
 export interface AppSettings {
-  hfToken: string;
   chunkSize: number;
   chunkOverlap: number;
   topK: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  hfToken: '',
   chunkSize: 1000,
   chunkOverlap: 150,
   topK: 6,
 };
+
+// ─── Model Status Types ────────────────────────────────────────────────────────
+
+export interface ModelStatus {
+  llmReady: boolean;
+  llmSizeGb: number;
+  downloadRequiredGb: number;
+}
+
+export interface DownloadProgress {
+  percent: number;
+  downloadedBytes: number;
+  totalBytes: number;
+  done: boolean;
+}
 
 // ─── IPC Channel Names ─────────────────────────────────────────────────────────
 

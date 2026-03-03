@@ -1,4 +1,12 @@
-import { AppSettings, OllamaStatus, FileInfo, QueryResult, ChatSession } from '../../../../../shared/src/types'
+import {
+  AppSettings,
+  DownloadProgress,
+  FileInfo,
+  ModelStatus,
+  OllamaStatus,
+  QueryResult,
+  ChatSession,
+} from '../../../../../shared/src/types'
 
 export {}
 
@@ -6,6 +14,9 @@ declare global {
   interface Window {
     api: {
       checkOllama: () => Promise<OllamaStatus>
+      checkModels: () => Promise<ModelStatus>
+      downloadModels: () => Promise<void>
+      onDownloadProgress: (cb: (p: DownloadProgress) => void) => Promise<() => void>
       openFileDialog: () => Promise<string[]>
       openFolderDialog: () => Promise<string | null>
       loadFiles: (filePaths: string[]) => Promise<FileInfo[]>
