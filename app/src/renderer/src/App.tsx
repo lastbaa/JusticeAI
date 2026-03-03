@@ -16,11 +16,38 @@ import ModelSetup from './components/ModelSetup'
 
 type View = 'main' | 'settings'
 
+const STOP_WORDS = new Set([
+  'a','an','the','is','are','was','were','be','been','being',
+  'have','has','had','do','does','did','will','would','could',
+  'should','may','might','shall','can','need','ought',
+  'i','me','my','we','our','you','your','he','she','it','they',
+  'what','which','who','whom','this','that','these','those',
+  'of','in','on','at','by','for','with','about','as','into',
+  'through','before','after','to','from','up','and','but','or',
+  'nor','so','yet','not','only','same','than','too','very','just',
+  'how','when','where','why','there','here','out','any','all',
+  'more','most','some','such','no','each','few','once','under',
+  'between','tell','explain','describe','give','provide','find',
+  'show','please','them','their','its','also','am','if','than',
+])
+
 function makeSessionName(messages: ChatMessage[]): string {
   const first = messages.find((m) => m.role === 'user')
   if (!first) return 'New Chat'
-  const text = first.content.trim()
-  return text.length > 52 ? text.slice(0, 52) + '…' : text
+
+  const words = first.content
+    .trim()
+    .replace(/[^a-zA-Z0-9\s'-]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()))
+
+  if (words.length === 0) {
+    const text = first.content.trim()
+    return text.length > 40 ? text.slice(0, 40) + '…' : text
+  }
+
+  const name = words.slice(0, 4).join(' ')
+  return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
 export default function App(): JSX.Element {

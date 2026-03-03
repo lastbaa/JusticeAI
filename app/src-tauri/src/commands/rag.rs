@@ -10,7 +10,7 @@ use tauri::Emitter;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
-const SCORE_THRESHOLD: f32 = 0.35;
+const SCORE_THRESHOLD: f32 = 0.15;
 const MAX_CHUNKS_PER_PAGE: usize = 2;
 const GGUF_MIN_SIZE: u64 = 4_000_000_000;
 
@@ -31,9 +31,13 @@ Rules you must never break:
 Context from loaded documents:
 {context}"#;
 
-// ── Llama backend singleton ───────────────────────────────────────────────────
-// Initialized once per process; LlamaBackend::init() must only be called once.
+// ── Singletons ────────────────────────────────────────────────────────────────
+// Both models are loaded once per process and cached for all subsequent calls.
 
+// fastembed TextEmbedding: ~22 MB ONNX, downloaded to model_dir/fastembed/ on first use.
+static EMBED_MODEL: OnceLock<Arc<Mutex<Option<fastembed::TextEmbedding>>>> = OnceLock::new();
+
+// llama.cpp backend: AtomicBool guard means init() must only be called once.
 static LLAMA_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
 
 fn get_llama_backend() -> &'static LlamaBackend {
@@ -186,6 +190,8 @@ pub async fn download_models(
 }
 
 // ── Local Embedding via fastembed ─────────────────────────────────────────────
+// The model is loaded once into EMBED_MODEL on the first call and reused for
+// every subsequent chunk or query. Re-initializing per call was silent-failing.
 
 pub async fn embed_text(text: &str, model_dir: &Path) -> Result<Vec<f32>, String> {
     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
@@ -194,13 +200,27 @@ pub async fn embed_text(text: &str, model_dir: &Path) -> Result<Vec<f32>, String
     let text_owned = text.to_string();
 
     tokio::task::spawn_blocking(move || {
-        let model = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2)
-                .with_cache_dir(cache_dir)
-                .with_show_download_progress(false),
-        )
-        .map_err(|e| e.to_string())?;
+        // Get or create the Arc<Mutex<Option<Model>>> wrapper (infallible).
+        let model_arc = EMBED_MODEL.get_or_init(|| Arc::new(Mutex::new(None)));
 
+        let mut guard = model_arc
+            .lock()
+            .map_err(|e| format!("Embed model mutex poisoned: {e}"))?;
+
+        // Initialize the model exactly once; errors here are propagated, not silently dropped.
+        if guard.is_none() {
+            std::fs::create_dir_all(&cache_dir)
+                .map_err(|e| format!("Cannot create fastembed cache dir: {e}"))?;
+            let model = TextEmbedding::try_new(
+                InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+                    .with_cache_dir(cache_dir)
+                    .with_show_download_progress(false),
+            )
+            .map_err(|e| format!("Failed to initialize embedding model: {e}"))?;
+            *guard = Some(model);
+        }
+
+        let model = guard.as_ref().unwrap();
         let embeddings = model
             .embed(vec![text_owned], None)
             .map_err(|e| e.to_string())?;
@@ -350,11 +370,26 @@ pub async fn load_files(
     }
 
     let mut results: Vec<FileInfo> = Vec::new();
+    let mut last_error: Option<String> = None;
     for file_path in expanded {
         match process_file(&file_path, &settings, &model_dir, &state).await {
-            Ok(info) => results.push(info),
-            Err(e) => log::error!("Failed to load {}: {}", file_path, e),
+            Ok(info) => {
+                if info.chunk_count == 0 {
+                    let msg = format!("File loaded but embedding failed — check that the embedding model downloaded correctly: {}", info.file_name);
+                    log::warn!("{}", msg);
+                    last_error = Some(msg);
+                }
+                results.push(info);
+            }
+            Err(e) => {
+                log::error!("Failed to load {}: {}", file_path, e);
+                last_error = Some(e);
+            }
         }
+    }
+
+    if results.is_empty() {
+        return Err(last_error.unwrap_or_else(|| "No files could be loaded.".to_string()));
     }
 
     Ok(results)
@@ -573,6 +608,16 @@ pub async fn query(
     let candidate_k = (settings.top_k * 3).min(30);
     let results = {
         let s = state.lock().await;
+
+        // No chunks at all → no files were successfully embedded.
+        if s.embedded_chunks.is_empty() {
+            return Ok(QueryResult {
+                answer: "I could not find information about this in your loaded documents. Please ensure the relevant files are loaded.".to_string(),
+                citations: vec![],
+                not_found: true,
+            });
+        }
+
         let mut scored: Vec<(f32, ChunkMetadata)> = s
             .embedded_chunks
             .iter()
@@ -580,15 +625,27 @@ pub async fn query(
                 let score = RagState::cosine_similarity(&query_vec, &entry.vector);
                 (score, entry.meta.clone())
             })
-            .filter(|(score, _)| *score >= SCORE_THRESHOLD)
             .collect();
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(candidate_k);
+
+        // Apply threshold filter; if nothing passes, fall back to bare top-k so the
+        // LLM always has context to work with (it will say "not found" if truly unrelated).
+        let above_threshold: Vec<_> = scored
+            .iter()
+            .filter(|(score, _)| *score >= SCORE_THRESHOLD)
+            .cloned()
+            .collect();
+
+        let pool = if above_threshold.is_empty() {
+            scored.into_iter().take(candidate_k).collect::<Vec<_>>()
+        } else {
+            above_threshold.into_iter().take(candidate_k).collect::<Vec<_>>()
+        };
 
         let mut page_count: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
-        scored
+        pool
             .into_iter()
             .filter(|(_, meta)| {
                 let key = format!("{}::{}", meta.file_path, meta.page_number);
@@ -602,14 +659,6 @@ pub async fn query(
             .take(settings.top_k)
             .collect::<Vec<_>>()
     };
-
-    if results.is_empty() {
-        return Ok(QueryResult {
-            answer: "I could not find information about this in your loaded documents. Please ensure the relevant files are loaded.".to_string(),
-            citations: vec![],
-            not_found: true,
-        });
-    }
 
     let context_parts: Vec<String> = results
         .iter()
