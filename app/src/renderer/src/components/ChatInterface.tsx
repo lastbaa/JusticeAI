@@ -9,6 +9,7 @@ interface Props {
   isLoading: boolean
   loadError: string | null
   chatMode: boolean
+  sessionName: string
   onQuery: (question: string) => void
   onNewChat: () => void
   onAddFiles: () => void
@@ -142,12 +143,12 @@ function TypingIndicator(): JSX.Element {
 
 // ── Example questions ────────────────────────────────────────────────────────
 const EXAMPLES = [
-  'What liability limitations does the Calloway contract include?',
-  'What standard of care applies to licensed arborists in Georgia?',
-  'Identify all property damage claims in the complaint',
-  'When did defendant receive written notice of the foundation damage?',
-  'What does the expert arborist report say about root system spread?',
-  'Find all references to the irrigation system in the case documents',
+  'What are the key terms and obligations in this contract?',
+  'Summarize the liability limitations and indemnification clauses',
+  'Find all deadlines and notice requirements in the agreement',
+  'What damages or remedies does this document contemplate?',
+  'Identify any confidentiality or non-compete provisions',
+  'What conditions must be met for termination of this agreement?',
 ]
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -158,6 +159,7 @@ export default function ChatInterface({
   isLoading,
   loadError,
   chatMode,
+  sessionName,
   onQuery,
   onAddFiles,
   onAddFolder,
@@ -422,18 +424,12 @@ export default function ChatInterface({
             <rect x="1" y="3" width="11" height="4" rx="1.25" fill="rgba(201,168,76,0.5)" transform="rotate(45 6.5 5)" />
             <line x1="10.5" y1="10.5" x2="18.5" y2="18.5" stroke="rgba(201,168,76,0.5)" strokeWidth="2.5" strokeLinecap="round" />
           </svg>
-          {isEmpty ? (
-            <span className="text-[12.5px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
-              New Chat
-            </span>
-          ) : (
-            <span
-              className="text-[12.5px] font-medium truncate"
-              style={{ color: 'rgba(255,255,255,0.5)', maxWidth: 400 }}
-            >
-              {messages.find((m) => m.role === 'user')?.content.slice(0, 55) ?? 'Chat'}
-            </span>
-          )}
+          <span
+            className="text-[12.5px] font-medium truncate"
+            style={{ color: isEmpty ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.55)', maxWidth: 400 }}
+          >
+            {isEmpty ? 'New Chat' : sessionName}
+          </span>
         </div>
 
         {/* Minimal doc count pill — documents managed in Context panel */}
@@ -498,6 +494,21 @@ export default function ChatInterface({
         )}
       </div>
 
+      {/* No-docs warning */}
+      {!hasFiles && (
+        <div
+          className="shrink-0 mx-6 mb-0 mt-0 rounded-lg px-3 py-2 flex items-center gap-2"
+          style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.14)', marginBottom: -4 }}
+        >
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="#c9a84c" opacity="0.7">
+            <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm.25 4.75a.75.75 0 0 0-1.5 0v4.5a.75.75 0 0 0 1.5 0v-4.5zM8 11a1 1 0 1 1 0 2 1 1 0 0 1 0-2z" />
+          </svg>
+          <p className="text-[11px]" style={{ color: 'rgba(201,168,76,0.7)' }}>
+            Add documents in the panel on the right before asking a question
+          </p>
+        </div>
+      )}
+
       {/* Input */}
       <div
         className="shrink-0 px-6 py-4"
@@ -528,7 +539,8 @@ export default function ChatInterface({
               />
               <button
                 onClick={handleSend}
-                disabled={isQuerying || !input.trim()}
+                disabled={isQuerying || !input.trim() || !hasFiles}
+                title={!hasFiles ? 'Add documents first' : undefined}
                 className="flex shrink-0 h-8 w-8 items-center justify-center rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                 style={{
                   background: input.trim() ? '#c9a84c' : 'rgba(255,255,255,0.06)',

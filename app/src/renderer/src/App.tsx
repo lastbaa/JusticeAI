@@ -296,6 +296,7 @@ export default function App(): JSX.Element {
           isLoading={isLoading}
           loadError={loadError}
           chatMode={chatMode}
+          sessionName={makeSessionName(messages)}
           onQuery={handleQuery}
           onNewChat={handleNewChat}
           onAddFiles={handleAddFiles}
