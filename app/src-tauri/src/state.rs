@@ -1,7 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+
+/// Shared flag: set to `true` by the `set_can_close` command before calling
+/// `appWindow.close()` from JS. The `on_window_event` handler checks this to
+/// distinguish a user-confirmed close from a raw OS close request.
+pub struct CloseAllowed(pub AtomicBool);
 
 // ── Shared Types (mirror of shared/src/types.ts) ────────────────────────────
 

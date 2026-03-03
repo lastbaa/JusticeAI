@@ -135,7 +135,11 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
 
         canvas.width = viewport.width
         canvas.height = viewport.height
-        const ctx = canvas.getContext('2d')!
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          if (!cancelled) setStatus('error')
+          return
+        }
 
         // Render the PDF page
         await page.render({ canvasContext: ctx, viewport, canvas }).promise
@@ -234,9 +238,10 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
   const [text, setText] = useState<string | null>(null)
 
   useEffect(() => {
-    window.api.getPageText(citation.filePath, citation.pageNumber).then((t) => {
-      setText(t || '(No text extracted for this page)')
-    })
+    window.api
+      .getPageText(citation.filePath, citation.pageNumber)
+      .then((t) => setText(t || '(No text extracted for this page)'))
+      .catch(() => setText('(Failed to load page text)'))
   }, [citation.filePath, citation.pageNumber])
 
   if (text === null) {

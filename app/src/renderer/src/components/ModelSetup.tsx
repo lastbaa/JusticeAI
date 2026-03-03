@@ -10,33 +10,46 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
   const [totalGb, setTotalGb] = useState(4.5)
   const [error, setError] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState(false)
-
-  async function startDownload(): Promise<void> {
-    setError(null)
-    setIsDownloading(true)
-
-    let unlisten: (() => void) | null = null
-    try {
-      unlisten = await window.api.onDownloadProgress((progress) => {
-        setPercent(progress.percent)
-        setDownloadedGb(progress.downloadedBytes / 1e9)
-        if (progress.totalBytes > 0) setTotalGb(progress.totalBytes / 1e9)
-        if (progress.done) {
-          if (unlisten) unlisten()
-          onComplete()
-        }
-      })
-      await window.api.downloadModels()
-    } catch (err) {
-      if (unlisten) unlisten()
-      setError(err instanceof Error ? err.message : 'Download failed. Check your connection and try again.')
-      setIsDownloading(false)
-    }
-  }
+  // Incrementing this triggers a fresh download attempt via useEffect dependency.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    startDownload()
-  }, [])
+    let isMounted = true
+    let unlisten: (() => void) | null = null
+
+    setError(null)
+    setIsDownloading(true)
+    setPercent(0)
+    setDownloadedGb(0)
+
+    async function run(): Promise<void> {
+      try {
+        unlisten = await window.api.onDownloadProgress((progress) => {
+          if (!isMounted) return  // component unmounted — ignore stale events
+          setPercent(progress.percent)
+          setDownloadedGb(progress.downloadedBytes / 1e9)
+          if (progress.totalBytes > 0) setTotalGb(progress.totalBytes / 1e9)
+          if (progress.done) {
+            if (unlisten) unlisten()
+            onComplete()
+          }
+        })
+        await window.api.downloadModels()
+      } catch (err) {
+        if (unlisten) { unlisten(); unlisten = null }
+        if (!isMounted) return
+        setError(err instanceof Error ? err.message : 'Download failed. Check your connection and try again.')
+        setIsDownloading(false)
+      }
+    }
+
+    run()
+
+    return () => {
+      isMounted = false
+      if (unlisten) unlisten()  // always unregister progress listener on unmount
+    }
+  }, [attempt])
 
   return (
     <div
@@ -92,7 +105,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
               </div>
             </div>
             <button
-              onClick={() => startDownload()}
+              onClick={() => setAttempt((n) => n + 1)}
               className="rounded-xl px-8 py-3 text-[13.5px] font-semibold"
               style={{
                 background: '#c9a84c',

@@ -37,13 +37,41 @@ Context from loaded documents:
 // fastembed TextEmbedding: ~22 MB ONNX, downloaded to model_dir/fastembed/ on first use.
 static EMBED_MODEL: OnceLock<Arc<Mutex<Option<fastembed::TextEmbedding>>>> = OnceLock::new();
 
-// llama.cpp backend: AtomicBool guard means init() must only be called once.
-static LLAMA_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
+// llama.cpp backend stored as Option so init failures don't poison the OnceLock.
+// Once set to None (init failed), every subsequent call fast-fails with a clear error.
+static LLAMA_BACKEND: OnceLock<Option<LlamaBackend>> = OnceLock::new();
 
-fn get_llama_backend() -> &'static LlamaBackend {
-    LLAMA_BACKEND.get_or_init(|| {
-        LlamaBackend::init().expect("Failed to initialize llama.cpp backend")
-    })
+fn get_llama_backend() -> Result<&'static LlamaBackend, String> {
+    let slot = LLAMA_BACKEND.get_or_init(|| {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(LlamaBackend::init)) {
+            Ok(Ok(b)) => Some(b),
+            Ok(Err(e)) => {
+                log::error!("LlamaBackend::init failed: {e}");
+                None
+            }
+            Err(_) => {
+                log::error!("LlamaBackend::init panicked");
+                None
+            }
+        }
+    });
+    slot.as_ref()
+        .ok_or_else(|| "llama.cpp backend failed to initialize. The app may need to be restarted.".to_string())
+}
+
+/// Validate GGUF magic bytes before loading — prevents llama.cpp from calling
+/// abort() on a corrupted or incomplete file, which would kill the process.
+fn validate_gguf(path: &std::path::Path) -> Result<(), String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| format!("Cannot open model file: {e}"))?;
+    let mut magic = [0u8; 4];
+    f.read_exact(&mut magic)
+        .map_err(|_| "Model file is too small — it may be incomplete. Try re-downloading.".to_string())?;
+    if &magic != b"GGUF" {
+        return Err("Model file appears corrupted (missing GGUF header). Please delete it and restart to re-download.".to_string());
+    }
+    Ok(())
 }
 
 // ── Model Management ─────────────────────────────────────────────────────────
@@ -189,6 +217,14 @@ pub async fn download_models(
     Ok(())
 }
 
+/// Called by the frontend close-confirmation handler immediately before
+/// `appWindow.close()`. Setting this flag allows the `on_window_event` handler
+/// in lib.rs to let the close proceed instead of intercepting it again.
+#[tauri::command]
+pub fn set_can_close(state: tauri::State<'_, crate::state::CloseAllowed>) {
+    state.0.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
 // ── Local Embedding via fastembed ─────────────────────────────────────────────
 // The model is loaded once into EMBED_MODEL on the first call and reused for
 // every subsequent chunk or query. Re-initializing per call was silent-failing.
@@ -257,8 +293,13 @@ async fn ask_saul(
     let prompt = format!("[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n{user_question} [/INST]");
 
     tokio::task::spawn_blocking(move || {
-        // Get (or lazily initialize) the global llama.cpp backend
-        let backend = get_llama_backend();
+        // Get (or lazily initialize) the global llama.cpp backend.
+        // Returns Err if init failed rather than panicking.
+        let backend = get_llama_backend()?;
+
+        // Validate GGUF magic bytes before loading. A corrupted file would cause
+        // llama.cpp to call abort() — which kills the whole process immediately.
+        validate_gguf(&gguf_path)?;
 
         // Lock model cache; load from disk on first call only
         let mut model_guard = model_cache

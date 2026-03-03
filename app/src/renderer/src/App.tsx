@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { confirm } from '@tauri-apps/plugin-dialog'
+import { invoke } from '@tauri-apps/api/core'
 import {
   AppSettings,
   ChatMessage,
@@ -81,28 +82,40 @@ export default function App(): JSX.Element {
     isBusyRef.current = isQuerying || showModelSetup
   }, [isQuerying, showModelSetup])
 
-  // Close protection — intercepted from Rust; confirm if a query is in progress
+  // Close protection — intercepted from Rust; confirm if a query is in progress.
+  // Uses a two-phase handshake: JS calls `set_can_close` (flips a Rust AtomicBool)
+  // then appWindow.close(), so the second CloseRequested event passes through.
   useEffect(() => {
     const appWindow = getCurrentWindow()
     let unlisten: (() => void) | undefined
+
+    async function doClose(): Promise<void> {
+      await invoke('set_can_close')
+      await appWindow.close()
+    }
+
     appWindow
       .listen('app-close-requested', async () => {
-        if (isBusyRef.current) {
-          const ok = await confirm('Justice AI is busy. Quit anyway?', {
-            title: 'Justice AI',
-            kind: 'warning',
-          })
-          if (ok) appWindow.close()
-        } else {
-          appWindow.close()
+        try {
+          if (isBusyRef.current) {
+            const ok = await confirm('Justice AI is busy. Quit anyway?', {
+              title: 'Justice AI',
+              kind: 'warning',
+            })
+            if (!ok) return
+          }
+          await doClose()
+        } catch {
+          // confirm() or invoke() failed — force close as fallback
+          try {
+            await doClose()
+          } catch { /* nothing we can do */ }
         }
       })
-      .then((fn) => {
-        unlisten = fn
-      })
-    return () => {
-      unlisten?.()
-    }
+      .then((fn) => { unlisten = fn })
+      .catch(() => { /* listener registration failed — log only */ })
+
+    return () => { unlisten?.() }
   }, [])
 
   useEffect(() => {
