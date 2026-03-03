@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { confirm } from '@tauri-apps/plugin-dialog'
 import {
   AppSettings,
   ChatMessage,
@@ -72,6 +74,36 @@ export default function App(): JSX.Element {
   messagesRef.current = messages
   sessionIdRef.current = currentSessionId
   sessionCreatedAtRef.current = sessionCreatedAt
+
+  // Track busy state in a ref so the close listener always reads the current value
+  const isBusyRef = useRef(false)
+  useEffect(() => {
+    isBusyRef.current = isQuerying || showModelSetup
+  }, [isQuerying, showModelSetup])
+
+  // Close protection — intercepted from Rust; confirm if a query is in progress
+  useEffect(() => {
+    const appWindow = getCurrentWindow()
+    let unlisten: (() => void) | undefined
+    appWindow
+      .listen('app-close-requested', async () => {
+        if (isBusyRef.current) {
+          const ok = await confirm('Justice AI is busy. Quit anyway?', {
+            title: 'Justice AI',
+            kind: 'warning',
+          })
+          if (ok) appWindow.close()
+        } else {
+          appWindow.close()
+        }
+      })
+      .then((fn) => {
+        unlisten = fn
+      })
+    return () => {
+      unlisten?.()
+    }
+  }, [])
 
   useEffect(() => {
     async function init(): Promise<void> {

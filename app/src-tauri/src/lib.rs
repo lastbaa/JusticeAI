@@ -2,7 +2,7 @@ mod commands;
 pub mod state;
 
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,6 +26,14 @@ pub fn run() {
 
             app.manage(Arc::new(Mutex::new(rag)));
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Intercept close requests so the frontend can show a confirmation
+            // when a query or model download is in progress.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                window.emit("app-close-requested", ()).ok();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::ollama::check_ollama,

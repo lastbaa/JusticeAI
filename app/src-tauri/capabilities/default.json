@@ -5,6 +5,8 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "dialog:default"
+    "core:window:allow-close",
+    "dialog:default",
+    "dialog:allow-confirm"
   ]
 }

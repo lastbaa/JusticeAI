@@ -267,7 +267,9 @@ async fn ask_saul(
 
         if model_guard.is_none() {
             log::info!("Loading Saul model from disk (first query)…");
-            let model_params = LlamaModelParams::default();
+            // Offload all layers to Metal GPU on Apple Silicon — dramatically reduces
+            // RSS and prevents OOM kills on 8 GB machines.
+            let model_params = LlamaModelParams::default().with_n_gpu_layers(100);
             let model = LlamaModel::load_from_file(backend, &gguf_path, &model_params)
                 .map_err(|e| format!("Failed to load Saul model: {e}"))?;
             *model_guard = Some(model);
@@ -277,8 +279,9 @@ async fn ask_saul(
         let model = model_guard.as_ref().unwrap();
 
         // Create a fresh context per query (allocates KV cache, ~seconds not minutes)
+        // 2048 tokens is plenty for citation-grounded answers and uses half the KV memory.
         let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(NonZeroU32::new(4096));
+            .with_n_ctx(NonZeroU32::new(2048));
         let mut ctx = model
             .new_context(backend, ctx_params)
             .map_err(|e| format!("Failed to create context: {e}"))?;
