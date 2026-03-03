@@ -193,7 +193,7 @@ export default function ContextPanel({
       style={{
         width: collapsed ? 0 : 300,
         minWidth: collapsed ? 0 : 300,
-        borderRight: collapsed ? 'none' : '1px solid rgba(255,255,255,0.05)',
+        borderLeft: collapsed ? 'none' : '1px solid rgba(255,255,255,0.05)',
         background: '#050505',
         overflow: 'hidden',
         transition: 'width 0.25s ease, min-width 0.25s ease',
@@ -209,7 +209,7 @@ export default function ContextPanel({
             <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25z" />
           </svg>
           <span className="text-[12px] font-semibold text-white tracking-[-0.01em]">
-            Context
+            Documents
           </span>
           {files.length > 0 && (
             <span
@@ -295,7 +295,7 @@ export default function ContextPanel({
           <div className="px-3 pt-4 pb-4">
             <div className="mb-2 px-3 flex items-center justify-between">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                Loaded Documents
+                Given Documents
               </p>
               <button
                 onClick={onClearFiles}
@@ -375,7 +375,7 @@ export default function ContextPanel({
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
             <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25V1.75zM8.75 9.25a.75.75 0 0 0-1.5 0v1.5H5.75a.75.75 0 0 0 0 1.5h1.5v1.5a.75.75 0 0 0 1.5 0v-1.5h1.5a.75.75 0 0 0 0-1.5H8.75v-1.5z" />
           </svg>
-          {isLoading ? 'Processing…' : 'Add Documents'}
+          {isLoading ? 'Processing…' : 'Add Documents…'}
         </button>
       </div>
     </aside>

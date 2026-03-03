@@ -288,18 +288,6 @@ export default function App(): JSX.Element {
         onOpenSettings={() => setView('settings')}
       />
 
-      <ContextPanel
-        files={files}
-        citations={lastCitations}
-        isQuerying={isQuerying}
-        isLoading={isLoading}
-        collapsed={viewerCitation !== null}
-        onAddFiles={handleAddFiles}
-        onRemoveFile={handleRemoveFile}
-        onClearFiles={handleClearFiles}
-        onViewCitation={setViewerCitation}
-      />
-
       <div className="flex flex-1 flex-col overflow-hidden">
         <ChatInterface
           messages={messages}
@@ -317,6 +305,18 @@ export default function App(): JSX.Element {
           onViewCitation={setViewerCitation}
         />
       </div>
+
+      <ContextPanel
+        files={files}
+        citations={lastCitations}
+        isQuerying={isQuerying}
+        isLoading={isLoading}
+        collapsed={viewerCitation !== null}
+        onAddFiles={handleAddFiles}
+        onRemoveFile={handleRemoveFile}
+        onClearFiles={handleClearFiles}
+        onViewCitation={setViewerCitation}
+      />
 
       <DocumentViewer
         citation={viewerCitation}
