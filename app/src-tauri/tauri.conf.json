@@ -36,6 +36,16 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Productivity",
+    "copyright": "© 2025 Justice AI",
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "frameworks": [],
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": null,
+      "exceptionDomain": null
+    }
   }
 }

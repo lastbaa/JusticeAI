@@ -18,14 +18,14 @@ const platforms: {
   {
     key: 'mac',
     label: 'macOS',
-    sub: 'Apple Silicon & Intel · macOS 12+',
+    sub: 'Apple Silicon (native) · Intel via Rosetta 2 · macOS 12+',
     file: 'https://github.com/lastbaa/CS-370-Justice-AI-Project/releases/download/v1.0.0/Justice.AI_1.0.0_aarch64.dmg',
     available: true,
     installSteps: [
-      'Open the .dmg and drag Justice AI to your Applications folder',
-      'Right-click the app icon → Open on first launch to pass the macOS security prompt',
-      'Justice AI downloads the Saul legal AI model once (~4.5 GB). Grab a coffee — it only happens this one time, then the app runs fully offline forever.',
-      'Drag in your PDFs or Word docs, ask any legal question, and get cited answers grounded in your own files.',
+      'Open the .dmg and drag Justice AI into your Applications folder, then eject the disk image.',
+      'macOS blocks apps not from the App Store on first launch. Double-click to open — if blocked, go to System Settings → Privacy & Security → scroll down → click "Open Anyway". On macOS 12–13 you can also right-click the icon and choose Open.',
+      'Justice AI automatically downloads the Saul legal AI model (~4.5 GB) on first open. This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
+      'Drag in your PDFs or Word documents, ask any legal question in plain English, and get cited answers grounded in your own files.',
     ],
     icon: (
       <svg width="17" height="21" viewBox="0 0 18 22" fill="currentColor">

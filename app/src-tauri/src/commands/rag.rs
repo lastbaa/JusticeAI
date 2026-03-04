@@ -319,16 +319,19 @@ async fn ask_saul(
 
         let model = model_guard.as_ref().unwrap();
 
-        // Create a fresh context per query (allocates KV cache, ~seconds not minutes)
-        // 2048 tokens is plenty for citation-grounded answers and uses half the KV memory.
+        // Create a fresh context per query (allocates KV cache, ~seconds not minutes).
+        // n_ctx=4096 comfortably fits legal document context + system prompt + generation.
+        // Previously 2048 caused ggml_abort() (uncatchable SIGABRT) when prompts exceeded
+        // the KV cache size — the root cause of the crash reported on Thread 15.
+        let n_ctx_size: u32 = 4096;
         let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(NonZeroU32::new(2048));
+            .with_n_ctx(NonZeroU32::new(n_ctx_size));
         let mut ctx = model
             .new_context(backend, ctx_params)
             .map_err(|e| format!("Failed to create context: {e}"))?;
 
         // Tokenize prompt
-        let tokens = model
+        let mut tokens = model
             .str_to_token(&prompt, AddBos::Always)
             .map_err(|e| format!("Tokenize error: {e}"))?;
 
@@ -336,6 +339,21 @@ async fn ask_saul(
         if n_tokens == 0 {
             return Err("Empty token sequence".to_string());
         }
+
+        // Secondary token-level guard: if the prompt still overflows (e.g. an
+        // unusually long question), drain tokens from the START of the context
+        // portion so the user question at the end is always preserved.
+        // Without this, ctx.decode() calls ggml_abort() and kills the process.
+        let max_prompt_tokens = n_ctx_size as usize - 512; // 512-token headroom for generation
+        if n_tokens > max_prompt_tokens {
+            log::warn!(
+                "Prompt ({} tokens) exceeds safe limit ({}). Truncating from context start.",
+                n_tokens,
+                max_prompt_tokens
+            );
+            tokens.drain(..n_tokens - max_prompt_tokens);
+        }
+        let n_tokens = tokens.len();
 
         // Decode the prompt as a batch (only the last token needs logits)
         let mut batch = LlamaBatch::new(n_tokens, 1);
@@ -352,7 +370,7 @@ async fn ask_saul(
         let mut sampler = LlamaSampler::chain_simple([LlamaSampler::greedy()]);
         let mut response = String::new();
         let mut pos = n_tokens;
-        let max_new_tokens = 1024usize;
+        let max_new_tokens = 2048usize;
 
         for _ in 0..max_new_tokens {
             // idx = -1 samples from the last computed logit position
@@ -717,7 +735,26 @@ pub async fn query(
             )
         })
         .collect();
-    let context = context_parts.join("\n\n---\n\n");
+    let raw_context = context_parts.join("\n\n---\n\n");
+
+    // Pre-truncate the document context so the assembled prompt stays within the
+    // LLM's context window (n_ctx=4096). Approximate budget:
+    //   4096 total - 512 generation headroom - ~250 system header = ~3334 tokens for context.
+    //   1 token ≈ 4 chars  →  ~13 300 chars is a safe ceiling.
+    // This is the first line of defence; ask_saul() has a secondary token-level guard.
+    const MAX_CONTEXT_CHARS: usize = 13_000;
+    let context = if raw_context.len() > MAX_CONTEXT_CHARS {
+        let safe_end = raw_context.floor_char_boundary(MAX_CONTEXT_CHARS);
+        log::warn!(
+            "Document context truncated from {} to {} chars to fit context window.",
+            raw_context.len(),
+            safe_end
+        );
+        raw_context[..safe_end].to_string()
+    } else {
+        raw_context
+    };
+
     let system_with_context = SYSTEM_PROMPT.replace("{context}", &context);
 
     let answer = ask_saul(&system_with_context, &question, &model_dir, model_cache).await?;
