@@ -8,6 +8,12 @@ import { api } from './api'
 // Expose api globally so all existing components work unchanged
 ;(window as unknown as Record<string, unknown>).api = api
 
+// Prevent unhandled promise rejections from crashing the webview
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason)
+  event.preventDefault()
+})
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>

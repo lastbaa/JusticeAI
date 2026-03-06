@@ -1,0 +1,8 @@
+[env]
+# Force macOS 14 deployment target so llama.cpp Metal code generates weak class
+# references for macOS 15-only APIs (e.g. MTLResidencySetDescriptor). Without
+# this, the binary has hard references to those classes and dyld crashes on
+# macOS 14 (Sonoma) before the process even starts.
+# CMAKE_OSX_DEPLOYMENT_TARGET is forwarded to cmake by llama-cpp-sys-2 build.rs.
+MACOSX_DEPLOYMENT_TARGET = { value = "14.0", force = true }
+CMAKE_OSX_DEPLOYMENT_TARGET = { value = "14.0", force = true }

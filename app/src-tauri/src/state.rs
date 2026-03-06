@@ -274,15 +274,38 @@ impl RagState {
         }
     }
 
-    /// Get all text chunks for a specific file+page from chunk registry
+    /// Get all text chunks for a specific file+page from chunk registry,
+    /// sorted by chunk_index and with overlapping prefix text deduplicated.
     pub fn get_page_text(&self, file_path: &str, page_number: u32) -> String {
-        let mut texts: Vec<&str> = Vec::new();
-        for chunk in self.chunk_registry.values() {
-            if chunk.file_path == file_path && chunk.page_number == page_number {
-                texts.push(&chunk.text);
+        let mut chunks: Vec<&ChunkMetadata> = self.chunk_registry.values()
+            .filter(|c| c.file_path == file_path && c.page_number == page_number)
+            .collect();
+        chunks.sort_by_key(|c| c.chunk_index);
+
+        // Join chunks, stripping overlap: if the end of result matches the
+        // start of the next chunk, skip the duplicated prefix.
+        let mut result = String::new();
+        for chunk in &chunks {
+            let text = chunk.text.trim();
+            if text.is_empty() { continue; }
+            if result.is_empty() {
+                result.push_str(text);
+            } else {
+                // Find longest suffix of result that equals a prefix of text.
+                // Cap search at 80 chars AND at text.len()-1 so skip never equals text.len().
+                let overlap_max = result.len().min(80).min(text.len().saturating_sub(1));
+                let mut skip = 0;
+                for n in (1..=overlap_max).rev() {
+                    if result.ends_with(&text[..n]) {
+                        skip = n;
+                        break;
+                    }
+                }
+                result.push(' ');
+                result.push_str(&text[skip..]);
             }
         }
-        texts.join(" ")
+        result
     }
 
     /// Extract best excerpt sentence from chunk text relevant to the query

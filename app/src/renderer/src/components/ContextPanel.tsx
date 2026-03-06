@@ -13,28 +13,6 @@ interface Props {
   onViewCitation: (citation: Citation) => void
 }
 
-function RelevanceBar({ score }: { score: number }): JSX.Element {
-  const pct = Math.round(score * 100)
-  const color =
-    pct >= 75 ? '#c9a84c' : pct >= 50 ? 'rgba(201,168,76,0.55)' : 'rgba(255,255,255,0.2)'
-  return (
-    <div className="flex items-center gap-2">
-      <div
-        className="h-1 rounded-full overflow-hidden"
-        style={{ width: 48, background: 'rgba(255,255,255,0.08)' }}
-      >
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${pct}%`, background: color }}
-        />
-      </div>
-      <span className="text-[10px] font-semibold tabular-nums" style={{ color }}>
-        {pct}%
-      </span>
-    </div>
-  )
-}
-
 function CitationRow({
   citation,
   index,
@@ -101,9 +79,6 @@ function CitationRow({
         </div>
       </div>
 
-      {/* Relevance bar */}
-      <RelevanceBar score={citation.score} />
-
       {/* Excerpt */}
       <p
         className="text-[11px] leading-relaxed italic"
@@ -157,7 +132,7 @@ function FileRow({
           {file.fileName}
         </p>
         <p className="text-[10px] mt-0.5" style={{ color: 'rgba(255,255,255,0.22)' }}>
-          {file.totalPages} {file.totalPages === 1 ? 'page' : 'pages'} · {file.chunkCount} chunks
+          {file.totalPages} {file.totalPages === 1 ? 'page' : 'pages'}
         </p>
       </div>
       {hovered && (

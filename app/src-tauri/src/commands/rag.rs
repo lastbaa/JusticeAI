@@ -10,26 +10,22 @@ use tauri::Emitter;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
-const SCORE_THRESHOLD: f32 = 0.15;
-const MAX_CHUNKS_PER_PAGE: usize = 2;
+const SCORE_THRESHOLD: f32 = 0.10;
+const MAX_CHUNKS_PER_PAGE: usize = 4;
 const GGUF_MIN_SIZE: u64 = 4_000_000_000;
 
 const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instruct-v1-GGUF/resolve/main/Saul-Instruct-v1.Q4_K_M.gguf";
 
-const SYSTEM_PROMPT: &str = r#"You are Justice AI, a secure legal research assistant designed for legal professionals.
-
-Your only job is to help the user find information within the documents they have loaded. You are NOT providing legal advice. You are a research and retrieval tool to support the legal professional using you.
-
-Rules you must never break:
-1. Answer ONLY using the document excerpts provided in the context below.
-2. Always cite the exact filename and page number for every claim you make.
-3. Always include a direct quoted excerpt from the source document to support your answer.
-4. If the answer cannot be found in the provided documents, respond only with: "I could not find information about this in your loaded documents. Please ensure the relevant files are loaded."
-5. Never use pretrained knowledge to fill gaps. Never guess. Never hallucinate.
-6. Never provide legal advice or legal conclusions. If asked for a legal opinion, remind the user that Justice AI is a research tool and that legal conclusions are theirs to make.
-
-Context from loaded documents:
-{context}"#;
+/// Rules-only system prompt — document context goes in the user turn so Llama 2
+/// pays full attention to it (system-prompt content is under-weighted by the model).
+const RULES_PROMPT: &str = "You are Justice AI, a legal document research assistant. \
+Answer questions using ONLY the document excerpts provided in the user message. \
+Always cite the exact filename and page number for every claim. \
+Include a direct quoted excerpt from the source. \
+If the answer is not in the provided excerpts, say exactly: \
+\"I could not find information about this in your loaded documents.\" \
+Never use outside knowledge. Never guess. Never hallucinate. \
+Do not give legal advice — you are a research tool.";
 
 // ── Singletons ────────────────────────────────────────────────────────────────
 // Both models are loaded once per process and cached for all subsequent calls.
@@ -262,7 +258,8 @@ pub async fn embed_text(text: &str, model_dir: &Path) -> Result<Vec<f32>, String
             *guard = Some(model);
         }
 
-        let model = guard.as_ref().unwrap();
+        let model = guard.as_ref()
+            .ok_or_else(|| "Embedding model unavailable after initialization".to_string())?;
         let embeddings = model
             .embed(vec![text_owned], None)
             .map_err(|e| e.to_string())?;
@@ -282,8 +279,8 @@ pub async fn embed_text(text: &str, model_dir: &Path) -> Result<Vec<f32>, String
 // A fresh LlamaContext is created per query (lightweight — just KV cache alloc).
 
 async fn ask_saul(
-    system_prompt: &str,
     user_question: &str,
+    context: &str,
     model_dir: &Path,
     model_cache: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>>,
 ) -> Result<String, String> {
@@ -296,7 +293,25 @@ async fn ask_saul(
     use std::num::NonZeroU32;
 
     let gguf_path = model_dir.join("saul.gguf");
-    let prompt = format!("[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n{user_question} [/INST]");
+
+    // Put context in the user turn — Llama 2 models pay far more attention to
+    // user-turn content than to the system prompt, so this is the reliable way
+    // to ground answers in the retrieved document chunks.
+    let user_content = if context.trim().is_empty() {
+        format!("Question: {user_question}")
+    } else {
+        format!(
+            "Below are excerpts from the user's loaded legal documents. \
+Answer the question using ONLY these excerpts.\n\n\
+{context}\n\n---\n\nQuestion: {user_question}"
+        )
+    };
+
+    // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
+    // Pre-filling the assistant's first token primes the model to start answering
+    // immediately. Putting it before [/INST] (in the user turn) causes the model
+    // to generate an EOG token immediately → empty response.
+    let prompt = format!("[INST] <<SYS>>\n{RULES_PROMPT}\n<</SYS>>\n\n{user_content} [/INST] Answer:");
 
     tokio::task::spawn_blocking(move || {
         // Get (or lazily initialize) the global llama.cpp backend.
@@ -323,7 +338,8 @@ async fn ask_saul(
             log::info!("Saul model loaded and cached.");
         }
 
-        let model = model_guard.as_ref().unwrap();
+        let model = model_guard.as_ref()
+            .ok_or_else(|| "Saul model unavailable after initialization".to_string())?;
 
         // Create a fresh context per query (allocates KV cache, ~seconds not minutes).
         // n_ctx=4096 comfortably fits legal document context + system prompt + generation.
@@ -346,39 +362,69 @@ async fn ask_saul(
             return Err("Empty token sequence".to_string());
         }
 
-        // Secondary token-level guard: if the prompt still overflows (e.g. an
-        // unusually long question), drain tokens from the START of the context
-        // portion so the user question at the end is always preserved.
-        // Without this, ctx.decode() calls ggml_abort() and kills the process.
-        let max_prompt_tokens = n_ctx_size as usize - 512; // 512-token headroom for generation
+        // Safety guard: if the prompt still overflows after the char-level pre-truncation,
+        // keep the FIRST 180 tokens (BOS + [INST] <<SYS>> rules <</SYS>>\n\n) and the
+        // LAST (budget - 180) tokens (end of context + question + [/INST]).
+        // This preserves both the instruction-mode markers and the user question
+        // instead of blindly draining from the front (which destroys [INST]/[/INST]).
+        let max_prompt_tokens = n_ctx_size as usize - 512;
         if n_tokens > max_prompt_tokens {
             log::warn!(
-                "Prompt ({} tokens) exceeds safe limit ({}). Truncating from context start.",
+                "Prompt ({} tokens) exceeds safe limit ({}). Preserving head+tail.",
                 n_tokens,
                 max_prompt_tokens
             );
-            tokens.drain(..n_tokens - max_prompt_tokens);
+            let head = 180usize.min(max_prompt_tokens / 2);
+            let tail = max_prompt_tokens - head;
+            let tail_start = n_tokens - tail;
+            let mut kept: Vec<_> = tokens[..head].to_vec();
+            kept.extend_from_slice(&tokens[tail_start..]);
+            tokens = kept;
         }
         let n_tokens = tokens.len();
 
-        // Decode the prompt as a batch (only the last token needs logits)
-        let mut batch = LlamaBatch::new(n_tokens, 1);
-        for (pos, token) in tokens.iter().enumerate() {
-            let is_last = pos == n_tokens - 1;
-            batch
-                .add(*token, pos as i32, &[0], is_last)
-                .map_err(|e| format!("Batch add error: {e}"))?;
+        // Decode the prompt in chunks to respect llama.cpp's n_batch limit.
+        // Default n_batch = 512; decoding more tokens at once triggers ggml_abort()
+        // which kills the entire process — the root cause of the SIGABRT crash.
+        const DECODE_BATCH_SIZE: usize = 512;
+        let mut batch = LlamaBatch::new(DECODE_BATCH_SIZE, 1);
+        let mut chunk_start = 0;
+        while chunk_start < n_tokens {
+            let chunk_end = (chunk_start + DECODE_BATCH_SIZE).min(n_tokens);
+            batch.clear();
+            for pos in chunk_start..chunk_end {
+                let is_last = pos == n_tokens - 1;
+                batch
+                    .add(tokens[pos], pos as i32, &[0], is_last)
+                    .map_err(|e| format!("Batch add error: {e}"))?;
+            }
+            ctx.decode(&mut batch)
+                .map_err(|e| format!("Prompt decode error: {e}"))?;
+            chunk_start = chunk_end;
         }
-        ctx.decode(&mut batch)
-            .map_err(|e| format!("Prompt decode error: {e}"))?;
 
-        // Autoregressive generation
-        let mut sampler = LlamaSampler::chain_simple([LlamaSampler::greedy()]);
+        // Autoregressive generation.
+        // penalties() prevents repetition loops. top_k narrows the candidate set before
+        // top_p, then dist(42) samples probabilistically — more natural than greedy argmax.
+        let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::penalties(64, 1.25, 0.2, 0.2),
+            LlamaSampler::top_k(40),
+            LlamaSampler::top_p(0.9, 1),
+            LlamaSampler::temp(0.4),
+            LlamaSampler::dist(42),
+        ]);
         let mut response = String::new();
         let mut pos = n_tokens;
-        let max_new_tokens = 2048usize;
+        let max_new_tokens = 800usize;
 
         for _ in 0..max_new_tokens {
+            // Hard stop if we've consumed the entire context window — decoding one
+            // more token would overflow the KV cache and trigger ggml_abort().
+            if pos >= n_ctx_size as usize {
+                log::warn!("Generation stopped: reached context window limit ({n_ctx_size} tokens).");
+                break;
+            }
+
             // idx = -1 samples from the last computed logit position
             let token = sampler.sample(&ctx, -1);
             sampler.accept(token);
@@ -403,7 +449,18 @@ async fn ask_saul(
             pos += 1;
         }
 
-        Ok(response)
+        // Strip common generation artifacts before returning to the UI.
+        let answer = response
+            .trim()
+            .trim_start_matches("<s>")
+            .trim()
+            .trim_end_matches("</s>")
+            .trim_end_matches("[INST]")
+            .trim_end_matches("[/INST]")
+            .trim()
+            .to_string();
+
+        Ok(answer)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -673,7 +730,27 @@ pub async fn query(
 
     let query_vec = embed_text(&question, &model_dir).await?;
 
-    let candidate_k = (settings.top_k * 3).min(30);
+    // Build a set of meaningful query keywords for hybrid re-ranking.
+    // Hybrid score = 0.75 * cosine_sim + 0.25 * keyword_overlap.
+    // This compensates for AllMiniLML6V2 giving low cosine scores on specialised legal text.
+    let stop_words: std::collections::HashSet<&str> = [
+        "a","an","the","is","are","was","were","be","been","being","have","has","had",
+        "do","does","did","will","would","could","should","may","might","shall","can",
+        "i","me","my","we","our","you","your","he","she","it","they","what","which",
+        "who","this","that","these","those","of","in","on","at","by","for","with",
+        "about","as","into","to","from","and","but","or","not","any","all","some",
+        "how","when","where","why","there","find","show","tell","explain","give",
+        "please","provide","describe",
+    ].iter().cloned().collect();
+
+    let query_keywords: std::collections::HashSet<String> = question
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3 && !stop_words.contains(*w))
+        .map(|w| w.to_string())
+        .collect();
+
+    let candidate_k = (settings.top_k * 6).min(60);
     let results = {
         let s = state.lock().await;
 
@@ -690,15 +767,29 @@ pub async fn query(
             .embedded_chunks
             .iter()
             .map(|entry| {
-                let score = RagState::cosine_similarity(&query_vec, &entry.vector);
-                (score, entry.meta.clone())
+                let cosine = RagState::cosine_similarity(&query_vec, &entry.vector);
+
+                // Keyword overlap bonus: fraction of query keywords found in chunk text.
+                let text_lower = entry.meta.text.to_lowercase();
+                let kw_hits = query_keywords
+                    .iter()
+                    .filter(|kw| text_lower.contains(kw.as_str()))
+                    .count();
+                let kw_score = if query_keywords.is_empty() {
+                    0.0f32
+                } else {
+                    kw_hits as f32 / query_keywords.len() as f32
+                };
+
+                let hybrid = 0.75 * cosine + 0.25 * kw_score;
+                (hybrid, entry.meta.clone())
             })
             .collect();
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Apply threshold filter; if nothing passes, fall back to bare top-k so the
-        // LLM always has context to work with (it will say "not found" if truly unrelated).
+        // Keep everything above threshold; if nothing qualifies, use bare top-k so
+        // the LLM always has some context (it will say "not found" if truly irrelevant).
         let above_threshold: Vec<_> = scored
             .iter()
             .filter(|(score, _)| *score >= SCORE_THRESHOLD)
@@ -733,7 +824,7 @@ pub async fn query(
         .enumerate()
         .map(|(i, (_, meta))| {
             format!(
-                "[{}] File: \"{}\" | Page {}\n{}",
+                "SOURCE {} — {}, Page {}:\n\"{}\"",
                 i + 1,
                 meta.file_name,
                 meta.page_number,
@@ -743,12 +834,10 @@ pub async fn query(
         .collect();
     let raw_context = context_parts.join("\n\n---\n\n");
 
-    // Pre-truncate the document context so the assembled prompt stays within the
-    // LLM's context window (n_ctx=4096). Approximate budget:
-    //   4096 total - 512 generation headroom - ~250 system header = ~3334 tokens for context.
-    //   1 token ≈ 4 chars  →  ~13 300 chars is a safe ceiling.
-    // This is the first line of defence; ask_saul() has a secondary token-level guard.
-    const MAX_CONTEXT_CHARS: usize = 13_000;
+    // Pre-truncate context chars before prompt assembly.
+    // Budget: 4096 ctx - 800 generation headroom - ~400 prompt/rules overhead ≈ 2896 tokens.
+    // 10000 chars ≈ 2500 tokens — uses most of the budget; keeps instruction markers intact.
+    const MAX_CONTEXT_CHARS: usize = 10_000;
     let context = if raw_context.len() > MAX_CONTEXT_CHARS {
         let safe_end = raw_context.floor_char_boundary(MAX_CONTEXT_CHARS);
         log::warn!(
@@ -761,13 +850,18 @@ pub async fn query(
         raw_context
     };
 
-    let system_with_context = SYSTEM_PROMPT.replace("{context}", &context);
+    let answer = ask_saul(&question, &context, &model_dir, model_cache).await?;
 
-    let answer = ask_saul(&system_with_context, &question, &model_dir, model_cache).await?;
+    let answer_lower = answer.to_lowercase();
+    // Only mark as truly not-found for the model's explicit "not found" signal.
+    // Avoid matching partial phrases that appear in valid answers.
+    let not_found = answer.is_empty()
+        || answer_lower.contains("i could not find information")
+        || answer_lower.contains("could not find information about this")
+        || answer_lower.contains("documents do not contain");
 
-    let not_found = answer.to_lowercase().contains("i could not find")
-        || answer.to_lowercase().contains("no relevant");
-
+    // Always build citations from the retrieved chunks — even on not_found,
+    // showing the sources lets the user investigate the document directly.
     let citations: Vec<Citation> = results
         .iter()
         .map(|(score, meta)| Citation {
@@ -781,7 +875,7 @@ pub async fn query(
 
     Ok(QueryResult {
         answer,
-        citations: if not_found { vec![] } else { citations },
+        citations,
         not_found,
     })
 }

@@ -386,9 +386,23 @@ export default function ChatInterface({
                 </div>
               )}
               {loadError && (
-                <p className="mt-1 text-[12px]" style={{ color: '#f85149' }}>
-                  {loadError}
-                </p>
+                <div
+                  className="flex items-start gap-2.5 rounded-xl px-4 py-3 mt-1 w-full"
+                  style={{
+                    background: 'rgba(201,168,76,0.06)',
+                    border: '1px solid rgba(201,168,76,0.28)',
+                    borderLeft: '2px solid rgba(201,168,76,0.7)',
+                    maxWidth: 360,
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="shrink-0 mt-0.5">
+                    <path d="M8.22 1.754a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368L8.22 1.754zm-1.358-.29a1.75 1.75 0 0 1 3.076 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15.5H1.918a1.75 1.75 0 0 1-1.538-2.658L6.862 1.464z" fill="rgba(201,168,76,0.75)" />
+                    <path d="M9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25-5.25a.75.75 0 0 0-1.5 0v2.5a.75.75 0 0 0 1.5 0v-2.5z" fill="rgba(201,168,76,0.75)" />
+                  </svg>
+                  <p className="text-[12px] leading-relaxed text-left" style={{ color: 'rgba(201,168,76,0.9)' }}>
+                    {loadError}
+                  </p>
+                </div>
               )}
             </div>
           </div>
@@ -694,6 +708,25 @@ export default function ChatInterface({
         style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: '#080808' }}
       >
         <div className="max-w-3xl mx-auto">
+          {loadError && (
+            <div
+              className="flex items-start gap-2.5 rounded-xl px-4 py-3 mb-3"
+              style={{
+                background: 'rgba(201,168,76,0.06)',
+                border: '1px solid rgba(201,168,76,0.28)',
+                borderLeft: '2px solid rgba(201,168,76,0.7)',
+                animation: 'fadeUp 0.25s ease both',
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="shrink-0 mt-0.5">
+                <path d="M8.22 1.754a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368L8.22 1.754zm-1.358-.29a1.75 1.75 0 0 1 3.076 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15.5H1.918a1.75 1.75 0 0 1-1.538-2.658L6.862 1.464z" fill="rgba(201,168,76,0.75)" />
+                <path d="M9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25-5.25a.75.75 0 0 0-1.5 0v2.5a.75.75 0 0 0 1.5 0v-2.5z" fill="rgba(201,168,76,0.75)" />
+              </svg>
+              <p className="text-[12px] leading-relaxed" style={{ color: 'rgba(201,168,76,0.9)' }}>
+                {loadError}
+              </p>
+            </div>
+          )}
           <div
             className="rounded-2xl"
             style={{

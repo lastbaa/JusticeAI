@@ -67,4 +67,6 @@ export const api = {
 
   getPageText: (filePath: string, pageNumber: number): Promise<string> =>
     invoke('get_page_text', { filePath, pageNumber }),
+
+  getFileServerPort: (): Promise<number> => invoke('get_file_server_port'),
 }

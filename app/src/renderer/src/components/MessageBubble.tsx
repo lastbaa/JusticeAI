@@ -204,7 +204,7 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
               </svg>
               <p
                 className="text-[13px] leading-relaxed whitespace-pre-wrap"
-                style={{ color: 'rgba(255,255,255,0.45)' }}
+                style={{ color: 'rgba(255,255,255,0.85)' }}
               >
                 {message.content}
               </p>
@@ -220,7 +220,10 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
             }}
           >
             <div className="text-[13.5px] text-white leading-[1.75]">
-              {renderMarkdown(message.content)}
+              {message.content.trim()
+                ? renderMarkdown(message.content)
+                : <span style={{ color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>No response generated. Please try again.</span>
+              }
             </div>
           </div>
         )}
@@ -230,19 +233,15 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
         </p>
 
         {!isNotFound && message.citations && message.citations.length > 0 && (
-          <div className="mt-4">
-            <div className="flex items-center gap-2 mb-2.5">
-              <div className="h-px flex-1" style={{ background: 'rgba(255,255,255,0.05)' }} />
-              <p
-                className="text-[10px] font-semibold uppercase tracking-[0.14em] shrink-0"
-                style={{ color: 'rgba(255,255,255,0.22)' }}
-              >
-                Sources · {message.citations.length}
-              </p>
-              <div className="h-px flex-1" style={{ background: 'rgba(255,255,255,0.05)' }} />
-            </div>
-            <div className="flex flex-col gap-2">
-              {message.citations.map((citation, idx) => (
+          <div className="mt-3">
+            <p
+              className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
+              style={{ color: 'rgba(255,255,255,0.18)' }}
+            >
+              Sources
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {message.citations.slice(0, 3).map((citation, idx) => (
                 <SourceCard key={idx} citation={citation} onView={onViewCitation} />
               ))}
             </div>
