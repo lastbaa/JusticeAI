@@ -929,9 +929,11 @@ pub async fn query(
     let raw_context = context_parts.join("\n\n---\n\n");
 
     // Pre-truncate context chars before prompt assembly.
-    // Budget: 4096 ctx - 800 generation headroom - ~400 prompt/rules overhead ≈ 2896 tokens.
-    // 10000 chars ≈ 2500 tokens — uses most of the budget; keeps instruction markers intact.
-    const MAX_CONTEXT_CHARS: usize = 10_000;
+    // Saul-7B has a 4096-token context. Safe prompt budget = 4096 - 512 (generation margin) = 3584.
+    // Accounting for RULES_PROMPT (~200 tokens) + question/overhead (~50 tokens) leaves ~3334 tokens
+    // for context. Legal text tokenizes at ~2.5 chars/token → 3334 × 2.5 ≈ 8335 chars max.
+    // Using 5500 gives comfortable headroom and avoids the head+tail truncation fallback.
+    const MAX_CONTEXT_CHARS: usize = 5_500;
     let context = if raw_context.len() > MAX_CONTEXT_CHARS {
         let safe_end = raw_context.floor_char_boundary(MAX_CONTEXT_CHARS);
         log::warn!(
