@@ -124,7 +124,7 @@ export default function BentoCapabilities() {
               className="md:col-span-7"
               icon={<Zap className="h-5 w-5" style={{ color: '#c9a84c' }} />}
               name="Hours of Research in Seconds"
-              description="A 500-page deposition that takes half a day to search manually returns a cited excerpt in under ten seconds. Your team can focus on analysis, not retrieval."
+              description="A 500-page deposition that takes half a day to search manually returns a cited excerpt in seconds — and answers stream word-by-word so you see results immediately, not after a minute of waiting."
               cta="See how it works"
               background={
                 <div className="absolute top-5 right-8 flex items-baseline gap-1 select-none pointer-events-none" style={{ opacity: 0.055 }}>
@@ -139,7 +139,7 @@ export default function BentoCapabilities() {
               className="md:col-span-4"
               icon={<BookOpenCheck className="h-5 w-5" style={{ color: '#c9a84c' }} />}
               name="Cited, Never Assumed"
-              description="Every response includes the exact filename and page number. Nothing inferred, nothing hallucinated."
+              description="Every source shows its exact filename, page number, and a relevance score — Strong, Good, or Weak — so you know at a glance how confident the match is."
               cta="Explore citation format"
               background={
                 <div className="absolute top-5 right-5 flex flex-col gap-2 opacity-[0.07] w-24 pointer-events-none">
