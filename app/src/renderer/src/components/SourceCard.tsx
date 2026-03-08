@@ -6,9 +6,16 @@ interface Props {
   onView?: (citation: Citation) => void
 }
 
+function relevanceLabel(score: number): { label: string; color: string } {
+  if (score >= 0.55) return { label: 'Strong', color: '#3fb950' }
+  if (score >= 0.30) return { label: 'Good',   color: '#c9a84c' }
+  return                    { label: 'Weak',   color: 'rgba(255,255,255,0.28)' }
+}
+
 export default function SourceCard({ citation, onView }: Props): JSX.Element {
   const [hovered, setHovered] = useState(false)
   const ext = citation.fileName.split('.').pop()?.toUpperCase() ?? 'DOC'
+  const rel = relevanceLabel(citation.score)
 
   return (
     <div
@@ -42,9 +49,24 @@ export default function SourceCard({ citation, onView }: Props): JSX.Element {
           >
             {citation.fileName}
           </span>
-          <span className="shrink-0 text-[11px]" style={{ color: 'rgba(255,255,255,0.28)' }}>
-            p.{citation.pageNumber}
-          </span>
+          <div className="shrink-0 flex items-center gap-1.5">
+            <span
+              style={{
+                display: 'inline-block',
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: rel.color,
+                opacity: 0.85,
+              }}
+            />
+            <span className="text-[10px]" style={{ color: rel.color, opacity: 0.85 }}>
+              {rel.label}
+            </span>
+            <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.28)' }}>
+              · p.{citation.pageNumber}
+            </span>
+          </div>
         </div>
         <p
           className="text-[11px] leading-relaxed italic"

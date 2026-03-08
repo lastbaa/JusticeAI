@@ -49,6 +49,12 @@ export const api = {
 
   query: (question: string): Promise<QueryResult> => invoke('query', { question }),
 
+  onQueryToken: (cb: (token: string) => void): Promise<() => void> =>
+    listen('query-token', (e) => cb(e.payload as string)),
+
+  onQueryStatus: (cb: (status: { phase: string; chunks?: number }) => void): Promise<() => void> =>
+    listen('query-status', (e) => cb(e.payload as { phase: string; chunks?: number })),
+
   getSettings: (): Promise<AppSettings> => invoke('get_settings'),
 
   saveSettings: (settings: AppSettings): Promise<void> =>

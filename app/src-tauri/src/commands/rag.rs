@@ -284,6 +284,7 @@ async fn ask_saul(
     context: &str,
     model_dir: &Path,
     model_cache: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>>,
+    window: tauri::Window,
 ) -> Result<String, String> {
     use llama_cpp_2::{
         context::params::LlamaContextParams,
@@ -445,7 +446,9 @@ Answer the question using ONLY these excerpts.\n\n\
             let output_bytes = model
                 .token_to_piece_bytes(token, 128, false, None)
                 .map_err(|e| format!("Token decode error: {e}"))?;
-            response.push_str(&String::from_utf8_lossy(&output_bytes));
+            let token_piece = String::from_utf8_lossy(&output_bytes).into_owned();
+            window.emit("query-token", token_piece.as_str()).ok();
+            response.push_str(&token_piece);
 
             // Feed the generated token back for next-step prediction
             batch.clear();
@@ -945,6 +948,7 @@ fn mmr_select(
 pub async fn query(
     question: String,
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+    window: tauri::Window,
 ) -> Result<QueryResult, String> {
     let (settings, model_dir, model_cache) = {
         let s = state.lock().await;
@@ -955,6 +959,7 @@ pub async fn query(
         )
     };
 
+    window.emit("query-status", serde_json::json!({"phase": "embedding"})).ok();
     let query_vec = embed_text(&question, &model_dir).await?;
 
     // Build a set of meaningful query keywords for hybrid re-ranking.
@@ -982,6 +987,8 @@ pub async fn query(
     let candidate_k = (settings.top_k * 6).min(60);
     let results = {
         let s = state.lock().await;
+
+        window.emit("query-status", serde_json::json!({"phase": "searching", "chunks": s.embedded_chunks.len()})).ok();
 
         // No chunks at all → no files were successfully embedded.
         if s.embedded_chunks.is_empty() {
@@ -1053,7 +1060,42 @@ pub async fn query(
             )
         })
         .collect();
-    let raw_context = context_parts.join("\n\n---\n\n");
+
+    // Neighbor chunk expansion: include adjacent chunks (same file + page) for surrounding context.
+    let selected_ids: std::collections::HashSet<&str> =
+        results.iter().map(|(_, m)| m.id.as_str()).collect();
+    let neighbor_context_parts = {
+        let s = state.lock().await;
+        let mut parts: Vec<String> = Vec::new();
+        for (_, meta) in &results {
+            for delta in [-1i64, 1i64] {
+                let nbr_idx = meta.chunk_index as i64 + delta;
+                if nbr_idx < 0 {
+                    continue;
+                }
+                if let Some(nbr) = s.chunk_registry.values().find(|c| {
+                    c.file_path == meta.file_path
+                        && c.page_number == meta.page_number
+                        && c.chunk_index == nbr_idx as usize
+                        && !selected_ids.contains(c.id.as_str())
+                }) {
+                    parts.push(nbr.text.clone());
+                }
+            }
+        }
+        parts
+    };
+
+    let mut raw_context = context_parts.join("\n\n---\n\n");
+    if !neighbor_context_parts.is_empty() {
+        raw_context.push_str("\n\n--- Surrounding Context ---\n\n");
+        raw_context.push_str(&neighbor_context_parts.join("\n\n"));
+        log::info!(
+            "Neighbor expansion added {} extra chunks ({} total context chars).",
+            neighbor_context_parts.len(),
+            raw_context.len()
+        );
+    }
 
     // Pre-truncate context chars before prompt assembly.
     // Saul-7B has a 4096-token context. Safe prompt budget = 4096 - 512 (generation margin) = 3584.
@@ -1073,7 +1115,8 @@ pub async fn query(
         raw_context
     };
 
-    let answer = ask_saul(&question, &context, &model_dir, model_cache).await?;
+    window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
+    let answer = ask_saul(&question, &context, &model_dir, model_cache, window.clone()).await?;
 
     let answer_lower = answer.to_lowercase();
     // Only mark as truly not-found for the model's explicit "not found" signal.

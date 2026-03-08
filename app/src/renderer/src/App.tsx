@@ -65,6 +65,7 @@ export default function App(): JSX.Element {
   const [sessionCreatedAt, setSessionCreatedAt] = useState<number>(() => Date.now())
   const [isLoading, setIsLoading] = useState(false)
   const [isQuerying, setIsQuerying] = useState(false)
+  const [queryPhase, setQueryPhase] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [lastCitations, setLastCitations] = useState<import('../../../../shared/src/types').Citation[]>([])
   const [viewerCitation, setViewerCitation] = useState<import('../../../../shared/src/types').Citation | null>(null)
@@ -245,31 +246,94 @@ export default function App(): JSX.Element {
     }
     setMessages((prev) => [...prev, userMessage])
     setIsQuerying(true)
+    setQueryPhase('')
+
+    const streamingId = uuidv4()
+    let unlistenToken: (() => void) | undefined
+    let unlistenStatus: (() => void) | undefined
 
     try {
+      // Subscribe to token stream before calling query so no tokens are missed
+      unlistenToken = await window.api.onQueryToken((token: string) => {
+        setMessages((prev) => {
+          const existing = prev.find((m) => m.id === streamingId)
+          if (existing) {
+            return prev.map((m) =>
+              m.id === streamingId ? { ...m, content: m.content + token } : m
+            )
+          }
+          // First token — insert the streaming message
+          const streamingMsg: ChatMessage = {
+            id: streamingId,
+            role: 'assistant',
+            content: token,
+            citations: [],
+            isStreaming: true,
+            timestamp: Date.now(),
+          }
+          return [...prev, streamingMsg]
+        })
+      })
+
+      unlistenStatus = await window.api.onQueryStatus(
+        (status: { phase: string; chunks?: number }) => {
+          if (status.phase === 'embedding') {
+            setQueryPhase('Embedding query…')
+          } else if (status.phase === 'searching') {
+            setQueryPhase(
+              status.chunks != null
+                ? `Searching ${status.chunks} chunks…`
+                : 'Searching documents…'
+            )
+          } else if (status.phase === 'generating') {
+            setQueryPhase('Generating answer…')
+          }
+        }
+      )
+
       const result = await window.api.query(question)
-      const assistantMessage: ChatMessage = {
-        id: uuidv4(),
+
+      // Replace streaming placeholder with the final cleaned answer + citations
+      const finalMessage: ChatMessage = {
+        id: streamingId,
         role: 'assistant',
         content: result.answer,
         citations: result.citations,
         notFound: result.notFound,
+        isStreaming: false,
         timestamp: Date.now(),
       }
-      setMessages((prev) => [...prev, assistantMessage])
+      setMessages((prev) => {
+        const hasStreaming = prev.some((m) => m.id === streamingId)
+        if (hasStreaming) {
+          return prev.map((m) => (m.id === streamingId ? finalMessage : m))
+        }
+        // No tokens arrived (e.g. instant error path) — append directly
+        return [...prev, finalMessage]
+      })
       setLastCitations(result.citations)
     } catch (err) {
       const errorMessage: ChatMessage = {
-        id: uuidv4(),
+        id: streamingId,
         role: 'assistant',
         content: `Unable to get a response. ${err instanceof Error ? err.message : 'Please try again.'}`,
         citations: [],
         notFound: true,
+        isStreaming: false,
         timestamp: Date.now(),
       }
-      setMessages((prev) => [...prev, errorMessage])
+      setMessages((prev) => {
+        const hasStreaming = prev.some((m) => m.id === streamingId)
+        if (hasStreaming) {
+          return prev.map((m) => (m.id === streamingId ? errorMessage : m))
+        }
+        return [...prev, errorMessage]
+      })
     } finally {
+      unlistenToken?.()
+      unlistenStatus?.()
       setIsQuerying(false)
+      setQueryPhase('')
     }
   }
 
@@ -346,6 +410,7 @@ export default function App(): JSX.Element {
           messages={messages}
           files={files}
           isQuerying={isQuerying}
+          queryPhase={queryPhase}
           isLoading={isLoading}
           loadError={loadError}
           chatMode={chatMode}

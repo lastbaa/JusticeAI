@@ -221,7 +221,22 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
           >
             <div className="text-[13.5px] text-white leading-[1.75]">
               {message.content.trim()
-                ? renderMarkdown(message.content)
+                ? <>
+                    {renderMarkdown(message.content)}
+                    {message.isStreaming && (
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          width: '2px',
+                          height: '1em',
+                          background: 'rgba(201,168,76,0.8)',
+                          marginLeft: '2px',
+                          verticalAlign: 'text-bottom',
+                          animation: 'cursorBlink 0.9s step-end infinite',
+                        }}
+                      />
+                    )}
+                  </>
                 : <span style={{ color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>No response generated. Please try again.</span>
               }
             </div>

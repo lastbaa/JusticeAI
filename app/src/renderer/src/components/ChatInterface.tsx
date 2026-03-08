@@ -5,6 +5,7 @@ import MessageBubble from './MessageBubble'
 interface Props {
   messages: ChatMessage[]
   isQuerying: boolean
+  queryPhase?: string
   files: FileInfo[]
   isLoading: boolean
   loadError: string | null
@@ -31,7 +32,7 @@ const THINKING_PHRASES = [
   'Reviewing source citations',
 ]
 
-function TypingIndicator(): JSX.Element {
+function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
   const [phraseIdx, setPhraseIdx] = useState(0)
   const [dotTick, setDotTick] = useState(0)
   const [elapsed, setElapsed] = useState(0)
@@ -55,6 +56,8 @@ function TypingIndicator(): JSX.Element {
   }, [])
 
   const dots = ['·', '··', '···'][dotTick % 3]
+  const displayPhrase = phase || THINKING_PHRASES[phraseIdx]
+  const displayKey = phase ? phase : phraseKey
 
   return (
     <div className="flex gap-3 max-w-3xl mx-auto w-full" style={{ animation: 'fadeUp 0.3s ease both' }}>
@@ -96,14 +99,14 @@ function TypingIndicator(): JSX.Element {
             style={{ border: '2px solid rgba(201,168,76,0.18)', borderTopColor: '#c9a84c' }}
           />
           <span
-            key={phraseKey}
+            key={displayKey}
             className="text-[13px]"
             style={{
               color: 'rgba(255,255,255,0.65)',
               animation: 'phraseIn 0.35s ease both',
             }}
           >
-            {THINKING_PHRASES[phraseIdx]}
+            {displayPhrase}
             <span style={{ color: 'rgba(201,168,76,0.55)', fontWeight: 600, letterSpacing: '0.05em' }}>
               {dots}
             </span>
@@ -156,6 +159,7 @@ const EXAMPLES = [
 export default function ChatInterface({
   messages,
   isQuerying,
+  queryPhase,
   files,
   isLoading,
   loadError,
@@ -696,7 +700,9 @@ export default function ChatInterface({
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} onViewCitation={onViewCitation} />
             ))}
-            {isQuerying && <TypingIndicator />}
+            {isQuerying && !messages.some((m) => m.isStreaming && m.content.length > 0) && (
+              <TypingIndicator phase={queryPhase} />
+            )}
             <div ref={messagesEndRef} className="h-4" />
           </div>
         )}
