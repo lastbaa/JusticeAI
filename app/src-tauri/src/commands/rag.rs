@@ -228,6 +228,14 @@ pub fn set_can_close(state: tauri::State<'_, crate::state::CloseAllowed>) {
     state.0.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// Write text content to an arbitrary file path chosen by the user via a save dialog.
+/// Called from the export-chat and export-citations features.
+#[tauri::command]
+pub fn save_file(file_path: String, content: String) -> Result<(), String> {
+    std::fs::write(&file_path, content.as_bytes())
+        .map_err(|e| format!("Failed to write file: {e}"))
+}
+
 // ── Local Embedding via fastembed ─────────────────────────────────────────────
 // The model is loaded once into EMBED_MODEL on the first call and reused for
 // every subsequent chunk or query. Re-initializing per call was silent-failing.
@@ -279,9 +287,22 @@ pub async fn embed_text(text: &str, model_dir: &Path) -> Result<Vec<f32>, String
 // The model (4.5 GB) is loaded once and cached in `model_cache`.
 // A fresh LlamaContext is created per query (lightweight — just KV cache alloc).
 
+/// Format prior conversation turns as labeled text for the model.
+fn format_history(history: &[(String, String)]) -> String {
+    let mut s = String::from("[Prior conversation — for follow-up context only:]\n");
+    for (user, assistant) in history {
+        // Trim each side to avoid bloating the prompt with long prior answers
+        let u = if user.len() > 400 { &user[..400] } else { user };
+        let a = if assistant.len() > 600 { &assistant[..600] } else { assistant };
+        s.push_str(&format!("User: {u}\nAssistant: {a}\n\n"));
+    }
+    s
+}
+
 async fn ask_saul(
     user_question: &str,
     context: &str,
+    history: &[(String, String)],
     model_dir: &Path,
     model_cache: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>>,
     window: tauri::Window,
@@ -296,16 +317,34 @@ async fn ask_saul(
 
     let gguf_path = model_dir.join("saul.gguf");
 
+    // Build history prefix (empty string when there are no prior turns).
+    let history_prefix = if history.is_empty() {
+        String::new()
+    } else {
+        format_history(history)
+    };
+
     // Put context in the user turn — Llama 2 models pay far more attention to
     // user-turn content than to the system prompt, so this is the reliable way
     // to ground answers in the retrieved document chunks.
     let user_content = if context.trim().is_empty() {
-        format!("Question: {user_question}")
-    } else {
+        if history_prefix.is_empty() {
+            format!("Question: {user_question}")
+        } else {
+            format!("{history_prefix}Current question: {user_question}")
+        }
+    } else if history_prefix.is_empty() {
         format!(
             "Below are excerpts from the user's loaded legal documents. \
 Answer the question using ONLY these excerpts.\n\n\
 {context}\n\n---\n\nQuestion: {user_question}"
+        )
+    } else {
+        format!(
+            "{history_prefix}\
+Below are excerpts from the user's loaded legal documents. \
+Answer the current question using ONLY these excerpts.\n\n\
+{context}\n\n---\n\nCurrent question: {user_question}"
         )
     };
 
@@ -947,6 +986,7 @@ fn mmr_select(
 #[tauri::command]
 pub async fn query(
     question: String,
+    history: Vec<(String, String)>,
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
     window: tauri::Window,
 ) -> Result<QueryResult, String> {
@@ -1116,7 +1156,7 @@ pub async fn query(
     };
 
     window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
-    let answer = ask_saul(&question, &context, &model_dir, model_cache, window.clone()).await?;
+    let answer = ask_saul(&question, &context, &history, &model_dir, model_cache, window.clone()).await?;
 
     let answer_lower = answer.to_lowercase();
     // Only mark as truly not-found for the model's explicit "not found" signal.

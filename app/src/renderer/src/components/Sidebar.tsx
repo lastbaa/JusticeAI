@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ChatSession } from '../../../../../shared/src/types'
 
 interface Props {
@@ -9,6 +9,7 @@ interface Props {
   onNewChat: () => void
   onLoadSession: (session: ChatSession) => void
   onDeleteSession: (sessionId: string) => void
+  onRenameSession: (id: string, newName: string) => void
   onClearSessions: () => void
   onAddFiles: () => void
   onOpenSettings: () => void
@@ -50,13 +51,63 @@ function SessionItem({
   isActive,
   onLoad,
   onDelete,
+  onRename,
 }: {
   session: ChatSession
   isActive: boolean
   onLoad: () => void
   onDelete: () => void
+  onRename: (newName: string) => void
 }): JSX.Element {
   const [hovered, setHovered] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function startEdit(e: React.MouseEvent): void {
+    e.stopPropagation()
+    setEditName(session.name)
+    setEditing(true)
+    setTimeout(() => inputRef.current?.select(), 0)
+  }
+
+  function commitEdit(): void {
+    setEditing(false)
+    const trimmed = editName.trim()
+    if (trimmed && trimmed !== session.name) {
+      onRename(trimmed)
+    }
+  }
+
+  function handleEditKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
+    if (e.key === 'Enter') { e.preventDefault(); commitEdit() }
+    if (e.key === 'Escape') setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div
+        className="relative flex items-center gap-2 rounded-lg px-3 py-1.5"
+        style={{ background: '#191919', border: '1px solid rgba(201,168,76,0.3)' }}
+      >
+        <div
+          className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 rounded-full"
+          style={{ background: '#c9a84c' }}
+        />
+        <input
+          ref={inputRef}
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={handleEditKeyDown}
+          autoFocus
+          className="flex-1 bg-transparent text-[12px] leading-snug outline-none text-white placeholder-white/30"
+          style={{ minWidth: 0 }}
+          maxLength={60}
+        />
+      </div>
+    )
+  }
 
   return (
     <div
@@ -79,17 +130,34 @@ function SessionItem({
         {session.name}
       </span>
       {hovered && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete() }}
-          className="no-drag shrink-0 flex h-4 w-4 items-center justify-center rounded transition-colors"
-          style={{ color: 'rgba(255,255,255,0.2)' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.2)' }}
-        >
-          <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
-            <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
-          </svg>
-        </button>
+        <div className="no-drag shrink-0 flex items-center gap-1">
+          {/* Rename button */}
+          <button
+            onClick={startEdit}
+            title="Rename"
+            className="flex h-4 w-4 items-center justify-center rounded transition-colors"
+            style={{ color: 'rgba(255,255,255,0.18)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.55)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.18)' }}
+          >
+            <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064l6.286-6.286zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086z" />
+            </svg>
+          </button>
+          {/* Delete button */}
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            title="Delete"
+            className="flex h-4 w-4 items-center justify-center rounded transition-colors"
+            style={{ color: 'rgba(255,255,255,0.18)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.18)' }}
+          >
+            <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
+            </svg>
+          </button>
+        </div>
       )}
     </div>
   )
@@ -103,11 +171,20 @@ export default function Sidebar({
   onNewChat,
   onLoadSession,
   onDeleteSession,
+  onRenameSession,
   onClearSessions,
   onAddFiles,
   onOpenSettings,
 }: Props): JSX.Element {
-  const groups = groupSessions(sessions)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredSessions = searchQuery.trim()
+    ? sessions.filter((s) =>
+        s.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : sessions
+
+  const groups = groupSessions(filteredSessions)
 
   return (
     <aside
@@ -160,38 +237,65 @@ export default function Sidebar({
       {/* Divider */}
       <div className="mx-3 mb-2 h-px" style={{ background: 'rgba(255,255,255,0.04)' }} />
 
-      {/* Sessions header */}
+      {/* Sessions header + search */}
       {sessions.length > 0 && (
-        <div className="flex items-center justify-between px-5 mb-1">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgba(255,255,255,0.18)' }}>
-            Chats
-          </span>
-          <button
-            onClick={onClearSessions}
-            title="Clear all conversations"
-            className="flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-md transition-all"
-            style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              color: 'rgba(255,255,255,0.25)',
-            }}
-            onMouseEnter={(e) => {
-              const el = e.currentTarget as HTMLButtonElement
-              el.style.color = '#f85149'
-              el.style.borderColor = 'rgba(248,81,73,0.3)'
-            }}
-            onMouseLeave={(e) => {
-              const el = e.currentTarget as HTMLButtonElement
-              el.style.color = 'rgba(255,255,255,0.25)'
-              el.style.borderColor = 'rgba(255,255,255,0.08)'
-            }}
-          >
-            <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15z" />
-            </svg>
-            Clear all
-          </button>
-        </div>
+        <>
+          <div className="flex items-center justify-between px-5 mb-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgba(255,255,255,0.18)' }}>
+              Chats
+            </span>
+            <button
+              onClick={onClearSessions}
+              title="Clear all conversations"
+              className="flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-md transition-all"
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                color: 'rgba(255,255,255,0.25)',
+              }}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLButtonElement
+                el.style.color = '#f85149'
+                el.style.borderColor = 'rgba(248,81,73,0.3)'
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLButtonElement
+                el.style.color = 'rgba(255,255,255,0.25)'
+                el.style.borderColor = 'rgba(255,255,255,0.08)'
+              }}
+            >
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15z" />
+              </svg>
+              Clear all
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="px-3 mb-1.5">
+            <div
+              className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="rgba(255,255,255,0.25)" className="shrink-0">
+                <path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04zm-5.943-1.044a4.5 4.5 0 1 0 6.364-6.364 4.5 4.5 0 0 0-6.364 6.364z" />
+              </svg>
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search chats…"
+                className="flex-1 bg-transparent text-[11px] text-white placeholder-white/20 outline-none"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} style={{ color: 'rgba(255,255,255,0.25)' }}>
+                  <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
+                    <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {/* Sessions list */}
@@ -214,6 +318,10 @@ export default function Sidebar({
             <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.15)' }}>No chats yet</p>
             <p className="mt-0.5 text-[10px]" style={{ color: 'rgba(255,255,255,0.09)' }}>Sessions auto-save</p>
           </div>
+        ) : filteredSessions.length === 0 ? (
+          <div className="flex flex-col items-center py-8 text-center px-4">
+            <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.18)' }}>No results for "{searchQuery}"</p>
+          </div>
         ) : (
           <div className="flex flex-col gap-5 py-1">
             {groups.map((group) => (
@@ -232,6 +340,7 @@ export default function Sidebar({
                       isActive={session.id === currentSessionId}
                       onLoad={() => onLoadSession(session)}
                       onDelete={() => onDeleteSession(session.id)}
+                      onRename={(name) => onRenameSession(session.id, name)}
                     />
                   ))}
                 </div>

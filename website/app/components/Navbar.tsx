@@ -18,6 +18,16 @@ export default function Navbar() {
           </svg>
           <span className="text-white font-semibold text-sm tracking-widest uppercase">Justice AI</span>
         </a>
+        <div className="flex items-center gap-4">
+        <a
+          href="/changelog"
+          className="text-sm font-medium transition-colors"
+          style={{ color: 'rgba(255,255,255,0.45)' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'rgba(255,255,255,0.8)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'rgba(255,255,255,0.45)' }}
+        >
+          Changelog
+        </a>
         <a
           href="#download"
           className="text-sm font-medium tracking-wider uppercase px-5 py-2 rounded-md transition-all duration-200"
@@ -35,6 +45,7 @@ export default function Navbar() {
         >
           Download
         </a>
+        </div>
       </div>
     </nav>
   )

@@ -171,6 +171,7 @@ pub fn run() {
             commands::rag::delete_session,
             commands::rag::get_file_data,
             commands::rag::get_page_text,
+            commands::rag::save_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

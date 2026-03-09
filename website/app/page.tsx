@@ -9,6 +9,7 @@ import Compare from './components/Compare'
 import UseCases from './components/UseCases'
 import HowItWorks from './components/HowItWorks'
 import LampCTA from './components/LampCTA'
+import FAQ from './components/FAQ'
 import Download from './components/Download'
 import Footer from './components/Footer'
 
@@ -26,6 +27,7 @@ export default function Home() {
       <UseCases />
       <HowItWorks />
       <LampCTA />
+      <FAQ />
       <div id="download">
         <Download />
       </div>

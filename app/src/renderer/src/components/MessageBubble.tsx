@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ChatMessage, Citation } from '../../../../../shared/src/types'
 import SourceCard from './SourceCard'
 
@@ -25,8 +26,49 @@ function GavelAvatar(): JSX.Element {
   )
 }
 
-// ── Lightweight markdown renderer (no external deps) ─────────────────────────
-// Handles bold, italic, inline code, fenced code blocks, bullet + numbered lists.
+// ── Copy button with checkmark flash ─────────────────────────────────────────
+function CopyButton({ text, className, style }: { text: string; className?: string; style?: React.CSSProperties }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy(e: React.MouseEvent): void {
+    e.stopPropagation()
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    }).catch(() => {})
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy"
+      className={`flex items-center justify-center rounded transition-all ${className ?? ''}`}
+      style={{
+        color: copied ? '#3fb950' : 'rgba(255,255,255,0.22)',
+        ...style,
+      }}
+      onMouseEnter={(e) => {
+        if (!copied) (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.55)'
+      }}
+      onMouseLeave={(e) => {
+        if (!copied) (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.22)'
+      }}
+    >
+      {copied ? (
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 8l4 4 8-8" />
+        </svg>
+      ) : (
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z" />
+          <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+// ── Lightweight markdown renderer ─────────────────────────────────────────────
 function renderMarkdown(text: string): JSX.Element {
   const lines = text.split('\n')
   const elements: JSX.Element[] = []
@@ -44,12 +86,18 @@ function renderMarkdown(text: string): JSX.Element {
         codeLines.push(lines[i])
         i++
       }
+      const codeText = codeLines.join('\n')
       elements.push(
-        <pre key={i} style={{ background: '#080808', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '12px 16px', overflowX: 'auto', margin: '8px 0' }}>
-          <code style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.82em', color: 'rgba(255,255,255,0.82)', lineHeight: 1.65 }} data-lang={lang}>
-            {codeLines.join('\n')}
-          </code>
-        </pre>
+        <div key={i} style={{ position: 'relative', margin: '8px 0' }}>
+          <pre style={{ background: '#080808', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '12px 16px', overflowX: 'auto', margin: 0 }}>
+            <code style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.82em', color: 'rgba(255,255,255,0.82)', lineHeight: 1.65 }} data-lang={lang}>
+              {codeText}
+            </code>
+          </pre>
+          <div style={{ position: 'absolute', top: 8, right: 8 }}>
+            <CopyButton text={codeText} />
+          </div>
+        </div>
       )
       i++
       continue
@@ -102,7 +150,6 @@ function renderMarkdown(text: string): JSX.Element {
 
     // Blank line
     if (line.trim() === '') {
-      // Only add spacing if there's content above
       if (elements.length > 0) {
         elements.push(<div key={i} style={{ height: '0.4em' }} />)
       }
@@ -123,7 +170,6 @@ function renderMarkdown(text: string): JSX.Element {
 // Inline markdown: **bold**, *italic*, `code`
 function inlineMarkdown(text: string): (string | JSX.Element)[] {
   const parts: (string | JSX.Element)[] = []
-  // Combined regex: **bold**, *italic*, `code`
   const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g
   let last = 0
   let m: RegExpExecArray | null
@@ -149,14 +195,20 @@ function inlineMarkdown(text: string): (string | JSX.Element)[] {
 }
 
 export default function MessageBubble({ message, onViewCitation }: Props): JSX.Element {
+  const [hovered, setHovered] = useState(false)
   const isUser = message.role === 'user'
 
   if (isUser) {
     return (
-      <div className="flex justify-end" style={{ animation: 'fadeUp 0.25s ease both' }}>
+      <div
+        className="flex justify-end"
+        style={{ animation: 'fadeUp 0.25s ease both' }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
         <div style={{ maxWidth: '72%' }}>
           <div
-            className="rounded-2xl rounded-tr-sm px-4 py-3"
+            className="relative rounded-2xl rounded-tr-sm px-4 py-3"
             style={{
               background: '#161616',
               border: '1px solid rgba(255,255,255,0.09)',
@@ -166,6 +218,11 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
             <p className="text-[13.5px] text-white leading-relaxed whitespace-pre-wrap">
               {message.content}
             </p>
+            {hovered && (
+              <div style={{ position: 'absolute', top: 6, right: 6 }}>
+                <CopyButton text={message.content} />
+              </div>
+            )}
           </div>
           <p className="mt-1.5 text-right text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
             {formatTime(message.timestamp)}
@@ -178,16 +235,26 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
   const isNotFound = message.notFound
 
   return (
-    <div className="flex gap-3" style={{ animation: 'fadeUp 0.25s ease both' }}>
+    <div
+      className="flex gap-3"
+      style={{ animation: 'fadeUp 0.25s ease both' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <GavelAvatar />
 
       <div className="flex-1 min-w-0">
-        <p
-          className="mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase"
-          style={{ color: 'rgba(201,168,76,0.6)' }}
-        >
-          Justice AI
-        </p>
+        <div className="flex items-center justify-between mb-2.5">
+          <p
+            className="text-[10px] font-bold tracking-[0.14em] uppercase"
+            style={{ color: 'rgba(201,168,76,0.6)' }}
+          >
+            Justice AI
+          </p>
+          {hovered && !isNotFound && !message.isStreaming && message.content.trim() && (
+            <CopyButton text={message.content} />
+          )}
+        </div>
 
         {isNotFound ? (
           <div

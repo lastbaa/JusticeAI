@@ -47,7 +47,8 @@ export const api = {
 
   removeFile: (fileId: string): Promise<void> => invoke('remove_file', { fileId }),
 
-  query: (question: string): Promise<QueryResult> => invoke('query', { question }),
+  query: (question: string, history: [string, string][]): Promise<QueryResult> =>
+    invoke('query', { question, history }),
 
   onQueryToken: (cb: (token: string) => void): Promise<() => void> =>
     listen('query-token', (e) => cb(e.payload as string)),
@@ -75,4 +76,8 @@ export const api = {
     invoke('get_page_text', { filePath, pageNumber }),
 
   getFileServerPort: (): Promise<number> => invoke('get_file_server_port'),
+
+  saveFile: (filePath: string, content: string): Promise<void> =>
+    invoke('save_file', { filePath, content }),
 }
+

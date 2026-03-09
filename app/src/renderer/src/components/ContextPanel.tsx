@@ -11,6 +11,7 @@ interface Props {
   onRemoveFile: (id: string) => void
   onClearFiles: () => void
   onViewCitation: (citation: Citation) => void
+  onExportCitations?: () => void
 }
 
 function CitationRow({
@@ -159,6 +160,7 @@ export default function ContextPanel({
   onRemoveFile,
   onClearFiles,
   onViewCitation,
+  onExportCitations,
 }: Props): JSX.Element {
   const hasCitations = citations.length > 0
 
@@ -212,23 +214,52 @@ export default function ContextPanel({
         {/* ── Retrieved chunks section ── */}
         {(hasCitations || isQuerying) && (
           <div className="px-4 pt-4 pb-2">
-            <div className="flex items-center gap-2 mb-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                Retrieved Context
-              </p>
-              {isQuerying && (
-                <div
-                  className="h-3 w-3 rounded-full animate-spin shrink-0"
-                  style={{ border: '1.5px solid rgba(201,168,76,0.2)', borderTopColor: '#c9a84c' }}
-                />
-              )}
-              {hasCitations && !isQuerying && (
-                <span
-                  className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
-                  style={{ background: 'rgba(201,168,76,0.08)', color: 'rgba(201,168,76,0.6)' }}
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                  Retrieved Context
+                </p>
+                {isQuerying && (
+                  <div
+                    className="h-3 w-3 rounded-full animate-spin shrink-0"
+                    style={{ border: '1.5px solid rgba(201,168,76,0.2)', borderTopColor: '#c9a84c' }}
+                  />
+                )}
+                {hasCitations && !isQuerying && (
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
+                    style={{ background: 'rgba(201,168,76,0.08)', color: 'rgba(201,168,76,0.6)' }}
+                  >
+                    {citations.length}
+                  </span>
+                )}
+              </div>
+              {hasCitations && !isQuerying && onExportCitations && (
+                <button
+                  onClick={onExportCitations}
+                  title="Export citations as CSV"
+                  className="flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-md transition-all"
+                  style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: 'rgba(255,255,255,0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    const el = e.currentTarget as HTMLButtonElement
+                    el.style.color = 'rgba(201,168,76,0.8)'
+                    el.style.borderColor = 'rgba(201,168,76,0.25)'
+                  }}
+                  onMouseLeave={(e) => {
+                    const el = e.currentTarget as HTMLButtonElement
+                    el.style.color = 'rgba(255,255,255,0.3)'
+                    el.style.borderColor = 'rgba(255,255,255,0.08)'
+                  }}
                 >
-                  {citations.length}
-                </span>
+                  <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14ZM7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.97a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.779a.749.749 0 1 1 1.06-1.06l1.97 1.97Z" />
+                  </svg>
+                  Export CSV
+                </button>
               )}
             </div>
 

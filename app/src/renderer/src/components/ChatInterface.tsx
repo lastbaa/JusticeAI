@@ -18,6 +18,7 @@ interface Props {
   onRemoveFile: (id: string) => void
   onLoadPaths: (paths: string[]) => void
   onViewCitation: (citation: Citation) => void
+  onExportChat?: () => void
 }
 
 // ── Thinking animation ────────────────────────────────────────────────────────
@@ -170,6 +171,7 @@ export default function ChatInterface({
   onAddFolder,
   onLoadPaths,
   onViewCitation,
+  onExportChat,
 }: Props): JSX.Element {
   const [input, setInput] = useState('')
   const [isDragging, setIsDragging] = useState(false)
@@ -590,18 +592,44 @@ export default function ChatInterface({
           </span>
         </div>
 
-        {/* Minimal doc count pill — documents managed in Context panel */}
-        {files.length > 0 && (
-          <div
-            className="no-drag flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] shrink-0"
-            style={{ border: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.28)', background: 'rgba(255,255,255,0.02)' }}
-          >
-            <svg width="9" height="9" viewBox="0 0 16 16" fill="rgba(201,168,76,0.5)">
-              <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25z" />
-            </svg>
-            {files.length} {files.length === 1 ? 'doc' : 'docs'}
-          </div>
-        )}
+        <div className="no-drag flex items-center gap-2 shrink-0">
+          {/* Doc count pill */}
+          {files.length > 0 && (
+            <div
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px]"
+              style={{ border: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.28)', background: 'rgba(255,255,255,0.02)' }}
+            >
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="rgba(201,168,76,0.5)">
+                <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25z" />
+              </svg>
+              {files.length} {files.length === 1 ? 'doc' : 'docs'}
+            </div>
+          )}
+          {/* Export button */}
+          {onExportChat && !isEmpty && (
+            <button
+              onClick={onExportChat}
+              title="Export conversation"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-all"
+              style={{ border: '1px solid rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.28)', background: 'rgba(255,255,255,0.02)' }}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLButtonElement
+                el.style.color = 'rgba(201,168,76,0.75)'
+                el.style.borderColor = 'rgba(201,168,76,0.22)'
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLButtonElement
+                el.style.color = 'rgba(255,255,255,0.28)'
+                el.style.borderColor = 'rgba(255,255,255,0.06)'
+              }}
+            >
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14ZM7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.97a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.779a.749.749 0 1 1 1.06-1.06l1.97 1.97Z" />
+              </svg>
+              Export
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Messages */}

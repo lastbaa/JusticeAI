@@ -143,9 +143,9 @@ export default function Hero() {
           style={{ color: 'rgba(255,255,255,0.45)' }}
         >
           Attorney-client privilege demands that your case files never touch a cloud server.
-          Justice AI keeps all your documents local — parsing and semantic search run on your
-          machine, while answers are generated via HuggingFace API, so your clients stay
-          protected and your research stays fast.
+          Justice AI keeps everything on-device — document parsing, semantic search, and AI
+          answer generation all run locally on your machine. No cloud. No API keys. No
+          data ever leaves your computer.
         </p>
 
         {/* Disclaimer */}

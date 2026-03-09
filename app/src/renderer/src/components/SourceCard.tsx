@@ -14,8 +14,17 @@ function relevanceLabel(score: number): { label: string; color: string } {
 
 export default function SourceCard({ citation, onView }: Props): JSX.Element {
   const [hovered, setHovered] = useState(false)
+  const [copied, setCopied] = useState(false)
   const ext = citation.fileName.split('.').pop()?.toUpperCase() ?? 'DOC'
   const rel = relevanceLabel(citation.score)
+
+  function handleCopyExcerpt(e: React.MouseEvent): void {
+    e.stopPropagation()
+    navigator.clipboard.writeText(citation.excerpt).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    }).catch(() => {})
+  }
 
   return (
     <div
@@ -76,13 +85,39 @@ export default function SourceCard({ citation, onView }: Props): JSX.Element {
             ? citation.excerpt.slice(0, 140) + '…'
             : citation.excerpt}"
         </p>
-        {hovered && onView && (
-          <p
-            className="mt-1.5 text-[10px] font-semibold"
-            style={{ color: 'rgba(201,168,76,0.6)' }}
-          >
-            Click to view in document →
-          </p>
+        {hovered && (
+          <div className="mt-1.5 flex items-center gap-3">
+            {onView && (
+              <p className="text-[10px] font-semibold" style={{ color: 'rgba(201,168,76,0.6)' }}>
+                Click to view →
+              </p>
+            )}
+            <button
+              onClick={handleCopyExcerpt}
+              className="flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded transition-all"
+              style={{
+                background: copied ? 'rgba(63,185,80,0.1)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${copied ? 'rgba(63,185,80,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                color: copied ? '#3fb950' : 'rgba(255,255,255,0.35)',
+              }}
+            >
+              {copied ? (
+                <>
+                  <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 5l2 2 4-4" />
+                  </svg>
+                  Copied
+                </>
+              ) : (
+                <>
+                  <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25ZM5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
+                  </svg>
+                  Copy
+                </>
+              )}
+            </button>
+          </div>
         )}
       </div>
     </div>
