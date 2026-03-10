@@ -19,7 +19,9 @@ const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instruct-
 /// pays full attention to it (system-prompt content is under-weighted by the model).
 const RULES_PROMPT: &str = "You are Justice AI, a legal document research assistant. \
 Answer questions using ONLY the document excerpts provided in the user message. \
-Always cite the exact filename and page number for every claim. \
+For every claim, cite the source inline using this exact format: [filename, p. N]. \
+Example: \"The agreement expires December 31, 2025 [employment_contract.pdf, p. 4].\" \
+Do not group all citations at the end — cite inline after each individual claim. \
 When the answer contains numbers, dollar amounts, dates, or specific figures, \
 extract and state them EXACTLY as written in the source — do not paraphrase or round. \
 Include a direct quoted excerpt from the source. \
@@ -240,11 +242,17 @@ pub fn save_file(file_path: String, content: String) -> Result<(), String> {
 // The model is loaded once into EMBED_MODEL on the first call and reused for
 // every subsequent chunk or query. Re-initializing per call was silent-failing.
 
-pub async fn embed_text(text: &str, model_dir: &Path) -> Result<Vec<f32>, String> {
+pub async fn embed_text(text: &str, is_query: bool, model_dir: &Path) -> Result<Vec<f32>, String> {
     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
-    let cache_dir = model_dir.join("fastembed");
-    let text_owned = text.to_string();
+    let cache_dir = model_dir.join("fastembed-bge");
+    // BGE uses asymmetric retrieval: queries get a prefix that shifts the embedding into the
+    // retrieval space. Document chunks are embedded without the prefix.
+    let text_owned = if is_query {
+        format!("Represent this sentence for searching relevant passages: {}", text)
+    } else {
+        text.to_string()
+    };
 
     tokio::task::spawn_blocking(move || {
         // Get or create the Arc<Mutex<Option<Model>>> wrapper (infallible).
@@ -259,7 +267,7 @@ pub async fn embed_text(text: &str, model_dir: &Path) -> Result<Vec<f32>, String
             std::fs::create_dir_all(&cache_dir)
                 .map_err(|e| format!("Cannot create fastembed cache dir: {e}"))?;
             let model = TextEmbedding::try_new(
-                InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+                InitOptions::new(EmbeddingModel::BGESmallENV15)
                     .with_cache_dir(cache_dir)
                     .with_show_download_progress(false),
             )
@@ -280,6 +288,33 @@ pub async fn embed_text(text: &str, model_dir: &Path) -> Result<Vec<f32>, String
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Re-embed all stored chunks using BGE-small-en-v1.5.
+/// Called once at startup when stale AllMiniL vectors are detected.
+/// Text is stored in chunk metadata, so no file re-parsing is needed.
+pub async fn migrate_embeddings(state: &mut crate::state::RagState) {
+    let total = state.embedded_chunks.len();
+    if total == 0 {
+        state.embed_model = "bge-small-en-v1.5".to_string();
+        state.save_embed_model().await;
+        return;
+    }
+    log::info!("Migrating {} chunk embeddings from AllMiniL → BGE-small-en-v1.5…", total);
+    let model_dir = state.model_dir.clone();
+    for (i, entry) in state.embedded_chunks.iter_mut().enumerate() {
+        match embed_text(&entry.meta.text, false, &model_dir).await {
+            Ok(vec) => entry.vector = vec,
+            Err(e) => log::error!("Migration embed error for chunk {}: {}", i, e),
+        }
+        if (i + 1) % 20 == 0 || i + 1 == total {
+            log::info!("Embedding migration: {}/{}", i + 1, total);
+        }
+    }
+    state.embed_model = "bge-small-en-v1.5".to_string();
+    state.save_embed_model().await;
+    state.save_chunks().await;
+    log::info!("Embedding migration complete.");
 }
 
 // ── Local LLM via llama-cpp-2 ─────────────────────────────────────────────────
@@ -458,12 +493,12 @@ Answer the current question using ONLY these excerpts.\n\n\
             LlamaSampler::penalties(64, 1.1, 0.0, 0.0),
             LlamaSampler::top_k(40),
             LlamaSampler::top_p(0.9, 1),
-            LlamaSampler::temp(0.6),
+            LlamaSampler::temp(0.3),
             LlamaSampler::dist(42),
         ]);
         let mut response = String::new();
         let mut pos = n_tokens;
-        let max_new_tokens = 800usize;
+        let max_new_tokens = 1024usize;
 
         for _ in 0..max_new_tokens {
             // Hard stop if we've consumed the entire context window — decoding one
@@ -663,7 +698,7 @@ async fn process_file(
             }
         }
 
-        match embed_text(&chunk.text, model_dir).await {
+        match embed_text(&chunk.text, false, model_dir).await {
             Ok(vector) => {
                 let item_id = Uuid::new_v4().to_string();
                 let entry = EmbeddedChunkEntry {
@@ -893,20 +928,35 @@ fn split_sentences(text: &str) -> Vec<&str> {
 /// "salary" matches chunks containing "compensation", "wages", etc.
 fn expand_keywords(keywords: &std::collections::HashSet<String>) -> std::collections::HashSet<String> {
     const SYNONYMS: &[(&str, &[&str])] = &[
-        ("salary",       &["compensation", "remuneration", "pay", "wage", "wages", "earnings", "income"]),
-        ("compensation", &["salary", "pay", "remuneration", "wage", "wages", "earnings"]),
-        ("wage",         &["salary", "pay", "compensation", "earnings", "income"]),
-        ("pay",          &["salary", "compensation", "wage", "payment", "remuneration"]),
-        ("offer",        &["proposal", "agreement", "letter", "terms", "offeror"]),
-        ("job",          &["position", "role", "employment", "work", "post"]),
-        ("hire",         &["employ", "employment", "onboard", "recruit", "position"]),
-        ("employee",     &["candidate", "staff", "worker", "personnel", "applicant"]),
-        ("employer",     &["company", "organization", "firm", "corporation", "employer"]),
-        ("contract",     &["agreement", "terms", "letter", "document"]),
-        ("benefit",      &["benefits", "perk", "perks", "bonus", "allowance", "bonuses"]),
-        ("start",        &["commence", "begin", "effective", "commencement", "joining"]),
-        ("date",         &["effective", "commencement", "period", "term"]),
-        ("annual",       &["yearly", "per year", "per annum"]),
+        ("salary",          &["compensation", "remuneration", "pay", "wage", "wages", "earnings", "income"]),
+        ("compensation",    &["salary", "pay", "remuneration", "wage", "wages", "earnings"]),
+        ("wage",            &["salary", "pay", "compensation", "earnings", "income"]),
+        ("pay",             &["salary", "compensation", "wage", "payment", "remuneration"]),
+        ("offer",           &["proposal", "agreement", "letter", "terms", "offeror"]),
+        ("job",             &["position", "role", "employment", "work", "post"]),
+        ("hire",            &["employ", "employment", "onboard", "recruit", "position"]),
+        ("employee",        &["candidate", "staff", "worker", "personnel", "applicant"]),
+        ("employer",        &["company", "organization", "firm", "corporation", "employer"]),
+        ("contract",        &["agreement", "terms", "letter", "document"]),
+        ("benefit",         &["benefits", "perk", "perks", "bonus", "allowance", "bonuses"]),
+        ("start",           &["commence", "begin", "effective", "commencement", "joining"]),
+        ("date",            &["effective", "commencement", "period", "term"]),
+        ("annual",          &["yearly", "per year", "per annum"]),
+        ("breach",          &["violation", "default", "failure", "infringement", "non-performance"]),
+        ("damages",         &["liability", "remedy", "award", "loss", "penalty", "compensation"]),
+        ("covenant",        &["agreement", "clause", "promise", "obligation", "undertaking"]),
+        ("warranty",        &["representation", "guarantee", "assurance", "certification"]),
+        ("jurisdiction",    &["venue", "court", "forum", "governing law", "choice of law"]),
+        ("indemnify",       &["indemnification", "hold harmless", "defend", "reimburse"]),
+        ("confidential",    &["confidentiality", "proprietary", "trade secret", "nda", "privileged"]),
+        ("terminate",       &["termination", "cancel", "rescind", "dissolve", "expire", "end"]),
+        ("consideration",   &["payment", "fee", "exchange", "value", "price"]),
+        ("liability",       &["obligation", "responsibility", "exposure", "risk"]),
+        ("amendment",       &["modification", "addendum", "revision", "supplement"]),
+        ("party",           &["parties", "signatory", "counterpart", "entity"]),
+        ("arbitration",     &["dispute resolution", "mediation", "adr", "tribunal", "hearing"]),
+        ("force majeure",   &["act of god", "unforeseeable", "impossibility", "beyond control"]),
+        ("assignment",      &["transfer", "delegate", "convey", "assign", "succession"]),
     ];
 
     let mut expanded = keywords.clone();
@@ -1000,11 +1050,11 @@ pub async fn query(
     };
 
     window.emit("query-status", serde_json::json!({"phase": "embedding"})).ok();
-    let query_vec = embed_text(&question, &model_dir).await?;
+    let query_vec = embed_text(&question, true, &model_dir).await?;
 
     // Build a set of meaningful query keywords for hybrid re-ranking.
-    // Hybrid score = 0.75 * cosine_sim + 0.25 * keyword_overlap.
-    // This compensates for AllMiniLML6V2 giving low cosine scores on specialised legal text.
+    // Hybrid score = 0.80 * cosine_sim + 0.20 * keyword_overlap.
+    // BGE-small-en-v1.5 is a retrieval model so cosine scores are reliable; keyword is a light fallback.
     let stop_words: std::collections::HashSet<&str> = [
         "a","an","the","is","are","was","were","be","been","being","have","has","had",
         "do","does","did","will","would","could","should","may","might","shall","can",
@@ -1058,7 +1108,7 @@ pub async fn query(
                     kw_hits as f32 / query_keywords.len() as f32
                 };
 
-                let hybrid = 0.60 * cosine + 0.40 * kw_score;
+                let hybrid = 0.80 * cosine + 0.20 * kw_score;
                 (hybrid, entry.meta.clone(), entry.vector.clone())
             })
             .collect();
@@ -1138,11 +1188,10 @@ pub async fn query(
     }
 
     // Pre-truncate context chars before prompt assembly.
-    // Saul-7B has a 4096-token context. Safe prompt budget = 4096 - 512 (generation margin) = 3584.
-    // Accounting for RULES_PROMPT (~200 tokens) + question/overhead (~50 tokens) leaves ~3334 tokens
-    // for context. Legal text tokenizes at ~2.5 chars/token → 3334 × 2.5 ≈ 8335 chars max.
-    // Using 5500 gives comfortable headroom and avoids the head+tail truncation fallback.
-    const MAX_CONTEXT_CHARS: usize = 5_500;
+    // Saul-7B has a 4096-token context. Budget: 4096 − 1024 (generation) − 250 (overhead) = 2822
+    // tokens for context. Legal text tokenizes at ~2.5 chars/token → 2822 × 2.5 ≈ 7055 chars max.
+    // Using 7000 fits cleanly and avoids the head+tail truncation fallback.
+    const MAX_CONTEXT_CHARS: usize = 7_000;
     let context = if raw_context.len() > MAX_CONTEXT_CHARS {
         let safe_end = raw_context.floor_char_boundary(MAX_CONTEXT_CHARS);
         log::warn!(

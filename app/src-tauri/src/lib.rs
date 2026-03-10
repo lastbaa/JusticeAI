@@ -130,6 +130,19 @@ pub fn run() {
             let mut rag = state::RagState::new(data_dir.clone());
             tauri::async_runtime::block_on(async {
                 rag.load_from_disk().await;
+                // Migration: if stored chunks were embedded with the old AllMiniL model,
+                // re-embed them now using BGE-small-en-v1.5 before the window opens.
+                // Text is stored in chunk metadata — no file re-parsing needed.
+                if rag.embed_model != "bge-small-en-v1.5" {
+                    if !rag.embedded_chunks.is_empty() {
+                        log::info!("Stale embeddings detected — migrating to BGE-small-en-v1.5 (this runs once)…");
+                        commands::rag::migrate_embeddings(&mut rag).await;
+                    } else {
+                        // Fresh install: stamp the model name so future loads skip migration.
+                        rag.embed_model = "bge-small-en-v1.5".to_string();
+                        rag.save_embed_model().await;
+                    }
+                }
             });
 
             app.manage(Arc::new(Mutex::new(rag)));

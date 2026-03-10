@@ -149,6 +149,8 @@ pub struct RagState {
     pub model_dir: PathBuf,
     pub settings: AppSettings,
     pub sessions: Vec<ChatSession>,
+    /// Which embedding model produced the stored vectors. Empty string = pre-BGE (stale).
+    pub embed_model: String,
     /// Cached llama model — loaded once on first query, reused thereafter.
     pub llama_model: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>>,
 }
@@ -165,6 +167,7 @@ impl RagState {
             data_dir,
             settings: AppSettings::default(),
             sessions: Vec::new(),
+            embed_model: String::new(),
             llama_model: Arc::new(Mutex::new(None)),
         }
     }
@@ -181,6 +184,10 @@ impl RagState {
         self.data_dir.join("sessions.json")
     }
 
+    fn embed_model_path(&self) -> PathBuf {
+        self.data_dir.join("embed_model.json")
+    }
+
     pub async fn load_from_disk(&mut self) {
         // Load settings
         if let Ok(data) = tokio::fs::read(&self.settings_path()).await {
@@ -193,6 +200,13 @@ impl RagState {
         if let Ok(data) = tokio::fs::read(&self.sessions_path()).await {
             if let Ok(s) = serde_json::from_slice::<Vec<ChatSession>>(&data) {
                 self.sessions = s;
+            }
+        }
+
+        // Load embed model version (empty = pre-BGE, triggers migration)
+        if let Ok(data) = tokio::fs::read(&self.embed_model_path()).await {
+            if let Ok(s) = serde_json::from_slice::<String>(&data) {
+                self.embed_model = s;
             }
         }
 
@@ -244,6 +258,12 @@ impl RagState {
     pub async fn save_chunks(&self) {
         if let Ok(data) = serde_json::to_vec(&self.embedded_chunks) {
             tokio::fs::write(&self.chunks_path(), data).await.ok();
+        }
+    }
+
+    pub async fn save_embed_model(&self) {
+        if let Ok(data) = serde_json::to_vec(&self.embed_model) {
+            tokio::fs::write(&self.embed_model_path(), data).await.ok();
         }
     }
 
