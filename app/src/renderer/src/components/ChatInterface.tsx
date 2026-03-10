@@ -108,7 +108,7 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
             }}
           >
             {displayPhrase}
-            <span style={{ color: 'rgba(201,168,76,0.55)', fontWeight: 600, letterSpacing: '0.05em' }}>
+            <span style={{ color: 'rgba(201,168,76,0.55)', fontWeight: 600, letterSpacing: '0.05em', marginLeft: '4px' }}>
               {dots}
             </span>
           </span>

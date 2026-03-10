@@ -16,6 +16,7 @@ app/out/
 # Electron / Tauri
 app/dist/
 app/src-tauri/target/
+app/src-tauri/target 2/
 app/src-tauri/gen/
 
 # Vercel
