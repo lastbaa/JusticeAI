@@ -936,7 +936,27 @@ fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChu
 fn is_section_header(line: &str) -> bool {
     let t = line.trim();
     if t.is_empty() || t.len() >= 80 { return false; }
+    // Numbered clause — checked BEFORE the ends_with('.') guard because bare
+    // markers like "2." or "3.1" end with a structural dot, not a sentence terminator.
+    // Prevents content sentences like "1. The Employee shall receive..." from
+    // being orphaned (their after-text is > 40 chars so they fall through).
+    if t.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        if let Some(dot_pos) = t.find('.') {
+            if t[..dot_pos].chars().all(|c| c.is_ascii_digit()) {
+                let after = t[dot_pos + 1..].trim();
+                // Reject if the label content itself ends with sentence punctuation
+                // (e.g. "1. The salary is $50,000." — after = "The salary is $50,000.")
+                if after.len() <= 40
+                    && !after.ends_with('.')
+                    && !after.ends_with('!')
+                    && !after.ends_with('?') {
+                    return true;
+                }
+            }
+        }
+    }
     // Lines ending with sentence punctuation are content, not headers
+    // (this guard intentionally comes AFTER the numbered-clause check above)
     if t.ends_with('.') || t.ends_with('!') || t.ends_with('?') { return false; }
     let u = t.to_uppercase();
     if u.starts_with("SECTION") || u.starts_with("ARTICLE") || u.starts_with("WHEREAS")
@@ -952,25 +972,16 @@ fn is_section_header(line: &str) -> bool {
         && t.split_whitespace().count() <= 8 {
         return true;
     }
-    // Numbered clause: "1.", "3.1 Definitions" — only treat as header when the
-    // label content after the number-dot prefix is short (≤ 40 chars).
-    // Prevents content sentences like "1. The Employee shall receive..." from
-    // being orphaned.
-    if t.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-        if let Some(dot_pos) = t.find('.') {
-            if t[..dot_pos].chars().all(|c| c.is_ascii_digit()) {
-                let after = t[dot_pos + 1..].trim();
+    // Lettered sub-clause: "(a)", "(b)", "(aa)", "(abc)" etc. — any sequence of
+    // letters between parens, only if the label content after is short (≤ 40 chars).
+    if t.starts_with('(') {
+        if let Some(close) = t.find(')') {
+            let inner = &t[1..close];
+            if !inner.is_empty() && inner.chars().all(|c| c.is_ascii_alphabetic()) {
+                let after = t[close + 1..].trim();
                 if after.len() <= 40 { return true; }
             }
         }
-    }
-    // Lettered sub-clause: "(a)", "(b)", "(aa)" etc. — only if the label
-    // content after the letter-paren is short (≤ 40 chars).
-    if t.starts_with('(')
-        && t.chars().nth(1).map_or(false, |c| c.is_ascii_alphabetic())
-        && t.chars().nth(2).map_or(false, |c| c == ')') {
-        let after = t.get(3..).unwrap_or("").trim();
-        if after.len() <= 40 { return true; }
     }
     false
 }
@@ -1028,9 +1039,15 @@ fn split_sentences(text: &str) -> Vec<SentenceFrag<'_>> {
                     frags.push(SentenceFrag { text: s, kind });
                 }
                 let mut j = i + 1;
+                let mut newline_count = 0usize;
                 while j < len && bytes[j].is_ascii_whitespace() {
+                    if bytes[j] == b'\n' { newline_count += 1; }
                     j += 1;
                 }
+                // A blank line (2+ newlines) after a sentence-ending punctuation mark
+                // signals a paragraph boundary, even though the whitespace was consumed
+                // here rather than by the \n branch. Flag the next fragment accordingly.
+                if newline_count >= 2 { next_para_break = true; }
                 start = j;
                 i = j;
             } else {
@@ -1498,4 +1515,251 @@ pub async fn delete_session(
     s.sessions.retain(|sess| sess.id != session_id);
     s.save_sessions().await;
     Ok(true)
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppSettings;
+
+    fn default_settings() -> AppSettings {
+        AppSettings {
+            chunk_size: 500,
+            chunk_overlap: 50,
+            top_k: 6,
+        }
+    }
+
+    // ── is_section_header ──────────────────────────────────────────────────
+
+    #[test]
+    fn header_keyword_prefixes() {
+        assert!(is_section_header("SECTION 3 — COMPENSATION"));
+        assert!(is_section_header("Article IV: Termination"));
+        assert!(is_section_header("WHEREAS the parties agree"));
+        assert!(is_section_header("NOW THEREFORE the parties"));
+        assert!(is_section_header("Schedule A"));
+        assert!(is_section_header("Exhibit B — Fee Schedule"));
+        assert!(is_section_header("ANNEX 1"));
+    }
+
+    #[test]
+    fn header_all_caps() {
+        assert!(is_section_header("DEFINITIONS"));
+        assert!(is_section_header("GOVERNING LAW"));
+        assert!(is_section_header("LIMITATION OF LIABILITY"));
+        assert!(is_section_header("INDEMNIFICATION"));
+        assert!(is_section_header("RECITALS"));
+        assert!(is_section_header("IN WITNESS WHEREOF"));
+    }
+
+    #[test]
+    fn header_numbered_short_label() {
+        assert!(is_section_header("1. Definitions"));
+        assert!(is_section_header("3.1 Grant of License"));
+        assert!(is_section_header("12. Governing Law"));
+        // Bare number-dot with nothing after — still a header
+        assert!(is_section_header("2."));
+    }
+
+    #[test]
+    fn header_numbered_long_content_is_not_header() {
+        // Fix 1: content sentences starting with a number must NOT be orphaned
+        assert!(!is_section_header("1. The Employee shall receive five weeks of paid vacation annually"));
+        assert!(!is_section_header("3. The Company agrees to provide health insurance benefits for the employee"));
+        assert!(!is_section_header("2. All notices under this Agreement shall be delivered in writing"));
+    }
+
+    #[test]
+    fn header_lettered_subclause_short_label() {
+        assert!(is_section_header("(a) Base Salary"));
+        assert!(is_section_header("(b) Bonus"));
+        assert!(is_section_header("(aa) General Provisions"));
+        // Bare letter-paren with nothing after
+        assert!(is_section_header("(c)"));
+    }
+
+    #[test]
+    fn header_lettered_subclause_long_content_is_not_header() {
+        // Fix 1 (lettered variant): long clause content must NOT be orphaned
+        assert!(!is_section_header("(a) The licensor hereby grants a non-exclusive, non-transferable license"));
+        assert!(!is_section_header("(b) The Employee shall not disclose any confidential information"));
+    }
+
+    #[test]
+    fn header_rejects_sentence_punctuation() {
+        assert!(!is_section_header("This is a sentence."));
+        assert!(!is_section_header("1. The salary is $50,000."));
+        assert!(!is_section_header("DEFINITIONS."));
+    }
+
+    #[test]
+    fn header_rejects_long_lines() {
+        // ≥ 80 chars always rejected regardless of content
+        let long = "SECTION 1 — THIS IS A VERY LONG HEADER THAT EXCEEDS EIGHTY CHARACTERS IN TOTAL LENGTH";
+        assert!(long.len() >= 80);
+        assert!(!is_section_header(long));
+    }
+
+    // ── split_at_char_boundaries ───────────────────────────────────────────
+
+    #[test]
+    fn char_boundary_split_ascii() {
+        let parts = split_at_char_boundaries("hello world foo bar", 10);
+        // Each part ≤ 10 bytes, no part empty
+        for p in &parts { assert!(p.len() <= 10); assert!(!p.is_empty()); }
+        // Reassembled text contains all words
+        let joined = parts.join(" ");
+        assert!(joined.contains("hello"));
+        assert!(joined.contains("bar"));
+    }
+
+    #[test]
+    fn char_boundary_split_multibyte() {
+        // Em-dash (3 bytes), section sign § (2 bytes), smart quote " (3 bytes)
+        let text = "\u{00a7} 4.1 \u{2014} Compensation \u{201c}as defined\u{201d}";
+        let parts = split_at_char_boundaries(text, 8);
+        // Every slice must be valid UTF-8 (from_utf8 would panic if not)
+        for p in &parts {
+            assert!(std::str::from_utf8(p.as_bytes()).is_ok());
+            assert!(!p.is_empty());
+        }
+    }
+
+    #[test]
+    fn char_boundary_split_empty_input() {
+        assert!(split_at_char_boundaries("", 100).is_empty());
+    }
+
+    // ── split_sentences ────────────────────────────────────────────────────
+
+    #[test]
+    fn split_tags_blank_line_as_para_break() {
+        let text = "First paragraph.\n\nSecond paragraph.";
+        let frags = split_sentences(text);
+        // "First paragraph." → Normal (no blank line before it)
+        // "Second paragraph." → ParagraphBreak (blank line preceded it)
+        let kinds: Vec<_> = frags.iter().map(|f| &f.kind).collect();
+        assert_eq!(kinds.len(), 2);
+        assert!(matches!(kinds[0], FragKind::Normal));
+        assert!(matches!(kinds[1], FragKind::ParagraphBreak));
+    }
+
+    #[test]
+    fn split_tags_section_header_as_para_break() {
+        let text = "Prior content.\nSECTION 4 — COMPENSATION\nNext content.";
+        let frags = split_sentences(text);
+        let header = frags.iter().find(|f| f.text.contains("COMPENSATION")).unwrap();
+        assert!(matches!(header.kind, FragKind::ParagraphBreak));
+    }
+
+    #[test]
+    fn split_normal_sentence_after_single_newline_is_normal() {
+        let text = "Line one\nLine two";
+        let frags = split_sentences(text);
+        // Single newline, no blank line — second line is Normal unless it's a header
+        let second = frags.iter().find(|f| f.text.contains("Line two")).unwrap();
+        assert!(matches!(second.kind, FragKind::Normal));
+    }
+
+    // ── chunk_document ─────────────────────────────────────────────────────
+
+    fn make_page(text: &str) -> crate::state::DocumentPage {
+        crate::state::DocumentPage { page_number: 1, text: text.to_string() }
+    }
+
+    #[test]
+    fn chunk_header_prepended_to_following_content() {
+        // Fix 2+3: a known section header should be prepended to the chunk that follows it
+        let text = "SECTION 1 — COMPENSATION\n\nThe base salary shall be one hundred thousand dollars per year as agreed.";
+        let pages = vec![make_page(text)];
+        let chunks = chunk_document(&pages, &default_settings());
+        // There should be exactly one chunk (the header + content, no orphan)
+        assert_eq!(chunks.len(), 1, "Expected 1 chunk, got {}: {:?}", chunks.len(), chunks.iter().map(|c| &c.text).collect::<Vec<_>>());
+        assert!(chunks[0].text.contains("SECTION 1"), "Header missing from chunk: {}", chunks[0].text);
+        assert!(chunks[0].text.contains("base salary"), "Content missing from chunk: {}", chunks[0].text);
+    }
+
+    #[test]
+    fn chunk_numbered_content_not_orphaned() {
+        // Fix 1: "1. The Employee shall receive..." must NOT be treated as orphan header
+        let text = "Preamble text here.\n\n1. The Employee shall receive five weeks of paid vacation per year.\n\n2. The Employee is entitled to full medical coverage.";
+        let pages = vec![make_page(text)];
+        let chunks = chunk_document(&pages, &default_settings());
+        // Each numbered clause should be its own chunk (paragraph break), NOT prepended to the next
+        let has_clause_1 = chunks.iter().any(|c| c.text.contains("five weeks"));
+        let has_clause_2 = chunks.iter().any(|c| c.text.contains("medical coverage"));
+        assert!(has_clause_1, "Clause 1 content missing");
+        assert!(has_clause_2, "Clause 2 content missing");
+        // Clause 1 text should NOT be prepended to clause 2's chunk
+        for c in &chunks {
+            if c.text.contains("medical coverage") {
+                assert!(!c.text.contains("five weeks"), "Clause 1 was incorrectly prepended to clause 2");
+            }
+        }
+    }
+
+    #[test]
+    fn chunk_consecutive_headers_accumulated() {
+        // Fix 3: ARTICLE IV → SECTION 4.1 should both appear in the following chunk
+        let text = "ARTICLE IV\nSECTION 4.1\n\nThe termination provisions are as follows and shall apply.";
+        let pages = vec![make_page(text)];
+        let chunks = chunk_document(&pages, &default_settings());
+        let content_chunk = chunks.iter().find(|c| c.text.contains("termination provisions")).unwrap();
+        assert!(content_chunk.text.contains("ARTICLE IV"), "ARTICLE IV missing: {}", content_chunk.text);
+        assert!(content_chunk.text.contains("SECTION 4.1"), "SECTION 4.1 missing: {}", content_chunk.text);
+    }
+
+    #[test]
+    fn chunk_no_overlap_across_paragraph_breaks() {
+        // Paragraph breaks should flush without carrying overlap into the next chunk.
+        // Sentences from paragraph A must not appear in paragraph B's chunk.
+        let text = "Alpha sentence one. Alpha sentence two.\n\nBeta sentence one. Beta sentence two.";
+        let pages = vec![make_page(text)];
+        let chunks = chunk_document(&pages, &default_settings());
+        for c in &chunks {
+            if c.text.contains("Beta") {
+                assert!(!c.text.contains("Alpha"), "Alpha leaked into Beta chunk via overlap: {}", c.text);
+            }
+        }
+    }
+
+    #[test]
+    fn chunk_token_count_uses_div3() {
+        // Fix (token count): token_count should be len/3, not len/4
+        let text = "The quick brown fox jumps over the lazy dog and keeps running away.";
+        let pages = vec![make_page(text)];
+        let chunks = chunk_document(&pages, &default_settings());
+        assert!(!chunks.is_empty());
+        let expected = (chunks[0].text.len() / 3).max(1);
+        assert_eq!(chunks[0].token_count, expected, "token_count should use /3");
+    }
+
+    // ── format_history ─────────────────────────────────────────────────────
+
+    #[test]
+    fn format_history_capped_at_4_turns() {
+        // Fix 8: only the last 4 turns should appear in the formatted history
+        let history: Vec<(String, String)> = (0..8)
+            .map(|i| (format!("user{i}"), format!("assistant{i}")))
+            .collect();
+        let result = format_history(&history);
+        // Turns 0-3 should be absent; turns 4-7 should be present
+        assert!(!result.contains("user0"), "Turn 0 should be excluded");
+        assert!(!result.contains("user3"), "Turn 3 should be excluded");
+        assert!(result.contains("user4"), "Turn 4 should be included");
+        assert!(result.contains("user7"), "Turn 7 should be included");
+    }
+
+    #[test]
+    fn format_history_short_history_unchanged() {
+        let history = vec![
+            ("q1".to_string(), "a1".to_string()),
+            ("q2".to_string(), "a2".to_string()),
+        ];
+        let result = format_history(&history);
+        assert!(result.contains("q1"));
+        assert!(result.contains("q2"));
+    }
 }
