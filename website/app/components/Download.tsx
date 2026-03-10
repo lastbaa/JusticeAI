@@ -119,9 +119,9 @@ export default function Download() {
     : platforms.find((p) => p.key === detected)!.installSteps
 
   return (
-    <section id="download" className="py-32 px-6" style={{ background: '#080808' }}>
+    <section className="py-32 px-6" style={{ background: '#080808' }}>
       <div className="max-w-6xl mx-auto">
-        <div className="border-t mb-32" style={{ borderColor: 'rgba(255,255,255,0.05)' }} />
+        <div className="border-t mb-16" style={{ borderColor: 'rgba(255,255,255,0.05)' }} />
       </div>
 
       <div className="max-w-3xl mx-auto">
@@ -239,7 +239,7 @@ export default function Download() {
                         el.style.boxShadow = 'none'
                         if (!isActive && !isMac) {
                           el.style.background = 'rgba(255,255,255,0.025)'
-                          el.style.borderColor = 'rgba(255,255,255,0.07)'
+                          el.style.borderColor = 'rgba(255,255,255,0.06)'
                         }
                       }}
                     >

@@ -49,11 +49,11 @@ export default function Hero() {
 
       {/* Bottom fade */}
       <div
-        className="absolute bottom-0 left-0 right-0 h-56"
+        className="absolute bottom-0 left-0 right-0 h-32"
         style={{ background: 'linear-gradient(to top, #080808, transparent)' }}
       />
 
-      <div className="relative z-20 max-w-4xl mx-auto flex flex-col items-center">
+      <div className="relative z-20 max-w-4xl mx-auto flex flex-col items-center pb-12">
 
         {/* Floating scales icon with multi-ring treatment */}
         <div className="hero-icon mb-10 relative inline-flex items-center justify-center">

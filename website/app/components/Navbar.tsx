@@ -19,32 +19,32 @@ export default function Navbar() {
           <span className="text-white font-semibold text-sm tracking-widest uppercase">Justice AI</span>
         </a>
         <div className="flex items-center gap-4">
-        <a
-          href="/changelog"
-          className="text-sm font-medium transition-colors"
-          style={{ color: 'rgba(255,255,255,0.45)' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'rgba(255,255,255,0.8)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'rgba(255,255,255,0.45)' }}
-        >
-          Changelog
-        </a>
-        <a
-          href="#download"
-          className="text-sm font-medium tracking-wider uppercase px-5 py-2 rounded-md transition-all duration-200"
-          style={{ border: '1px solid rgba(201,168,76,0.45)', color: '#c9a84c', background: 'rgba(201,168,76,0.06)' }}
-          onMouseEnter={e => {
-            (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(201,168,76,0.12)'
-            ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(201,168,76,0.7)'
-            ;(e.currentTarget as HTMLAnchorElement).style.color = '#e8c97e'
-          }}
-          onMouseLeave={e => {
-            (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(201,168,76,0.06)'
-            ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(201,168,76,0.45)'
-            ;(e.currentTarget as HTMLAnchorElement).style.color = '#c9a84c'
-          }}
-        >
-          Download
-        </a>
+          <a
+            href="/changelog"
+            className="text-sm font-medium transition-colors"
+            style={{ color: 'rgba(255,255,255,0.45)' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'rgba(255,255,255,0.8)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'rgba(255,255,255,0.45)' }}
+          >
+            Changelog
+          </a>
+          <a
+            href="#download"
+            className="text-sm font-medium tracking-wider uppercase px-5 py-2 rounded-md transition-all duration-200"
+            style={{ border: '1px solid rgba(201,168,76,0.45)', color: '#c9a84c', background: 'rgba(201,168,76,0.06)' }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(201,168,76,0.12)'
+              ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(201,168,76,0.7)'
+              ;(e.currentTarget as HTMLAnchorElement).style.color = '#e8c97e'
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(201,168,76,0.06)'
+              ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(201,168,76,0.45)'
+              ;(e.currentTarget as HTMLAnchorElement).style.color = '#c9a84c'
+            }}
+          >
+            Download
+          </a>
         </div>
       </div>
     </nav>
