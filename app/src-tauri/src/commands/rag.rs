@@ -10,7 +10,7 @@ use tauri::Emitter;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
-const SCORE_THRESHOLD: f32 = 0.10;
+const SCORE_THRESHOLD: f32 = 0.20;
 const GGUF_MIN_SIZE: u64 = 4_000_000_000;
 
 const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instruct-v1-GGUF/resolve/main/Saul-Instruct-v1.Q4_K_M.gguf";
@@ -757,6 +757,11 @@ struct TempChunk {
     token_count: usize,
 }
 
+#[derive(PartialEq)]
+enum FragKind { Normal, ParagraphBreak }
+
+struct SentenceFrag<'a> { text: &'a str, kind: FragKind }
+
 fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChunk> {
     let mut chunks = Vec::new();
     let mut global_idx = 0usize;
@@ -767,9 +772,10 @@ fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChu
             continue;
         }
 
-        let sentences = split_sentences(text);
+        let frags = split_sentences(text);
         let mut current = String::new();
         let mut sentence_buf: Vec<&str> = Vec::new();
+        let mut pending_header: Option<String> = None;
 
         let flush = |current: &str,
                      global_idx: &mut usize,
@@ -782,19 +788,60 @@ fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChu
                     page_number: page_num,
                     chunk_index: *global_idx,
                     text: trimmed.to_string(),
-                    token_count: (trimmed.len() / 4).max(1),
+                    token_count: (trimmed.len() / 3).max(1),
                 });
                 *global_idx += 1;
             }
         };
 
-        for sentence in &sentences {
-            // If a single sentence is larger than chunk_size (common when lopdf
-            // extracts a page as one long line with no sentence-ending punctuation
-            // or newlines), split it into fixed-size sub-spans so we don't create
-            // a single enormous chunk that breaks context window budgets.
-            let sub_sentences: Vec<&str> = if sentence.len() > settings.chunk_size {
-                sentence
+        for frag in &frags {
+            if frag.kind == FragKind::ParagraphBreak {
+                // Short line with no sentence-ending punctuation: treat as a
+                // section/clause header — park it so it prepends the next chunk.
+                let is_orphan = frag.text.len() < 80
+                    && !frag.text.ends_with('.')
+                    && !frag.text.ends_with('!')
+                    && !frag.text.ends_with('?');
+
+                if is_orphan {
+                    if !current.is_empty() {
+                        flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                        current.clear();
+                        sentence_buf.clear();
+                    }
+                    pending_header = Some(frag.text.to_string());
+                    continue;
+                }
+
+                // Non-orphan paragraph break: flush current, no overlap carried across
+                if !current.is_empty() {
+                    flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                    current.clear();
+                    sentence_buf.clear();
+                }
+                if let Some(h) = pending_header.take() {
+                    current.push_str(&h);
+                    current.push('\n');
+                }
+                current.push_str(frag.text);
+                sentence_buf.push(frag.text);
+                continue;
+            }
+
+            // Normal fragment: apply any parked header first
+            if let Some(h) = pending_header.take() {
+                if !current.is_empty() {
+                    flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                    current.clear();
+                    sentence_buf.clear();
+                }
+                current.push_str(&h);
+                current.push('\n');
+            }
+
+            // If a single fragment is larger than chunk_size, split into sub-spans.
+            let sub_sentences: Vec<&str> = if frag.text.len() > settings.chunk_size {
+                frag.text
                     .as_bytes()
                     .chunks(settings.chunk_size)
                     .map(|b| {
@@ -804,7 +851,7 @@ fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChu
                     .filter(|s| !s.is_empty())
                     .collect()
             } else {
-                vec![sentence]
+                vec![frag.text]
             };
 
             for sub in sub_sentences {
@@ -833,18 +880,53 @@ fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChu
             }
         }
 
+        // Flush remainder; if a lone header is pending, emit it as its own chunk
+        if let Some(h) = pending_header {
+            if !current.is_empty() {
+                flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                current.clear();
+            }
+            current.push_str(&h);
+        }
         flush(&current, &mut global_idx, &mut chunks, page.page_number);
     }
 
     chunks
 }
 
-fn split_sentences(text: &str) -> Vec<&str> {
-    let mut sentences = Vec::new();
+fn is_section_header(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() || t.len() >= 80 { return false; }
+    // Lines ending with sentence punctuation are content, not headers
+    if t.ends_with('.') || t.ends_with('!') || t.ends_with('?') { return false; }
+    let u = t.to_uppercase();
+    if u.starts_with("SECTION") || u.starts_with("ARTICLE") || u.starts_with("WHEREAS")
+        || u.starts_with("NOW THEREFORE") || u.starts_with("SCHEDULE")
+        || u.starts_with("EXHIBIT") || u.starts_with("ANNEX") {
+        return true;
+    }
+    // Numbered clause: "1.", "3.1", "12." at start
+    if t.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        if let Some(dot_pos) = t.find('.') {
+            if t[..dot_pos].chars().all(|c| c.is_ascii_digit()) { return true; }
+        }
+    }
+    // Lettered sub-clause: "(a)", "(b)", "(aa)" etc.
+    if t.starts_with('(')
+        && t.chars().nth(1).map_or(false, |c| c.is_ascii_alphabetic())
+        && t.chars().nth(2).map_or(false, |c| c == ')') {
+        return true;
+    }
+    false
+}
+
+fn split_sentences(text: &str) -> Vec<SentenceFrag<'_>> {
+    let mut frags = Vec::new();
     let mut start = 0;
     let bytes = text.as_bytes();
     let len = bytes.len();
     let mut i = 0;
+    let mut next_para_break = false;
 
     while i < len {
         let b = bytes[i];
@@ -862,7 +944,6 @@ fn split_sentences(text: &str) -> Vec<&str> {
                 }
                 let word = &bytes[word_start..i];
                 if word.is_empty() || (word.len() == 1 && word[0].is_ascii_alphabetic()) {
-                    // Empty or single letter initial — not a boundary
                     false
                 } else {
                     const ABBREVS: &[&[u8]] = &[
@@ -877,13 +958,19 @@ fn split_sentences(text: &str) -> Vec<&str> {
                     !ABBREVS.iter().any(|abbr| *abbr == word_lower.as_slice())
                 }
             } else {
-                true // '!' and '?' are always sentence boundaries
+                true
             };
 
             if is_boundary {
                 let s = text[start..=i].trim();
                 if !s.is_empty() {
-                    sentences.push(s);
+                    let kind = if next_para_break || is_section_header(s) {
+                        next_para_break = false;
+                        FragKind::ParagraphBreak
+                    } else {
+                        FragKind::Normal
+                    };
+                    frags.push(SentenceFrag { text: s, kind });
                 }
                 let mut j = i + 1;
                 while j < len && bytes[j].is_ascii_whitespace() {
@@ -895,18 +982,23 @@ fn split_sentences(text: &str) -> Vec<&str> {
                 i += 1;
             }
         } else if b == b'\n' {
-            // Treat newlines as line boundaries — critical for structured documents
-            // (job offers, contracts) where "Salary: $85,000\nStart Date: ..." must
-            // be split into separate indexable lines, not merged into one huge token run.
+            // Treat newlines as line boundaries — critical for structured documents.
+            // Track blank lines (2+ consecutive newlines) as paragraph breaks.
             let s = text[start..i].trim();
-            if !s.is_empty() {
-                sentences.push(s);
-            }
-            // Skip consecutive newlines (blank lines between sections)
             let mut j = i + 1;
-            while j < len && bytes[j] == b'\n' {
-                j += 1;
+            while j < len && bytes[j] == b'\n' { j += 1; }
+            let blank = (j - i) >= 2;
+
+            if !s.is_empty() {
+                let kind = if next_para_break || is_section_header(s) {
+                    FragKind::ParagraphBreak
+                } else {
+                    FragKind::Normal
+                };
+                next_para_break = false;
+                frags.push(SentenceFrag { text: s, kind });
             }
+            if blank { next_para_break = true; }
             start = j;
             i = j;
         } else {
@@ -916,10 +1008,15 @@ fn split_sentences(text: &str) -> Vec<&str> {
 
     let remainder = text[start..].trim();
     if !remainder.is_empty() {
-        sentences.push(remainder);
+        let kind = if next_para_break || is_section_header(remainder) {
+            FragKind::ParagraphBreak
+        } else {
+            FragKind::Normal
+        };
+        frags.push(SentenceFrag { text: remainder, kind });
     }
 
-    sentences
+    frags
 }
 
 // ── RAG Query ─────────────────────────────────────────────────────────────────

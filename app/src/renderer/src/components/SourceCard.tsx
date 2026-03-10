@@ -7,8 +7,8 @@ interface Props {
 }
 
 function relevanceLabel(score: number): { label: string; color: string } {
-  if (score >= 0.55) return { label: 'Strong', color: '#3fb950' }
-  if (score >= 0.30) return { label: 'Good',   color: '#c9a84c' }
+  if (score >= 0.40) return { label: 'Strong', color: '#3fb950' }
+  if (score >= 0.22) return { label: 'Good',   color: '#c9a84c' }
   return                    { label: 'Weak',   color: 'rgba(255,255,255,0.28)' }
 }
 

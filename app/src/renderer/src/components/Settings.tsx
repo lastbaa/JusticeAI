@@ -158,7 +158,7 @@ export default function Settings({ settings, onSave, onClose }: Props): JSX.Elem
                 <div>
                   <p className="text-[13px] font-semibold text-white">Saul-7B-Instruct</p>
                   <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                    all-MiniLM-L6-v2 embeddings · 7 billion parameters · running on-device
+                    BGE-small-en-v1.5 embeddings · 7 billion parameters · running on-device
                   </p>
                 </div>
               </div>

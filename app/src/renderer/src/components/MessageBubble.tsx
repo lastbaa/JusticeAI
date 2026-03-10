@@ -323,7 +323,7 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
               Sources
             </p>
             <div className="flex flex-col gap-1.5">
-              {message.citations.slice(0, 3).map((citation, idx) => (
+              {message.citations.slice(0, 6).map((citation, idx) => (
                 <SourceCard key={idx} citation={citation} onView={onViewCitation} />
               ))}
             </div>
