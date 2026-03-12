@@ -35,7 +35,6 @@ const THINKING_PHRASES = [
 
 function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
   const [phraseIdx, setPhraseIdx] = useState(0)
-  const [dotTick, setDotTick] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [phraseKey, setPhraseKey] = useState(0)
   const startRef = useRef(Date.now())
@@ -48,19 +47,16 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
         setPhraseKey((k) => k + 1)
       }, 2800)
     }
-    const dotsTimer = setInterval(() => setDotTick((t) => t + 1), 500)
     const elapsedTimer = setInterval(
       () => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)),
       1000
     )
     return () => {
       if (phraseTimer) clearInterval(phraseTimer)
-      clearInterval(dotsTimer)
       clearInterval(elapsedTimer)
     }
   }, [phase])
 
-  const dots = ['·', '··', '···'][dotTick % 3]
   const displayPhrase = phase || THINKING_PHRASES[phraseIdx]
   const displayKey = phase ? phase : phraseKey
 
@@ -112,9 +108,7 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
             }}
           >
             {displayPhrase}
-            <span style={{ color: 'rgba(201,168,76,0.55)', fontWeight: 600, letterSpacing: '0.05em', marginLeft: '4px' }}>
-              {dots}
-            </span>
+            <span className="loading-ellipsis" style={{ color: 'rgba(201,168,76,0.55)', fontWeight: 600 }} />
           </span>
         </div>
 

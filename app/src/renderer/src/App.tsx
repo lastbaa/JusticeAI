@@ -21,38 +21,51 @@ import Toast, { ToastMessage } from './components/Toast'
 
 type View = 'main' | 'settings'
 
-const STOP_WORDS = new Set([
-  'a','an','the','is','are','was','were','be','been','being',
-  'have','has','had','do','does','did','will','would','could',
-  'should','may','might','shall','can','need','ought',
-  'i','me','my','we','our','you','your','he','she','it','they',
-  'what','which','who','whom','this','that','these','those',
-  'of','in','on','at','by','for','with','about','as','into',
-  'through','before','after','to','from','up','and','but','or',
-  'nor','so','yet','not','only','same','than','too','very','just',
-  'how','when','where','why','there','here','out','any','all',
-  'more','most','some','such','no','each','few','once','under',
-  'between','tell','explain','describe','give','provide','find',
-  'show','please','them','their','its','also','am','if','than',
-])
-
+/**
+ * Generate a concise chat title from the first user message.
+ * Mirrors the style of Claude's browser UI: short noun-phrase titles
+ * like "Lease Agreement Questions" or "W-9 Form Details".
+ */
 function makeSessionName(messages: ChatMessage[]): string {
   const first = messages.find((m) => m.role === 'user')
   if (!first) return 'New Chat'
 
-  const words = first.content
-    .trim()
-    .replace(/[^a-zA-Z0-9\s'-]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()))
+  let text = first.content.trim()
+  if (!text) return 'New Chat'
 
-  if (words.length === 0) {
-    const text = first.content.trim()
-    return text.length > 40 ? text.slice(0, 40) + '…' : text
+  // Strip file paths, URLs, code blocks
+  text = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '')
+  text = text.replace(/https?:\/\/\S+/g, '').replace(/\/[\w./\\-]+/g, '')
+  text = text.trim()
+
+  // Use just the first sentence or line
+  const firstLine = text.split(/[.\n]/).filter(Boolean)[0]?.trim() ?? text
+  let phrase = firstLine
+
+  // Strip leading filler: "Can you", "Please", "I want to", "Help me", etc.
+  phrase = phrase.replace(
+    /^(hey|hi|hello|ok|okay|so|well|um|uh|basically|actually),?\s*/i, ''
+  )
+  phrase = phrase.replace(
+    /^(can you|could you|would you|will you|please|i want to|i need to|i'd like to|help me|i want you to|let's|let me|go ahead and)\s+/i, ''
+  )
+  phrase = phrase.replace(/^(please\s+)/i, '')
+
+  // Remove trailing question mark for cleaner titles
+  phrase = phrase.replace(/\?+$/, '').trim()
+
+  // Capitalize first letter
+  if (phrase.length > 0) {
+    phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1)
   }
 
-  const name = words.slice(0, 4).join(' ')
-  return name.charAt(0).toUpperCase() + name.slice(1)
+  // Truncate at a word boundary around 45 chars
+  if (phrase.length > 48) {
+    const cut = phrase.lastIndexOf(' ', 45)
+    phrase = phrase.slice(0, cut > 20 ? cut : 45) + '…'
+  }
+
+  return phrase || 'New Chat'
 }
 
 export default function App(): JSX.Element {
