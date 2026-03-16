@@ -1,111 +1,125 @@
 # Justice AI
 
-**Secure legal research for legal professionals. Runs entirely on your machine.**
+Private, citation-grounded legal document research on your local machine.
 
----
+## What It Is
 
-## Purpose
+Justice AI is a desktop app for legal professionals to search loaded case documents and answer questions with source citations.
 
-Enterprise tools like ChatGPT cannot guarantee confidentiality. When sensitive case files, client communications, or privileged materials are sent to a third-party server, attorney-client privilege is put at risk. Justice AI eliminates this problem entirely by running a local LLM on the user's machine, so no data ever leaves their control.
+- Runs locally (Tauri + Rust backend + React UI)
+- Uses local embedding + local LLM inference
+- Returns answers with file/page/excerpt citations
 
-Justice AI is an **enhancement tool for legal professionals**. It searches through your case files so you can focus on analysis and strategy. It does not replace legal judgment.
+> Important: Justice AI is a research assistant, not legal advice. Attorneys remain responsible for legal conclusions.
 
-> **Important:** Justice AI does not provide legal advice. Its output does not constitute legal conclusions. A computer cannot be held accountable for legal decisions. The attorney using this tool is responsible for all legal analysis and advice given to their clients.
+## Current Architecture
 
----
+- `app/src-tauri` — active desktop backend (Rust + Tauri)
+- `app/src/renderer` — active desktop frontend (React + Vite)
+- `shared` — shared TypeScript models/contracts
+- `website` — marketing site
 
-## Key Objectives
+Note: legacy Electron files still exist in `app/src/main` and `app/src/preload`, but the active runtime is Tauri.
 
-- **Privacy** — No data leaves the machine. No cloud upload, no telemetry, no external API calls.
-- **Accuracy** — Every answer is grounded strictly in the documents you load. If the answer is not in the files, Justice AI says so.
-- **Efficiency** — Let AI do the document searching. Legal professionals focus on the thinking.
-- **Flexibility** — Load any set of documents for any legal specialty. Immigration files, contracts, case law, deposition transcripts — the tool adapts to what you provide.
-- **Sustainability** — Running a small local model instead of hitting a massive data center dramatically reduces energy usage. Responsible AI starts with the hardware choices we make.
+## Supported File Types
 
----
+- `.pdf`
+- `.docx`
+- `.txt`
+- `.md`
+- `.csv`
+- `.eml`
+- `.html`
+- `.htm`
+- `.mhtml`
+- `.xml`
+- `.xlsx`
+- `.png`
+- `.jpg`
+- `.jpeg`
+- `.tif`
+- `.tiff`
 
-## Project Structure
-
-```
-/
-├── website/      # Next.js marketing site
-├── app/          # Electron + React desktop app
-└── shared/       # Shared TypeScript types
-```
-
----
-
-## Desktop App Setup
+## Setup
 
 ### Prerequisites
-Note: prerequisites will only be necessary during the testing and development stage, the final product will be plug-and-play. 
 
-1. **Ollama** — Install from [ollama.ai](https://ollama.ai)
-2. **Pull the LLM model:**
-   ```bash
-   ollama pull saul-7b
-   ```
-3. **Pull the embedding model:**
-   ```bash
-   ollama pull nomic-embed-text
-   ```
+- Node.js 20+
+- Rust toolchain (for Tauri builds)
+- Platform build tools required by Tauri
 
-### Run in development
+### Install dependencies
+
+From repo root:
 
 ```bash
-# From the repo root
 npm install
+```
+
+## Run the App (Development)
+
+From repo root:
+
+```bash
 npm run app
 ```
 
-### Build for distribution
+On first run, the app setup flow will:
+
+1. Download the Saul model (one-time)
+2. Check/install OCR runtime (Tesseract) for image text extraction when possible
+
+If OCR auto-install cannot complete on your platform, setup shows manual instructions.
+
+## Build
+
+From repo root:
 
 ```bash
-cd app
-npm run package
-# Output: app/dist/Justice AI.dmg
+npm run build:app
 ```
 
-### System Requirements
+This compiles the app and runs Tauri bundling.
 
-| Requirement | Minimum |
-|---|---|
-| Mac chip | Apple Silicon (M1/M2/M3) or Intel |
-| macOS | 12 Monterey or later |
-| RAM | 8 GB (16 GB recommended) |
-| Free storage | ~8 GB (for model weights) |
-
----
-
-## Website Setup
+From repo root:
 
 ```bash
-cd website
-npm install
-npm run dev       # Development at http://localhost:3000
-npm run build     # Production build
+npm run build:website
 ```
 
----
+Builds the Next.js marketing site.
 
-## How It Works
+## How Retrieval Works
 
-1. **Load documents** — Drop in a folder of PDFs and DOCX files. All parsing happens locally.
-2. **Chunking & embedding** — Documents are split into ~500-token chunks and embedded using `nomic-embed-text` via Ollama. Embeddings are stored in a local vector index (Vectra).
-3. **Query** — Your question is embedded and matched against the vector index. The top-K most relevant chunks are retrieved.
-4. **Answer** — The retrieved chunks and your question are passed to `saul-7b` with a strict system prompt that enforces citation-only answers and prohibits hallucination.
-5. **Citations** — Every answer includes the filename, page number, and a direct quoted excerpt from the source document.
+1. Parse local documents
+2. Normalize/chunk content for retrieval efficiency
+3. Embed chunks locally
+4. Retrieve top relevant evidence
+5. Generate local answer with citations
 
----
+## Security & Privacy Notes
 
-## Privacy Guarantee
+- Parsing and retrieval run locally
+- No cloud inference dependency in normal query flow
+- File parsing includes format validation and hardening checks
+- XML parser rejects unsafe DTD/entity constructs
+- OCR uses local Tesseract runtime
 
-- No network requests are made except to `localhost:11434` (your local Ollama instance)
-- No telemetry, no analytics, no crash reporting
-- Chat history is stored locally and encrypted on disk
-- The app works fully offline after the initial model download
+## Useful Development Commands
 
----
+Desktop app dev:
+
+```bash
+npm run app
+```
+
+Rust check/tests (desktop backend):
+
+```bash
+cd app/src-tauri
+cargo check
+cargo test
+```
 
 ## License
 
