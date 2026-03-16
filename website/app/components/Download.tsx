@@ -19,7 +19,7 @@ const platforms: {
     key: 'mac',
     label: 'macOS',
     sub: 'Apple Silicon (native) · Intel via Rosetta 2 · macOS 12+',
-    file: 'https://github.com/lastbaa/CS-370-Justice-AI-Project/releases/download/v1.2.0/Justice.AI-1.2.0-arm64.dmg',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v1.4.0/Justice.AI-1.4.0-arm64.dmg',
     available: true,
     installSteps: [
       'Open the .dmg and drag Justice AI into your Applications folder, then eject the disk image.',
@@ -187,7 +187,7 @@ export default function Download() {
                     background: 'rgba(255,255,255,0.02)',
                   }}
                 >
-                  v1.2.0 · Open Source
+                  v1.4.0 · Open Source
                 </span>
               </div>
 
