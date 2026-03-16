@@ -11,6 +11,7 @@ import type {
   DownloadProgress,
   FileInfo,
   ModelStatus,
+  OcrRuntimeStatus,
   OllamaStatus,
   QueryResult,
 } from '../../../../shared/src/types'
@@ -19,6 +20,7 @@ export const api = {
   checkOllama: (): Promise<OllamaStatus> => invoke('check_ollama'),
 
   checkModels: (): Promise<ModelStatus> => invoke('check_models'),
+  ensureOcrRuntime: (): Promise<OcrRuntimeStatus> => invoke('ensure_ocr_runtime'),
 
   downloadModels: (): Promise<void> => invoke('download_models'),
 
@@ -28,7 +30,10 @@ export const api = {
   openFileDialog: async (): Promise<string[]> => {
     const result = await open({
       multiple: true,
-      filters: [{ name: 'Documents', extensions: ['pdf', 'docx'] }],
+      filters: [{
+        name: 'Supported Files',
+        extensions: ['pdf', 'docx', 'txt', 'md', 'csv', 'eml', 'html', 'htm', 'mhtml', 'xml', 'xlsx', 'png', 'jpg', 'jpeg', 'tif', 'tiff'],
+      }],
     })
     if (!result) return []
     return Array.isArray(result) ? result : [result]
@@ -82,4 +87,3 @@ export const api = {
 
   getBuildInfo: (): Promise<string> => invoke('get_build_info'),
 }
-

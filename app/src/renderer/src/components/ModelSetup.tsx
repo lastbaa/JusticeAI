@@ -9,6 +9,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
   const [downloadedGb, setDownloadedGb] = useState(0)
   const [totalGb, setTotalGb] = useState(4.5)
   const [error, setError] = useState<string | null>(null)
+  const [ocrMessage, setOcrMessage] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState(false)
   // Incrementing this triggers a fresh download attempt via useEffect dependency.
   const [attempt, setAttempt] = useState(0)
@@ -24,6 +25,13 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
 
     async function run(): Promise<void> {
       try {
+        const ocr = await window.api.ensureOcrRuntime()
+        if (!ocr.ready) {
+          setOcrMessage(ocr.message)
+        } else {
+          setOcrMessage(null)
+        }
+
         unlisten = await window.api.onDownloadProgress((progress) => {
           if (!isMounted) return  // component unmounted — ignore stale events
           setPercent(progress.percent)
@@ -85,6 +93,17 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
           <br />
           <span style={{ color: 'rgb(var(--ov) / 0.22)' }}>This only happens once.</span>
         </p>
+
+        {ocrMessage && (
+          <div
+            className="w-full rounded-xl px-4 py-3 mb-4"
+            style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.22)' }}
+          >
+            <p className="text-[12.5px] leading-relaxed" style={{ color: 'rgba(201,168,76,0.9)' }}>
+              {ocrMessage}
+            </p>
+          </div>
+        )}
 
         {error ? (
           <div className="w-full flex flex-col items-center gap-5">

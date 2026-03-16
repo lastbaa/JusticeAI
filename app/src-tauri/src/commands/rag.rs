@@ -1,14 +1,26 @@
-use crate::pipeline::{self, chunk_document, embed_text, RetrievalBackend, GGUF_MIN_SIZE, SAUL_GGUF_URL, SCORE_THRESHOLD};
+use crate::pipeline::{
+    self, chunk_document, embed_text, RetrievalBackend, GGUF_MIN_SIZE, SAUL_GGUF_URL,
+    SCORE_THRESHOLD,
+};
 use crate::state::{
-    AppSettings, ChatSession, ChunkMetadata, Citation, EmbeddedChunkEntry, FileInfo,
-    ModelStatus, QueryResult, RagState,
+    AppSettings, ChatSession, ChunkMetadata, Citation, EmbeddedChunkEntry, FileInfo, ModelStatus,
+    QueryResult, RagState,
 };
 use base64::Engine;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrRuntimeStatus {
+    pub ready: bool,
+    pub install_attempted: bool,
+    pub message: String,
+}
 
 // ── Model Management ─────────────────────────────────────────────────────────
 
@@ -21,11 +33,99 @@ pub async fn check_models(
         s.model_dir.join("saul.gguf")
     };
     let size = gguf_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
+    let ocr_ready = super::doc_parser::tesseract_binary().is_some();
     Ok(ModelStatus {
         llm_ready: size > GGUF_MIN_SIZE,
         llm_size_gb: size as f32 / 1e9,
         download_required_gb: 4.5,
+        ocr_ready,
+        ocr_message: if ocr_ready {
+            None
+        } else {
+            Some("Image OCR is not ready yet. Setup will attempt to install Tesseract automatically.".to_string())
+        },
     })
+}
+
+#[tauri::command]
+pub async fn ensure_ocr_runtime() -> Result<OcrRuntimeStatus, String> {
+    if super::doc_parser::tesseract_binary().is_some() {
+        return Ok(OcrRuntimeStatus {
+            ready: true,
+            install_attempted: false,
+            message: "OCR runtime is already installed.".to_string(),
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let brew_exists = tokio::process::Command::new("brew")
+            .arg("--version")
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !brew_exists {
+            return Ok(OcrRuntimeStatus {
+                ready: false,
+                install_attempted: false,
+                message: "Homebrew is not installed, so OCR could not be auto-installed. Install Homebrew, then run `brew install tesseract`.".to_string(),
+            });
+        }
+
+        let status = tokio::process::Command::new("brew")
+            .args(["install", "tesseract"])
+            .status()
+            .await;
+
+        let ready = super::doc_parser::tesseract_binary().is_some();
+        return Ok(OcrRuntimeStatus {
+            ready,
+            install_attempted: true,
+            message: match status {
+                Ok(s) if s.success() && ready => "OCR runtime installed successfully.".to_string(),
+                Ok(_) if ready => "OCR runtime is available.".to_string(),
+                Ok(_) => "Attempted to install OCR runtime, but Tesseract is still unavailable. Try `brew install tesseract` manually.".to_string(),
+                Err(e) => format!("OCR auto-install attempt failed: {e}. Try `brew install tesseract`."),
+            },
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let status = tokio::process::Command::new("winget")
+            .args([
+                "install",
+                "--id",
+                "UB-Mannheim.TesseractOCR",
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ])
+            .status()
+            .await;
+        let ready = super::doc_parser::tesseract_binary().is_some();
+        return Ok(OcrRuntimeStatus {
+            ready,
+            install_attempted: true,
+            message: match status {
+                Ok(s) if s.success() && ready => "OCR runtime installed successfully.".to_string(),
+                Ok(_) if ready => "OCR runtime is available.".to_string(),
+                Ok(_) => "Attempted OCR auto-install, but Tesseract is still unavailable. Install Tesseract manually.".to_string(),
+                Err(e) => format!("OCR auto-install attempt failed: {e}. Install Tesseract manually."),
+            },
+        });
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return Ok(OcrRuntimeStatus {
+            ready: false,
+            install_attempted: false,
+            message: "Automatic OCR install is not enabled on this platform. Install `tesseract-ocr` with your package manager.".to_string(),
+        });
+    }
 }
 
 #[tauri::command]
@@ -171,8 +271,7 @@ pub fn set_can_close(state: tauri::State<'_, crate::state::CloseAllowed>) {
 /// Called from the export-chat and export-citations features.
 #[tauri::command]
 pub fn save_file(file_path: String, content: String) -> Result<(), String> {
-    std::fs::write(&file_path, content.as_bytes())
-        .map_err(|e| format!("Failed to write file: {e}"))
+    std::fs::write(&file_path, content.as_bytes()).map_err(|e| format!("Failed to write file: {e}"))
 }
 
 /// Re-embed all stored chunks using BGE-small-en-v1.5.
@@ -185,7 +284,10 @@ pub async fn migrate_embeddings(state: &mut crate::state::RagState) {
         state.save_embed_model().await;
         return;
     }
-    log::info!("Migrating {} chunk embeddings from AllMiniL → BGE-small-en-v1.5…", total);
+    log::info!(
+        "Migrating {} chunk embeddings from AllMiniL → BGE-small-en-v1.5…",
+        total
+    );
     let model_dir = state.model_dir.clone();
     for (i, entry) in state.embedded_chunks.iter_mut().enumerate() {
         match embed_text(&entry.meta.text, false, &model_dir).await {
@@ -221,7 +323,10 @@ pub async fn load_files(
             for entry in entries.flatten() {
                 let path = entry.path();
                 let lower = path.to_string_lossy().to_lowercase();
-                if lower.ends_with(".pdf") || lower.ends_with(".docx") {
+                if super::doc_parser::SUPPORTED_EXTENSIONS
+                    .iter()
+                    .any(|ext| lower.ends_with(&format!(".{ext}")))
+                {
                     expanded.push(path.to_string_lossy().to_string());
                 }
             }
@@ -264,14 +369,8 @@ async fn process_file(
 ) -> Result<FileInfo, String> {
     use super::doc_parser;
 
-    let lower = file_path.to_lowercase();
-    let pages = if lower.ends_with(".pdf") {
-        doc_parser::parse_pdf(file_path)?
-    } else if lower.ends_with(".docx") {
-        doc_parser::parse_docx(file_path)?
-    } else {
-        return Err(format!("Unsupported file type: {}", file_path));
-    };
+    let ext = doc_parser::detect_supported_extension(file_path)?;
+    let pages = doc_parser::parse_by_extension(file_path, &ext)?;
 
     let file_name = std::path::Path::new(file_path)
         .file_name()
@@ -305,14 +404,14 @@ async fn process_file(
         // chunk to be silently dropped and leaving the LLM with no context.
         let total_chars = chunk.text.chars().count();
         if total_chars > 0 {
-            let printable = chunk.text
+            let printable = chunk
+                .text
                 .chars()
                 .filter(|&c| {
                     let code = c as u32;
-                    c == '\n' || c == '\t'
-                        || (!c.is_control()
-                            && !(0xE000..=0xF8FF).contains(&code)
-                            && code < 0xFFF0)
+                    c == '\n'
+                        || c == '\t'
+                        || (!c.is_control() && !(0xE000..=0xF8FF).contains(&code) && code < 0xFFF0)
                 })
                 .count();
             let ratio = printable as f32 / total_chars as f32;
@@ -396,14 +495,21 @@ pub async fn query(
         )
     };
 
-    window.emit("query-status", serde_json::json!({"phase": "embedding"})).ok();
+    window
+        .emit("query-status", serde_json::json!({"phase": "embedding"}))
+        .ok();
     let query_vec = embed_text(&question, true, &model_dir).await?;
 
     let candidate_k = (settings.top_k * 6).min(60);
     let results = {
         let s = state.lock().await;
 
-        window.emit("query-status", serde_json::json!({"phase": "searching", "chunks": s.embedded_chunks.len()})).ok();
+        window
+            .emit(
+                "query-status",
+                serde_json::json!({"phase": "searching", "chunks": s.embedded_chunks.len()}),
+            )
+            .ok();
 
         // No chunks at all → no files were successfully embedded.
         if s.embedded_chunks.is_empty() {
@@ -417,8 +523,16 @@ pub async fn query(
         // Use the pluggable retrieval backend.
         let backend = pipeline::default_backend();
         let corpus = pipeline::RetrievalCorpus {
-            texts: s.embedded_chunks.iter().map(|e| e.meta.text.as_str()).collect(),
-            vectors: s.embedded_chunks.iter().map(|e| e.vector.as_slice()).collect(),
+            texts: s
+                .embedded_chunks
+                .iter()
+                .map(|e| e.meta.text.as_str())
+                .collect(),
+            vectors: s
+                .embedded_chunks
+                .iter()
+                .map(|e| e.vector.as_slice())
+                .collect(),
         };
         let config = pipeline::RetrievalConfig {
             top_k: settings.top_k,
@@ -505,11 +619,21 @@ pub async fn query(
         raw_context
     };
 
-    window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
+    window
+        .emit("query-status", serde_json::json!({"phase": "generating"}))
+        .ok();
     let window_clone = window.clone();
-    let answer: String = pipeline::ask_saul(&question, &context, &history, &model_dir, model_cache, move |tok| {
-        window_clone.emit("query-token", tok.as_str()).ok();
-    }).await?;
+    let answer: String = pipeline::ask_saul(
+        &question,
+        &context,
+        &history,
+        &model_dir,
+        model_cache,
+        move |tok| {
+            window_clone.emit("query-token", tok.as_str()).ok();
+        },
+    )
+    .await?;
 
     let answer_lower = answer.to_lowercase();
     // Only mark as truly not-found for the model's explicit "not found" signal.
@@ -626,7 +750,13 @@ pub async fn save_session(
             ..session
         };
     } else {
-        s.sessions.insert(0, ChatSession { updated_at: now, ..session });
+        s.sessions.insert(
+            0,
+            ChatSession {
+                updated_at: now,
+                ..session
+            },
+        );
         s.sessions.truncate(50);
     }
 
@@ -659,8 +789,8 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
     use crate::pipeline::{
-        chunk_document, format_history, is_section_header,
-        split_at_char_boundaries, split_sentences, FragKind,
+        chunk_document, format_history, is_section_header, split_at_char_boundaries,
+        split_sentences, FragKind,
     };
     use crate::state::AppSettings;
 
@@ -708,9 +838,15 @@ mod tests {
     #[test]
     fn header_numbered_long_content_is_not_header() {
         // Fix 1: content sentences starting with a number must NOT be orphaned
-        assert!(!is_section_header("1. The Employee shall receive five weeks of paid vacation annually"));
-        assert!(!is_section_header("3. The Company agrees to provide health insurance benefits for the employee"));
-        assert!(!is_section_header("2. All notices under this Agreement shall be delivered in writing"));
+        assert!(!is_section_header(
+            "1. The Employee shall receive five weeks of paid vacation annually"
+        ));
+        assert!(!is_section_header(
+            "3. The Company agrees to provide health insurance benefits for the employee"
+        ));
+        assert!(!is_section_header(
+            "2. All notices under this Agreement shall be delivered in writing"
+        ));
     }
 
     #[test]
@@ -725,8 +861,12 @@ mod tests {
     #[test]
     fn header_lettered_subclause_long_content_is_not_header() {
         // Fix 1 (lettered variant): long clause content must NOT be orphaned
-        assert!(!is_section_header("(a) The licensor hereby grants a non-exclusive, non-transferable license"));
-        assert!(!is_section_header("(b) The Employee shall not disclose any confidential information"));
+        assert!(!is_section_header(
+            "(a) The licensor hereby grants a non-exclusive, non-transferable license"
+        ));
+        assert!(!is_section_header(
+            "(b) The Employee shall not disclose any confidential information"
+        ));
     }
 
     #[test]
@@ -739,7 +879,8 @@ mod tests {
     #[test]
     fn header_rejects_long_lines() {
         // ≥ 80 chars always rejected regardless of content
-        let long = "SECTION 1 — THIS IS A VERY LONG HEADER THAT EXCEEDS EIGHTY CHARACTERS IN TOTAL LENGTH";
+        let long =
+            "SECTION 1 — THIS IS A VERY LONG HEADER THAT EXCEEDS EIGHTY CHARACTERS IN TOTAL LENGTH";
         assert!(long.len() >= 80);
         assert!(!is_section_header(long));
     }
@@ -750,7 +891,10 @@ mod tests {
     fn char_boundary_split_ascii() {
         let parts = split_at_char_boundaries("hello world foo bar", 10);
         // Each part ≤ 10 bytes, no part empty
-        for p in &parts { assert!(p.len() <= 10); assert!(!p.is_empty()); }
+        for p in &parts {
+            assert!(p.len() <= 10);
+            assert!(!p.is_empty());
+        }
         // Reassembled text contains all words
         let joined = parts.join(" ");
         assert!(joined.contains("hello"));
@@ -792,7 +936,10 @@ mod tests {
     fn split_tags_section_header_as_para_break() {
         let text = "Prior content.\nSECTION 4 — COMPENSATION\nNext content.";
         let frags = split_sentences(text);
-        let header = frags.iter().find(|f| f.text.contains("COMPENSATION")).unwrap();
+        let header = frags
+            .iter()
+            .find(|f| f.text.contains("COMPENSATION"))
+            .unwrap();
         assert!(matches!(header.kind, FragKind::ParagraphBreak));
     }
 
@@ -808,7 +955,10 @@ mod tests {
     // ── chunk_document ─────────────────────────────────────────────────────
 
     fn make_page(text: &str) -> crate::state::DocumentPage {
-        crate::state::DocumentPage { page_number: 1, text: text.to_string() }
+        crate::state::DocumentPage {
+            page_number: 1,
+            text: text.to_string(),
+        }
     }
 
     #[test]
@@ -818,9 +968,23 @@ mod tests {
         let pages = vec![make_page(text)];
         let chunks = chunk_document(&pages, &default_settings());
         // There should be exactly one chunk (the header + content, no orphan)
-        assert_eq!(chunks.len(), 1, "Expected 1 chunk, got {}: {:?}", chunks.len(), chunks.iter().map(|c| &c.text).collect::<Vec<_>>());
-        assert!(chunks[0].text.contains("SECTION 1"), "Header missing from chunk: {}", chunks[0].text);
-        assert!(chunks[0].text.contains("base salary"), "Content missing from chunk: {}", chunks[0].text);
+        assert_eq!(
+            chunks.len(),
+            1,
+            "Expected 1 chunk, got {}: {:?}",
+            chunks.len(),
+            chunks.iter().map(|c| &c.text).collect::<Vec<_>>()
+        );
+        assert!(
+            chunks[0].text.contains("SECTION 1"),
+            "Header missing from chunk: {}",
+            chunks[0].text
+        );
+        assert!(
+            chunks[0].text.contains("base salary"),
+            "Content missing from chunk: {}",
+            chunks[0].text
+        );
     }
 
     #[test]
@@ -837,7 +1001,10 @@ mod tests {
         // Clause 1 text should NOT be prepended to clause 2's chunk
         for c in &chunks {
             if c.text.contains("medical coverage") {
-                assert!(!c.text.contains("five weeks"), "Clause 1 was incorrectly prepended to clause 2");
+                assert!(
+                    !c.text.contains("five weeks"),
+                    "Clause 1 was incorrectly prepended to clause 2"
+                );
             }
         }
     }
@@ -845,24 +1012,41 @@ mod tests {
     #[test]
     fn chunk_consecutive_headers_accumulated() {
         // Fix 3: ARTICLE IV → SECTION 4.1 should both appear in the following chunk
-        let text = "ARTICLE IV\nSECTION 4.1\n\nThe termination provisions are as follows and shall apply.";
+        let text =
+            "ARTICLE IV\nSECTION 4.1\n\nThe termination provisions are as follows and shall apply.";
         let pages = vec![make_page(text)];
         let chunks = chunk_document(&pages, &default_settings());
-        let content_chunk = chunks.iter().find(|c| c.text.contains("termination provisions")).unwrap();
-        assert!(content_chunk.text.contains("ARTICLE IV"), "ARTICLE IV missing: {}", content_chunk.text);
-        assert!(content_chunk.text.contains("SECTION 4.1"), "SECTION 4.1 missing: {}", content_chunk.text);
+        let content_chunk = chunks
+            .iter()
+            .find(|c| c.text.contains("termination provisions"))
+            .unwrap();
+        assert!(
+            content_chunk.text.contains("ARTICLE IV"),
+            "ARTICLE IV missing: {}",
+            content_chunk.text
+        );
+        assert!(
+            content_chunk.text.contains("SECTION 4.1"),
+            "SECTION 4.1 missing: {}",
+            content_chunk.text
+        );
     }
 
     #[test]
     fn chunk_no_overlap_across_paragraph_breaks() {
         // Paragraph breaks should flush without carrying overlap into the next chunk.
         // Sentences from paragraph A must not appear in paragraph B's chunk.
-        let text = "Alpha sentence one. Alpha sentence two.\n\nBeta sentence one. Beta sentence two.";
+        let text =
+            "Alpha sentence one. Alpha sentence two.\n\nBeta sentence one. Beta sentence two.";
         let pages = vec![make_page(text)];
         let chunks = chunk_document(&pages, &default_settings());
         for c in &chunks {
             if c.text.contains("Beta") {
-                assert!(!c.text.contains("Alpha"), "Alpha leaked into Beta chunk via overlap: {}", c.text);
+                assert!(
+                    !c.text.contains("Alpha"),
+                    "Alpha leaked into Beta chunk via overlap: {}",
+                    c.text
+                );
             }
         }
     }
