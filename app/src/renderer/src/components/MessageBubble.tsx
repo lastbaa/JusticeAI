@@ -33,7 +33,7 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
           className="text-[10px] font-semibold uppercase tracking-[0.12em]"
           style={{ color: 'rgb(var(--ov) / 0.18)' }}
         >
-          Sources{!showAll && deduped.length > 0 ? ` (${deduped.length})` : showAll ? ` (${Math.min(citations.length, 6)})` : ''}
+          Sources{!showAll && deduped.length > 0 ? ` (${deduped.length})` : showAll ? ` (${citations.length})` : ''}
         </p>
         {hasExtras && (
           <button

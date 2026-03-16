@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface Props {
   onComplete: () => void
@@ -8,20 +8,64 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
   const [percent, setPercent] = useState(0)
   const [downloadedGb, setDownloadedGb] = useState(0)
   const [totalGb, setTotalGb] = useState(4.5)
+  const [speed, setSpeed] = useState('')
+  const [eta, setEta] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [ocrMessage, setOcrMessage] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState(false)
   // Incrementing this triggers a fresh download attempt via useEffect dependency.
   const [attempt, setAttempt] = useState(0)
 
+  // High-water marks and throttle state (refs to avoid re-render churn)
+  const highWaterPct = useRef(0)
+  const highWaterBytes = useRef(0)
+  const lastUiUpdate = useRef(0)
+  const speedSamples = useRef<{ time: number; bytes: number }[]>([])
+
   useEffect(() => {
     let isMounted = true
     let unlisten: (() => void) | null = null
+    let rafId: number | null = null
 
     setError(null)
     setIsDownloading(true)
     setPercent(0)
     setDownloadedGb(0)
+    setSpeed('')
+    setEta('')
+    highWaterPct.current = 0
+    highWaterBytes.current = 0
+    lastUiUpdate.current = 0
+    speedSamples.current = []
+
+    // Pending values that get flushed to state at throttled intervals
+    let pendingPct = 0
+    let pendingGb = 0
+    let pendingTotalGb = 4.5
+    let pendingSpeed = ''
+    let pendingEta = ''
+
+    function flushToUi(): void {
+      if (!isMounted) return
+      setPercent(pendingPct)
+      setDownloadedGb(pendingGb)
+      setTotalGb(pendingTotalGb)
+      setSpeed(pendingSpeed)
+      setEta(pendingEta)
+    }
+
+    function formatSpeed(bytesPerSec: number): string {
+      if (bytesPerSec < 1e6) return `${(bytesPerSec / 1e3).toFixed(0)} KB/s`
+      return `${(bytesPerSec / 1e6).toFixed(1)} MB/s`
+    }
+
+    function formatEta(seconds: number): string {
+      if (seconds <= 0 || !isFinite(seconds)) return ''
+      const m = Math.floor(seconds / 60)
+      const s = Math.ceil(seconds % 60)
+      if (m === 0) return `${s}s left`
+      return `${m}m ${s}s left`
+    }
 
     async function run(): Promise<void> {
       try {
@@ -33,13 +77,59 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
         }
 
         unlisten = await window.api.onDownloadProgress((progress) => {
-          if (!isMounted) return  // component unmounted — ignore stale events
-          setPercent(progress.percent)
-          setDownloadedGb(progress.downloadedBytes / 1e9)
-          if (progress.totalBytes > 0) setTotalGb(progress.totalBytes / 1e9)
+          if (!isMounted) return
+
           if (progress.done) {
+            // Immediately flush final state
+            pendingPct = 100
+            pendingGb = progress.downloadedBytes / 1e9
+            pendingSpeed = ''
+            pendingEta = ''
+            flushToUi()
             if (unlisten) unlisten()
             onComplete()
+            return
+          }
+
+          // Enforce monotonic progress — never let the bar go backwards
+          const rawPct = progress.percent
+          if (rawPct > highWaterPct.current) highWaterPct.current = rawPct
+          pendingPct = highWaterPct.current
+
+          const rawBytes = progress.downloadedBytes
+          if (rawBytes > highWaterBytes.current) highWaterBytes.current = rawBytes
+          pendingGb = highWaterBytes.current / 1e9
+
+          if (progress.totalBytes > 0) pendingTotalGb = progress.totalBytes / 1e9
+
+          // Speed calculation: rolling 5-second window
+          const now = Date.now()
+          speedSamples.current.push({ time: now, bytes: highWaterBytes.current })
+          // Trim samples older than 5 seconds
+          const cutoff = now - 5000
+          speedSamples.current = speedSamples.current.filter((s) => s.time >= cutoff)
+          if (speedSamples.current.length >= 2) {
+            const oldest = speedSamples.current[0]
+            const newest = speedSamples.current[speedSamples.current.length - 1]
+            const elapsed = (newest.time - oldest.time) / 1000
+            const bytesDelta = newest.bytes - oldest.bytes
+            if (elapsed > 0.5) {
+              const bps = bytesDelta / elapsed
+              pendingSpeed = formatSpeed(bps)
+              const remaining = pendingTotalGb * 1e9 - highWaterBytes.current
+              if (bps > 0 && remaining > 0) {
+                pendingEta = formatEta(remaining / bps)
+              } else {
+                pendingEta = ''
+              }
+            }
+          }
+
+          // Throttle UI updates to ~4 per second (250ms)
+          if (now - lastUiUpdate.current >= 250) {
+            lastUiUpdate.current = now
+            if (rafId !== null) cancelAnimationFrame(rafId)
+            rafId = requestAnimationFrame(flushToUi)
           }
         })
         await window.api.downloadModels()
@@ -55,7 +145,8 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
 
     return () => {
       isMounted = false
-      if (unlisten) unlisten()  // always unregister progress listener on unmount
+      if (unlisten) unlisten()
+      if (rafId !== null) cancelAnimationFrame(rafId)
     }
   }, [attempt])
 
@@ -154,8 +245,13 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
               style={{ height: '6px', background: 'rgb(var(--ov) / 0.06)' }}
             >
               <div
-                className="h-full rounded-full transition-all duration-500 relative overflow-hidden"
-                style={{ width: `${percent}%`, background: 'linear-gradient(90deg, #b8923e, #c9a84c, #e8c97e)' }}
+                className="h-full rounded-full relative overflow-hidden"
+                style={{
+                  width: `${percent}%`,
+                  background: 'linear-gradient(90deg, #b8923e, #c9a84c, #e8c97e)',
+                  transition: 'width 0.6s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                  willChange: 'width',
+                }}
               >
                 {/* Shimmer overlay */}
                 {isDownloading && percent < 100 && (
@@ -173,11 +269,16 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
 
             {/* Stats */}
             <div className="flex items-center justify-between">
-              <span className="text-[13px] font-medium" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
+              <span className="text-[13px] font-medium tabular-nums" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                 {isDownloading ? (
                   percent < 100 ? (
                     <>
                       {downloadedGb.toFixed(2)} GB / {totalGb.toFixed(1)} GB
+                      {speed && (
+                        <span style={{ color: 'rgb(var(--ov) / 0.28)', marginLeft: '8px' }}>
+                          {speed}
+                        </span>
+                      )}
                     </>
                   ) : (
                     'Finalizing…'
@@ -186,8 +287,15 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
                   'Starting…'
                 )}
               </span>
-              <span className="text-[13px] font-bold tabular-nums" style={{ color: '#c9a84c' }}>
-                {percent}%
+              <span className="flex items-center gap-2">
+                {eta && percent < 100 && (
+                  <span className="text-[11px] tabular-nums" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+                    {eta}
+                  </span>
+                )}
+                <span className="text-[13px] font-bold tabular-nums" style={{ color: '#c9a84c' }}>
+                  {percent}%
+                </span>
               </span>
             </div>
 

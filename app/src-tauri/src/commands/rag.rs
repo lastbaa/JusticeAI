@@ -213,28 +213,34 @@ pub async fn download_models(
 
     // Byte counter starts at whatever was already on disk (0 if not resuming).
     let mut downloaded: u64 = if resuming { already_downloaded } else { 0 };
+    let mut last_emit = std::time::Instant::now();
 
     while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         downloaded += chunk.len() as u64;
 
-        let percent: u8 = if total_bytes > 0 {
-            (downloaded * 100 / total_bytes).min(99) as u8
-        } else {
-            0
-        };
+        // Throttle progress events to ~5 per second to prevent UI jitter
+        let now = std::time::Instant::now();
+        if now.duration_since(last_emit).as_millis() >= 200 {
+            last_emit = now;
+            let percent: u8 = if total_bytes > 0 {
+                (downloaded * 100 / total_bytes).min(99) as u8
+            } else {
+                0
+            };
 
-        window
-            .emit(
-                "download-progress",
-                serde_json::json!({
-                    "percent": percent,
-                    "downloadedBytes": downloaded,
-                    "totalBytes": total_bytes,
-                    "done": false
-                }),
-            )
-            .ok();
+            window
+                .emit(
+                    "download-progress",
+                    serde_json::json!({
+                        "percent": percent,
+                        "downloadedBytes": downloaded,
+                        "totalBytes": total_bytes,
+                        "done": false
+                    }),
+                )
+                .ok();
+        }
     }
 
     file.flush().await.map_err(|e| e.to_string())?;
