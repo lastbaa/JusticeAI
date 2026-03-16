@@ -353,15 +353,15 @@ export default function App(): JSX.Element {
       unlistenStatus = await window.api.onQueryStatus(
         (status: { phase: string; chunks?: number }) => {
           if (status.phase === 'embedding') {
-            setQueryPhase('Embedding query…')
+            setQueryPhase('Embedding query')
           } else if (status.phase === 'searching') {
             setQueryPhase(
               status.chunks != null
-                ? `Searching ${status.chunks} chunks…`
-                : 'Searching documents…'
+                ? `Searching ${status.chunks} chunks`
+                : 'Searching documents'
             )
           } else if (status.phase === 'generating') {
-            setQueryPhase('Generating answer…')
+            setQueryPhase('Generating answer')
           }
         }
       )

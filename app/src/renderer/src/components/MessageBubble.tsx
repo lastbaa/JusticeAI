@@ -7,6 +7,55 @@ interface Props {
   onViewCitation?: (citation: Citation) => void
 }
 
+// ── Deduplicated citation list with "show all" toggle ────────────────────────
+function CitationSources({ citations, onViewCitation }: { citations: Citation[]; onViewCitation?: (c: Citation) => void }): JSX.Element {
+  const [showAll, setShowAll] = useState(false)
+
+  // Deduplicate by (fileName, pageNumber) — keep highest-scored citation per page
+  const deduped: Citation[] = []
+  const seen = new Set<string>()
+  // citations are already sorted by score descending from the pipeline
+  for (const c of citations) {
+    const key = `${c.fileName}::${c.pageNumber}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      deduped.push(c)
+    }
+  }
+
+  const hasExtras = deduped.length < citations.length
+  const displayed = showAll ? citations.slice(0, 6) : deduped.slice(0, 6)
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between mb-2">
+        <p
+          className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+          style={{ color: 'rgb(var(--ov) / 0.18)' }}
+        >
+          Sources{!showAll && deduped.length > 0 ? ` (${deduped.length})` : showAll ? ` (${Math.min(citations.length, 6)})` : ''}
+        </p>
+        {hasExtras && (
+          <button
+            onClick={() => setShowAll((v) => !v)}
+            className="text-[10px] font-medium transition-colors"
+            style={{ color: 'rgba(201,168,76,0.5)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.85)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.5)' }}
+          >
+            {showAll ? 'Show unique pages' : 'Show all chunks'}
+          </button>
+        )}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {displayed.map((citation, idx) => (
+          <SourceCard key={idx} citation={citation} onView={onViewCitation} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
@@ -315,19 +364,7 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
         </p>
 
         {!isNotFound && message.citations && message.citations.length > 0 && (
-          <div className="mt-3">
-            <p
-              className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
-              style={{ color: 'rgb(var(--ov) / 0.18)' }}
-            >
-              Sources
-            </p>
-            <div className="flex flex-col gap-1.5">
-              {message.citations.slice(0, 6).map((citation, idx) => (
-                <SourceCard key={idx} citation={citation} onView={onViewCitation} />
-              ))}
-            </div>
-          </div>
+          <CitationSources citations={message.citations} onViewCitation={onViewCitation} />
         )}
       </div>
     </div>

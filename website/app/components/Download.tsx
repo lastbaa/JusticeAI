@@ -357,6 +357,49 @@ export default function Download() {
 
               <div className="border-t mt-8 mb-5" style={{ borderColor: 'rgba(255,255,255,0.06)' }} />
 
+              {/* Sample document for demo */}
+              <div
+                className="rounded-xl p-5 mb-6"
+                style={{ background: 'rgba(201,168,76,0.04)', border: '1px solid rgba(201,168,76,0.15)' }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.15em] mb-1" style={{ color: 'rgba(201,168,76,0.6)' }}>
+                      Sample Document
+                    </p>
+                    <p className="text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                      IRS W-9 (filled example) — try loading this into Justice AI to see cited answers in action.
+                    </p>
+                  </div>
+                  <a
+                    href="/irs_w9_filled.pdf"
+                    download="IRS_W9_Filled_Example.pdf"
+                    className="shrink-0 ml-4 flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all duration-200"
+                    style={{
+                      background: 'rgba(201,168,76,0.12)',
+                      border: '1px solid rgba(201,168,76,0.3)',
+                      color: '#c9a84c',
+                    }}
+                    onMouseEnter={(e) => {
+                      const el = e.currentTarget as HTMLAnchorElement
+                      el.style.background = 'rgba(201,168,76,0.2)'
+                      el.style.borderColor = 'rgba(201,168,76,0.45)'
+                    }}
+                    onMouseLeave={(e) => {
+                      const el = e.currentTarget as HTMLAnchorElement
+                      el.style.background = 'rgba(201,168,76,0.12)'
+                      el.style.borderColor = 'rgba(201,168,76,0.3)'
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 2v9M4.5 7.5L8 11l3.5-3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M2 13h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                    </svg>
+                    Download PDF
+                  </a>
+                </div>
+              </div>
+
               <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.3)' }}>
                 <span className="text-white font-medium">Everything runs on your machine.</span>{' '}
                 The app installer is under 20 MB. First launch downloads Saul-7B once (~4.5 GB) — after that, document parsing, vector search, and AI answers run entirely offline. No accounts, no API keys, no data ever touches the cloud.
