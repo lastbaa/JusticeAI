@@ -40,6 +40,8 @@ Note: legacy Electron files still exist in `app/src/main` and `app/src/preload`,
 - `.tif`
 - `.tiff`
 
+> Note on supported file types: All of the types listed above are "supported" in the sense that they can be ingested, but the degree of text extraction, as always, depends on the quality of the source. Ex: for image files such as .jpg, extraction will depend on the quality of the original file. OCR cannot do anything to rectify poor image quality. 
+
 ## Setup
 
 ### Prerequisites
