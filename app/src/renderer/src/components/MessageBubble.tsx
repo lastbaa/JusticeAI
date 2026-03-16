@@ -60,16 +60,22 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function GavelAvatar(): JSX.Element {
+function ScalesAvatar(): JSX.Element {
   return (
     <div
       className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full mt-0.5"
       style={{ background: 'rgba(201,168,76,0.09)', border: '1px solid rgba(201,168,76,0.2)' }}
     >
-      <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
-        <rect x="1" y="3" width="11" height="4" rx="1.25" fill="#c9a84c" transform="rotate(45 6.5 5)" />
-        <line x1="10.5" y1="10.5" x2="18.5" y2="18.5" stroke="#c9a84c" strokeWidth="2.5" strokeLinecap="round" />
-        <rect x="0.5" y="16.5" width="8.5" height="2.5" rx="0.75" fill="#c9a84c" opacity="0.38" />
+      <svg width="13" height="13" viewBox="0 0 28 28" fill="none">
+        <circle cx="14" cy="5" r="1.5" fill="#c9a84c" />
+        <rect x="13.25" y="5" width="1.5" height="16" fill="#c9a84c" />
+        <rect x="9" y="21" width="10" height="1.5" rx="0.75" fill="#c9a84c" />
+        <rect x="12" y="22.5" width="4" height="1.5" rx="0.75" fill="#c9a84c" />
+        <rect x="5" y="8.25" width="18" height="1.5" rx="0.75" fill="#c9a84c" />
+        <line x1="7" y1="9.75" x2="5.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
+        <line x1="21" y1="9.75" x2="22.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
+        <path d="M3 17 Q5.5 20 8 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+        <path d="M20 17 Q22.5 20 25 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
       </svg>
     </div>
   )
@@ -290,7 +296,7 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <GavelAvatar />
+      <ScalesAvatar />
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-2.5">
