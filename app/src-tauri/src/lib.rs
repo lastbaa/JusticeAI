@@ -109,11 +109,7 @@ fn get_file_server_port() -> u16 {
 /// Return build fingerprint (git hash + timestamp) so the UI can show which build is running.
 #[tauri::command]
 fn get_build_info() -> String {
-    format!(
-        "{} ({})",
-        env!("BUILD_GIT_HASH"),
-        env!("BUILD_TIMESTAMP"),
-    )
+    format!("{} ({})", env!("BUILD_GIT_HASH"), env!("BUILD_TIMESTAMP"),)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -195,6 +191,7 @@ pub fn run() {
             get_build_info,
             commands::ollama::check_ollama,
             commands::rag::check_models,
+            commands::rag::ensure_ocr_runtime,
             commands::rag::download_models,
             commands::rag::set_can_close,
             commands::rag::load_files,

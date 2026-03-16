@@ -3,6 +3,7 @@ import {
   DownloadProgress,
   FileInfo,
   ModelStatus,
+  OcrRuntimeStatus,
   OllamaStatus,
   QueryResult,
   ChatSession,
@@ -15,6 +16,7 @@ declare global {
     api: {
       checkOllama: () => Promise<OllamaStatus>
       checkModels: () => Promise<ModelStatus>
+      ensureOcrRuntime: () => Promise<OcrRuntimeStatus>
       downloadModels: () => Promise<void>
       onDownloadProgress: (cb: (p: DownloadProgress) => void) => Promise<() => void>
       openFileDialog: () => Promise<string[]>

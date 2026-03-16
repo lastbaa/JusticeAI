@@ -1,5 +1,78 @@
 use crate::state::DocumentPage;
+use calamine::{open_workbook_auto, Reader};
+use mailparse::MailHeaderMap;
+use regex::Regex;
 use std::io::Read;
+use std::path::Path;
+
+const MAX_FILE_SIZE_BYTES: u64 = 40 * 1024 * 1024;
+const MAX_TEXT_CHARS: usize = 2_000_000;
+const PAGE_CHAR_BUDGET: usize = 7_000;
+
+pub const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "pdf", "docx", "txt", "md", "csv", "eml", "html", "htm", "mhtml", "xml", "xlsx", "png", "jpg",
+    "jpeg", "tif", "tiff",
+];
+
+/// Resolve and validate file type using extension + lightweight magic checks.
+/// This blocks accidental parser confusion and simple extension spoofing.
+pub fn detect_supported_extension(path: &str) -> Result<String, String> {
+    enforce_file_security(path)?;
+
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .ok_or_else(|| format!("File has no extension: {path}"))?;
+
+    if !SUPPORTED_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(format!("Unsupported file type: {path}"));
+    }
+
+    let head = read_head(path, 8)?;
+    match ext.as_str() {
+        "pdf" if !head.starts_with(b"%PDF") => {
+            return Err(format!(
+                "File extension is .pdf but content is not a PDF: {path}"
+            ));
+        }
+        "png" if head != [137, 80, 78, 71, 13, 10, 26, 10] => {
+            return Err(format!(
+                "File extension is .png but header is invalid: {path}"
+            ));
+        }
+        "jpg" | "jpeg" if !head.starts_with(&[0xFF, 0xD8, 0xFF]) => {
+            return Err(format!(
+                "File extension is .jpg/.jpeg but header is invalid: {path}"
+            ));
+        }
+        "tif" | "tiff" if !(head.starts_with(b"II*\0") || head.starts_with(b"MM\0*")) => {
+            return Err(format!(
+                "File extension is .tif/.tiff but header is invalid: {path}"
+            ));
+        }
+        _ => {}
+    }
+
+    Ok(ext)
+}
+
+pub fn parse_by_extension(path: &str, ext: &str) -> Result<Vec<DocumentPage>, String> {
+    match ext {
+        "pdf" => parse_pdf(path),
+        "docx" => parse_docx(path),
+        "txt" => parse_plain_text(path),
+        "md" => parse_markdown(path),
+        "csv" => parse_csv(path),
+        "eml" => parse_eml(path),
+        "html" | "htm" => parse_html(path),
+        "mhtml" => parse_mhtml(path),
+        "xml" => parse_xml(path),
+        "xlsx" => parse_xlsx(path),
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" => parse_image_ocr(path),
+        _ => Err(format!("Unsupported file extension: {ext}")),
+    }
+}
 
 /// Parse a PDF file into pages of text.
 ///
@@ -101,15 +174,13 @@ fn append_acroform_values(doc: &lopdf::Document, pages: &mut [DocumentPage]) {
 
         // Get /Annots array
         let annots = match page_dict.get(b"Annots") {
-            Ok(obj) => {
-                match doc.dereference(obj) {
-                    Ok((_, lopdf::Object::Array(arr))) => arr.clone(),
-                    _ => match obj {
-                        lopdf::Object::Array(arr) => arr.clone(),
-                        _ => continue,
-                    },
-                }
-            }
+            Ok(obj) => match doc.dereference(obj) {
+                Ok((_, lopdf::Object::Array(arr))) => arr.clone(),
+                _ => match obj {
+                    lopdf::Object::Array(arr) => arr.clone(),
+                    _ => continue,
+                },
+            },
             Err(_) => continue,
         };
 
@@ -175,9 +246,10 @@ fn append_acroform_values(doc: &lopdf::Document, pages: &mut [DocumentPage]) {
                 .and_then(|o| match o {
                     lopdf::Object::Array(arr) if arr.len() >= 4 => {
                         // Rect = [x0, y0, x1, y1] — use y1 (top of field)
-                        arr[3].as_float().ok().or_else(|| {
-                            arr[3].as_i64().ok().map(|i| i as f32)
-                        })
+                        arr[3]
+                            .as_float()
+                            .ok()
+                            .or_else(|| arr[3].as_i64().ok().map(|i| i as f32))
                     }
                     _ => None,
                 })
@@ -191,9 +263,7 @@ fn append_acroform_values(doc: &lopdf::Document, pages: &mut [DocumentPage]) {
         }
 
         // Sort top-to-bottom (descending y = top of page first)
-        field_entries.sort_by(|a, b| {
-            b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        field_entries.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         // Collect as (label, value) pairs for the summary
         if page_idx >= pages.len() {
@@ -222,13 +292,17 @@ fn infer_field_label(value: &str) -> &'static str {
         return "ID Number";
     }
     // Looks like a full SSN (xxx-xx-xxxx)
-    if v.len() == 11 && v.chars().filter(|c| *c == '-').count() == 2
-        && v.replace('-', "").chars().all(|c| c.is_ascii_digit()) {
+    if v.len() == 11
+        && v.chars().filter(|c| *c == '-').count() == 2
+        && v.replace('-', "").chars().all(|c| c.is_ascii_digit())
+    {
         return "Social Security Number";
     }
     // ZIP code
-    if (v.len() == 5 || v.len() == 10) && v.chars().next().map_or(false, |c| c.is_ascii_digit())
-        && v.replace('-', "").chars().all(|c| c.is_ascii_digit()) {
+    if (v.len() == 5 || v.len() == 10)
+        && v.chars().next().map_or(false, |c| c.is_ascii_digit())
+        && v.replace('-', "").chars().all(|c| c.is_ascii_digit())
+    {
         return "ZIP Code";
     }
     // State abbreviation (2 uppercase letters)
@@ -244,15 +318,17 @@ fn infer_field_label(value: &str) -> &'static str {
         }
     }
     // Looks like a street address (starts with digits, has words)
-    if v.chars().next().map_or(false, |c| c.is_ascii_digit())
-        && v.contains(' ')
-        && v.len() > 5 {
+    if v.chars().next().map_or(false, |c| c.is_ascii_digit()) && v.contains(' ') && v.len() > 5 {
         return "Address";
     }
     // Multiple capitalized words → likely a name or business
     let words: Vec<&str> = v.split_whitespace().collect();
-    if words.len() >= 2 && words.len() <= 5
-        && words.iter().all(|w| w.chars().next().map_or(false, |c| c.is_uppercase())) {
+    if words.len() >= 2
+        && words.len() <= 5
+        && words
+            .iter()
+            .all(|w| w.chars().next().map_or(false, |c| c.is_uppercase()))
+    {
         if words.len() <= 3 && words.iter().all(|w| w.len() <= 15) {
             return "Name";
         }
@@ -273,11 +349,12 @@ fn prepend_form_summary(fields: &[(String, String)], pages: &mut [DocumentPage])
         if page_text.contains(value.as_str()) {
             continue; // Already in the text
         }
-        let clean_label = label
-            .replace("[0]", "")
-            .replace("[1]", "");
+        let clean_label = label.replace("[0]", "").replace("[1]", "");
         // For generic field names (f1_01, etc.), infer a descriptive label from the value
-        if clean_label.is_empty() || clean_label.starts_with("f1_") || clean_label.starts_with("f2_") {
+        if clean_label.is_empty()
+            || clean_label.starts_with("f1_")
+            || clean_label.starts_with("f2_")
+        {
             let inferred = infer_field_label(value);
             lines.push(format!("{inferred}: {value}"));
         } else {
@@ -389,9 +466,7 @@ fn collect_acroform_field(
     }
 
     let value = match dict.get(b"V") {
-        Ok(lopdf::Object::String(bytes, _)) => {
-            String::from_utf8_lossy(bytes).trim().to_string()
-        }
+        Ok(lopdf::Object::String(bytes, _)) => String::from_utf8_lossy(bytes).trim().to_string(),
         _ => return,
     };
     if value.is_empty() {
@@ -429,7 +504,9 @@ fn reinterleave_form_fields(
         let page_id = match page_map.get(&page_num) {
             Some(id) => *id,
             None => {
-                if fallback { result_pages.push(original_pages[page_idx].clone()); }
+                if fallback {
+                    result_pages.push(original_pages[page_idx].clone());
+                }
                 continue;
             }
         };
@@ -437,14 +514,18 @@ fn reinterleave_form_fields(
         let content_bytes = match doc.get_page_content(page_id) {
             Ok(b) => b,
             Err(_) => {
-                if fallback { result_pages.push(original_pages[page_idx].clone()); }
+                if fallback {
+                    result_pages.push(original_pages[page_idx].clone());
+                }
                 continue;
             }
         };
 
         let xobjects = collect_xobjects(doc, page_id);
         if xobjects.is_empty() {
-            if fallback { result_pages.push(original_pages[page_idx].clone()); }
+            if fallback {
+                result_pages.push(original_pages[page_idx].clone());
+            }
             continue;
         }
 
@@ -458,9 +539,13 @@ fn reinterleave_form_fields(
             match op {
                 ScannedOp::SaveState => ctm_stack.push(ctm),
                 ScannedOp::RestoreState => {
-                    if let Some(saved) = ctm_stack.pop() { ctm = saved; }
+                    if let Some(saved) = ctm_stack.pop() {
+                        ctm = saved;
+                    }
                 }
-                ScannedOp::ConcatMatrix(m) => { ctm = multiply_matrices(ctm, *m); }
+                ScannedOp::ConcatMatrix(m) => {
+                    ctm = multiply_matrices(ctm, *m);
+                }
                 ScannedOp::DoXObject(name) => {
                     xobj_entries.push((name.clone(), ctm));
                 }
@@ -468,7 +553,9 @@ fn reinterleave_form_fields(
         }
 
         if xobj_entries.len() < 2 {
-            if fallback { result_pages.push(original_pages[page_idx].clone()); }
+            if fallback {
+                result_pages.push(original_pages[page_idx].clone());
+            }
             continue;
         }
 
@@ -482,23 +569,27 @@ fn reinterleave_form_fields(
         }
 
         if sized_entries.is_empty() {
-            if fallback { result_pages.push(original_pages[page_idx].clone()); }
+            if fallback {
+                result_pages.push(original_pages[page_idx].clone());
+            }
             continue;
         }
 
         // Template = largest XObject; filled fields = the rest
         let max_size = sized_entries.iter().map(|e| e.2).max().unwrap_or(0);
         if max_size < 100 {
-            if fallback { result_pages.push(original_pages[page_idx].clone()); }
+            if fallback {
+                result_pages.push(original_pages[page_idx].clone());
+            }
             continue;
         }
 
-        let filled_fields: Vec<_> = sized_entries.iter()
-            .filter(|e| e.2 < max_size)
-            .collect();
+        let filled_fields: Vec<_> = sized_entries.iter().filter(|e| e.2 < max_size).collect();
 
         if filled_fields.is_empty() {
-            if fallback { result_pages.push(original_pages[page_idx].clone()); }
+            if fallback {
+                result_pages.push(original_pages[page_idx].clone());
+            }
             continue;
         }
 
@@ -515,7 +606,9 @@ fn reinterleave_form_fields(
         }
 
         if field_entries.is_empty() {
-            if fallback { result_pages.push(original_pages[page_idx].clone()); }
+            if fallback {
+                result_pages.push(original_pages[page_idx].clone());
+            }
             continue;
         }
 
@@ -525,7 +618,8 @@ fn reinterleave_form_fields(
         field_entries.sort_by(|a, b| {
             let ya = (-a.2 / 30.0).round() as i32;
             let yb = (-b.2 / 30.0).round() as i32;
-            ya.cmp(&yb).then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            ya.cmp(&yb)
+                .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
         });
 
         // Get the original page text from pdf-extract
@@ -545,7 +639,9 @@ fn reinterleave_form_fields(
         let template_text = match insert_point {
             Some(pos) => &original_text[..pos],
             None => {
-                if fallback { result_pages.push(original_pages[page_idx].clone()); }
+                if fallback {
+                    result_pages.push(original_pages[page_idx].clone());
+                }
                 continue;
             }
         };
@@ -554,7 +650,8 @@ fn reinterleave_form_fields(
         // Most form field values are short (names, dates, amounts) and decode
         // correctly. For longer values where lopdf strips spaces, we insert
         // spaces before capital letters that follow lowercase letters.
-        let field_values: Vec<String> = field_entries.iter()
+        let field_values: Vec<String> = field_entries
+            .iter()
             .map(|(t, _, _)| recover_spaces(t))
             .collect();
 
@@ -566,13 +663,17 @@ fn reinterleave_form_fields(
         while i < template_bytes.len() {
             if template_bytes[i] == b'_' {
                 let start = i;
-                while i < template_bytes.len() && template_bytes[i] == b'_' { i += 1; }
+                while i < template_bytes.len() && template_bytes[i] == b'_' {
+                    i += 1;
+                }
                 let run_len = i - start;
                 if run_len >= 4 && value_idx < field_values.len() {
                     interleaved.push_str(&field_values[value_idx]);
                     value_idx += 1;
                 } else {
-                    for _ in 0..run_len { interleaved.push('_'); }
+                    for _ in 0..run_len {
+                        interleaved.push('_');
+                    }
                 }
             } else {
                 interleaved.push(template_bytes[i] as char);
@@ -600,9 +701,10 @@ fn reinterleave_form_fields(
 /// Get the decompressed content size of an XObject stream.
 fn xobject_content_size(doc: &lopdf::Document, obj_id: lopdf::ObjectId) -> usize {
     match doc.get_object(obj_id) {
-        Ok(lopdf::Object::Stream(ref s)) => {
-            s.decompressed_content().map(|b| b.len()).unwrap_or(s.content.len())
-        }
+        Ok(lopdf::Object::Stream(ref s)) => s
+            .decompressed_content()
+            .map(|b| b.len())
+            .unwrap_or(s.content.len()),
         _ => 0,
     }
 }
@@ -615,10 +717,10 @@ fn xobject_content_size(doc: &lopdf::Document, obj_id: lopdf::ObjectId) -> usize
 
 #[derive(Debug)]
 enum ScannedOp {
-    SaveState,                   // q
-    RestoreState,                // Q
-    ConcatMatrix([f32; 6]),      // a b c d e f cm
-    DoXObject(String),           // /Name Do
+    SaveState,              // q
+    RestoreState,           // Q
+    ConcatMatrix([f32; 6]), // a b c d e f cm
+    DoXObject(String),      // /Name Do
 }
 
 /// Scan raw content stream bytes for q/Q/cm/Do operators.
@@ -642,7 +744,9 @@ fn scan_content_ops(bytes: &[u8]) -> Vec<ScannedOp> {
         if ch == '%' {
             while let Some(&(_, c)) = chars.peek() {
                 chars.next();
-                if c == '\n' || c == '\r' { break; }
+                if c == '\n' || c == '\r' {
+                    break;
+                }
             }
             continue;
         }
@@ -653,8 +757,16 @@ fn scan_content_ops(bytes: &[u8]) -> Vec<ScannedOp> {
             let start = i + 1;
             let mut end = start;
             while let Some(&(j, c)) = chars.peek() {
-                if c.is_ascii_whitespace() || c == '/' || c == '[' || c == ']'
-                    || c == '(' || c == ')' || c == '<' || c == '>' || c == '{' || c == '}'
+                if c.is_ascii_whitespace()
+                    || c == '/'
+                    || c == '['
+                    || c == ']'
+                    || c == '('
+                    || c == ')'
+                    || c == '<'
+                    || c == '>'
+                    || c == '{'
+                    || c == '}'
                 {
                     break;
                 }
@@ -696,9 +808,19 @@ fn scan_content_ops(bytes: &[u8]) -> Vec<ScannedOp> {
                     prev_backslash = false;
                     continue;
                 }
-                if c == '\\' { prev_backslash = true; continue; }
-                if c == '(' { depth += 1; }
-                if c == ')' { depth -= 1; if depth == 0 { break; } }
+                if c == '\\' {
+                    prev_backslash = true;
+                    continue;
+                }
+                if c == '(' {
+                    depth += 1;
+                }
+                if c == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
             }
             continue;
         }
@@ -713,16 +835,27 @@ fn scan_content_ops(bytes: &[u8]) -> Vec<ScannedOp> {
                 while let Some(&(_, c)) = chars.peek() {
                     chars.next();
                     if c == '<' {
-                        if let Some(&(_, '<')) = chars.peek() { chars.next(); depth += 1; }
+                        if let Some(&(_, '<')) = chars.peek() {
+                            chars.next();
+                            depth += 1;
+                        }
                     } else if c == '>' {
-                        if let Some(&(_, '>')) = chars.peek() { chars.next(); depth -= 1; if depth == 0 { break; } }
+                        if let Some(&(_, '>')) = chars.peek() {
+                            chars.next();
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
                     }
                 }
             } else {
                 // hex string — skip until >
                 while let Some(&(_, c)) = chars.peek() {
                     chars.next();
-                    if c == '>' { break; }
+                    if c == '>' {
+                        break;
+                    }
                 }
             }
             continue;
@@ -734,8 +867,15 @@ fn scan_content_ops(bytes: &[u8]) -> Vec<ScannedOp> {
             let mut depth = 1;
             while let Some(&(_, c)) = chars.peek() {
                 chars.next();
-                if c == '[' { depth += 1; }
-                if c == ']' { depth -= 1; if depth == 0 { break; } }
+                if c == '[' {
+                    depth += 1;
+                }
+                if c == ']' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
             }
             continue;
         }
@@ -893,11 +1033,19 @@ fn extract_text_from_content_bytes(
     let mut pending_strings: Vec<(Vec<u8>, bool)> = Vec::new(); // (bytes, is_hex)
 
     while let Some(&(cur_i, ch)) = chars.peek() {
-        if ch.is_ascii_whitespace() { chars.next(); continue; }
+        if ch.is_ascii_whitespace() {
+            chars.next();
+            continue;
+        }
 
         // Comment
         if ch == '%' {
-            while let Some(&(_, c)) = chars.peek() { chars.next(); if c == '\n' || c == '\r' { break; } }
+            while let Some(&(_, c)) = chars.peek() {
+                chars.next();
+                if c == '\n' || c == '\r' {
+                    break;
+                }
+            }
             continue;
         }
 
@@ -906,7 +1054,9 @@ fn extract_text_from_content_bytes(
             chars.next();
             let mut name = String::new();
             while let Some(&(_, c)) = chars.peek() {
-                if c.is_ascii_whitespace() || b"/[]()<>{}".contains(&(c as u8)) { break; }
+                if c.is_ascii_whitespace() || b"/[]()<>{}".contains(&(c as u8)) {
+                    break;
+                }
                 name.push(c);
                 chars.next();
             }
@@ -920,7 +1070,12 @@ fn extract_text_from_content_bytes(
             chars.next();
             let mut end_i = start_i + ch.len_utf8();
             while let Some(&(j, c)) = chars.peek() {
-                if c.is_ascii_digit() || c == '.' { end_i = j + c.len_utf8(); chars.next(); } else { break; }
+                if c.is_ascii_digit() || c == '.' {
+                    end_i = j + c.len_utf8();
+                    chars.next();
+                } else {
+                    break;
+                }
             }
             if let Ok(n) = raw[start_i..end_i].parse::<f32>() {
                 number_stack.push(n);
@@ -949,9 +1104,23 @@ fn extract_text_from_content_bytes(
                     }
                     continue;
                 }
-                if c == '\\' { prev_backslash = true; continue; }
-                if c == '(' { depth += 1; string_bytes.push(b'('); continue; }
-                if c == ')' { depth -= 1; if depth == 0 { break; } string_bytes.push(b')'); continue; }
+                if c == '\\' {
+                    prev_backslash = true;
+                    continue;
+                }
+                if c == '(' {
+                    depth += 1;
+                    string_bytes.push(b'(');
+                    continue;
+                }
+                if c == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    string_bytes.push(b')');
+                    continue;
+                }
                 string_bytes.push(c as u8);
             }
             pending_strings.push((string_bytes, false));
@@ -967,15 +1136,31 @@ fn extract_text_from_content_bytes(
                 let mut depth = 1;
                 while let Some(&(_, c)) = chars.peek() {
                     chars.next();
-                    if c == '<' { if let Some(&(_, '<')) = chars.peek() { chars.next(); depth += 1; } }
-                    else if c == '>' { if let Some(&(_, '>')) = chars.peek() { chars.next(); depth -= 1; if depth == 0 { break; } } }
+                    if c == '<' {
+                        if let Some(&(_, '<')) = chars.peek() {
+                            chars.next();
+                            depth += 1;
+                        }
+                    } else if c == '>' {
+                        if let Some(&(_, '>')) = chars.peek() {
+                            chars.next();
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                    }
                 }
             } else {
                 let mut hex = String::new();
                 while let Some(&(_, c)) = chars.peek() {
                     chars.next();
-                    if c == '>' { break; }
-                    if c.is_ascii_hexdigit() { hex.push(c); }
+                    if c == '>' {
+                        break;
+                    }
+                    if c.is_ascii_hexdigit() {
+                        hex.push(c);
+                    }
                 }
                 let hex_bytes: Vec<u8> = (0..hex.len())
                     .step_by(2)
@@ -994,8 +1179,19 @@ fn extract_text_from_content_bytes(
             let mut depth = 1;
             let mut arr_strings: Vec<(Vec<u8>, bool)> = Vec::new();
             while let Some(&(_, c)) = chars.peek() {
-                if c == ']' { chars.next(); depth -= 1; if depth == 0 { break; } continue; }
-                if c == '[' { chars.next(); depth += 1; continue; }
+                if c == ']' {
+                    chars.next();
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    continue;
+                }
+                if c == '[' {
+                    chars.next();
+                    depth += 1;
+                    continue;
+                }
                 if c == '(' {
                     chars.next();
                     let mut sdepth = 1;
@@ -1003,10 +1199,33 @@ fn extract_text_from_content_bytes(
                     let mut esc = false;
                     while let Some(&(_, sc)) = chars.peek() {
                         chars.next();
-                        if esc { esc = false; match sc { 'n' => sbytes.push(b'\n'), 'r' => sbytes.push(b'\r'), 't' => sbytes.push(b'\t'), _ => sbytes.push(sc as u8) }; continue; }
-                        if sc == '\\' { esc = true; continue; }
-                        if sc == '(' { sdepth += 1; sbytes.push(b'('); continue; }
-                        if sc == ')' { sdepth -= 1; if sdepth == 0 { break; } sbytes.push(b')'); continue; }
+                        if esc {
+                            esc = false;
+                            match sc {
+                                'n' => sbytes.push(b'\n'),
+                                'r' => sbytes.push(b'\r'),
+                                't' => sbytes.push(b'\t'),
+                                _ => sbytes.push(sc as u8),
+                            };
+                            continue;
+                        }
+                        if sc == '\\' {
+                            esc = true;
+                            continue;
+                        }
+                        if sc == '(' {
+                            sdepth += 1;
+                            sbytes.push(b'(');
+                            continue;
+                        }
+                        if sc == ')' {
+                            sdepth -= 1;
+                            if sdepth == 0 {
+                                break;
+                            }
+                            sbytes.push(b')');
+                            continue;
+                        }
                         sbytes.push(sc as u8);
                     }
                     arr_strings.push((sbytes, false));
@@ -1020,18 +1239,37 @@ fn extract_text_from_content_bytes(
                         let mut ddepth = 1;
                         while let Some(&(_, dc)) = chars.peek() {
                             chars.next();
-                            if dc == '<' { if let Some(&(_, '<')) = chars.peek() { chars.next(); ddepth += 1; } }
-                            else if dc == '>' { if let Some(&(_, '>')) = chars.peek() { chars.next(); ddepth -= 1; if ddepth == 0 { break; } } }
+                            if dc == '<' {
+                                if let Some(&(_, '<')) = chars.peek() {
+                                    chars.next();
+                                    ddepth += 1;
+                                }
+                            } else if dc == '>' {
+                                if let Some(&(_, '>')) = chars.peek() {
+                                    chars.next();
+                                    ddepth -= 1;
+                                    if ddepth == 0 {
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     } else {
                         let mut hex = String::new();
                         while let Some(&(_, hc)) = chars.peek() {
                             chars.next();
-                            if hc == '>' { break; }
-                            if hc.is_ascii_hexdigit() { hex.push(hc); }
+                            if hc == '>' {
+                                break;
+                            }
+                            if hc.is_ascii_hexdigit() {
+                                hex.push(hc);
+                            }
                         }
-                        let hbytes: Vec<u8> = (0..hex.len()).step_by(2)
-                            .filter_map(|i| u8::from_str_radix(&hex[i..(i+2).min(hex.len())], 16).ok())
+                        let hbytes: Vec<u8> = (0..hex.len())
+                            .step_by(2)
+                            .filter_map(|i| {
+                                u8::from_str_radix(&hex[i..(i + 2).min(hex.len())], 16).ok()
+                            })
                             .collect();
                         arr_strings.push((hbytes, true));
                     }
@@ -1180,7 +1418,9 @@ fn collect_xobject_fonts(
 /// - After `,` when not followed by a space or digit
 fn recover_spaces(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= 1 { return text.to_string(); }
+    if chars.len() <= 1 {
+        return text.to_string();
+    }
     let mut result = String::with_capacity(text.len() + text.len() / 4);
     result.push(chars[0]);
     for i in 1..chars.len() {
@@ -1229,13 +1469,16 @@ fn pdf_extract_pages(raw: &str) -> Vec<DocumentPage> {
 
     // Quality gate: at least 60 % of characters must be printable
     // (printable = not a control char and not in Unicode Private Use Area).
-    let printable = raw.chars().filter(|&c| {
-        let code = c as u32;
-        c == '\n' || c == '\t' || c == '\x0c'
-            || (!c.is_control()
-                && !(0xE000..=0xF8FF).contains(&code)
-                && code < 0xFFF0)
-    }).count();
+    let printable = raw
+        .chars()
+        .filter(|&c| {
+            let code = c as u32;
+            c == '\n'
+                || c == '\t'
+                || c == '\x0c'
+                || (!c.is_control() && !(0xE000..=0xF8FF).contains(&code) && code < 0xFFF0)
+        })
+        .count();
     let ratio = printable as f32 / total_chars as f32;
     if ratio < 0.60 {
         return Vec::new();
@@ -1289,7 +1532,11 @@ fn decode_pdf_string(bytes: &[u8]) -> String {
         let chars: Vec<u16> = bytes[2..]
             .chunks(2)
             .filter_map(|c| {
-                if c.len() == 2 { Some(u16::from_be_bytes([c[0], c[1]])) } else { None }
+                if c.len() == 2 {
+                    Some(u16::from_be_bytes([c[0], c[1]]))
+                } else {
+                    None
+                }
             })
             .collect();
         String::from_utf16_lossy(&chars)
@@ -1311,28 +1558,28 @@ fn clean_pdf_text(text: &str) -> String {
     // looks correct visually but doesn't match the plain-ASCII "fi" that the
     // embedding model was trained on.
     let text = text
-        .replace('\u{FB00}', "ff")   // ﬀ
-        .replace('\u{FB01}', "fi")   // ﬁ
-        .replace('\u{FB02}', "fl")   // ﬂ
-        .replace('\u{FB03}', "ffi")  // ﬃ
-        .replace('\u{FB04}', "ffl")  // ﬄ
-        .replace('\u{FB05}', "st")   // ﬅ
-        .replace('\u{FB06}', "st");  // ﬆ
+        .replace('\u{FB00}', "ff") // ﬀ
+        .replace('\u{FB01}', "fi") // ﬁ
+        .replace('\u{FB02}', "fl") // ﬂ
+        .replace('\u{FB03}', "ffi") // ﬃ
+        .replace('\u{FB04}', "ffl") // ﬄ
+        .replace('\u{FB05}', "st") // ﬅ
+        .replace('\u{FB06}', "st"); // ﬆ
 
     // Typographic quotes → straight ASCII (keeps tokenisation consistent)
     let text = text
-        .replace('\u{2018}', "'")    // ' left single
-        .replace('\u{2019}', "'")    // ' right single / apostrophe
-        .replace('\u{201C}', "\"")   // " left double
-        .replace('\u{201D}', "\"")   // " right double
-        .replace('\u{201A}', ",")    // ‚ single low-9 (misused as comma in some fonts)
-        .replace('\u{201E}', "\"");  // „ double low-9
+        .replace('\u{2018}', "'") // ' left single
+        .replace('\u{2019}', "'") // ' right single / apostrophe
+        .replace('\u{201C}', "\"") // " left double
+        .replace('\u{201D}', "\"") // " right double
+        .replace('\u{201A}', ",") // ‚ single low-9 (misused as comma in some fonts)
+        .replace('\u{201E}', "\""); // „ double low-9
 
     // Dashes and special spaces
     let text = text
-        .replace('\u{2013}', "-")    // – en dash → hyphen
-        .replace('\u{00A0}', " ")    // non-breaking space → regular space
-        .replace('\u{00AD}', "");    // soft hyphen (invisible) → remove
+        .replace('\u{2013}', "-") // – en dash → hyphen
+        .replace('\u{00A0}', " ") // non-breaking space → regular space
+        .replace('\u{00AD}', ""); // soft hyphen (invisible) → remove
 
     // ── Pass 2: character-level whitespace normalization + PUA stripping ─────
     // Preserve newlines, collapse runs of other whitespace to a single space,
@@ -1388,11 +1635,7 @@ fn remove_hyphen_breaks(text: &str) -> String {
     let mut i = 0;
     while i < len {
         // Pattern: '-' followed by '\n' followed by a letter → join without hyphen.
-        if i + 2 < len
-            && chars[i] == '-'
-            && chars[i + 1] == '\n'
-            && chars[i + 2].is_alphabetic()
-        {
+        if i + 2 < len && chars[i] == '-' && chars[i + 1] == '\n' && chars[i + 2].is_alphabetic() {
             // Drop the hyphen and newline; the next character follows normally.
             i += 2;
             continue;
@@ -1438,8 +1681,8 @@ pub fn parse_docx(path: &str) -> Result<Vec<DocumentPage>, String> {
             .map_err(|e| format!("Read error: {e}"))?;
     }
 
-    let doc = roxmltree::Document::parse(&xml_content)
-        .map_err(|e| format!("XML parse error: {e}"))?;
+    let doc =
+        roxmltree::Document::parse(&xml_content).map_err(|e| format!("XML parse error: {e}"))?;
 
     let ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     let mut pages: Vec<String> = vec![String::new()];
@@ -1511,6 +1754,494 @@ pub fn parse_docx(path: &str) -> Result<Vec<DocumentPage>, String> {
     Ok(result)
 }
 
+fn enforce_file_security(path: &str) -> Result<(), String> {
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("Could not read file metadata for {path}: {e}"))?;
+
+    if !meta.is_file() {
+        return Err(format!("Not a regular file: {path}"));
+    }
+    if meta.len() == 0 {
+        return Err(format!("File is empty: {path}"));
+    }
+    if meta.len() > MAX_FILE_SIZE_BYTES {
+        return Err(format!(
+            "File is too large ({:.1} MB). Limit is {:.1} MB.",
+            meta.len() as f64 / 1_000_000.0,
+            MAX_FILE_SIZE_BYTES as f64 / 1_000_000.0
+        ));
+    }
+    Ok(())
+}
+
+fn read_head(path: &str, n: usize) -> Result<Vec<u8>, String> {
+    let mut file = std::fs::File::open(path).map_err(|e| format!("Open error: {e}"))?;
+    let mut buf = vec![0u8; n];
+    let bytes_read = file
+        .read(&mut buf)
+        .map_err(|e| format!("Read error: {e}"))?;
+    buf.truncate(bytes_read);
+    Ok(buf)
+}
+
+fn normalize_text(mut text: String) -> String {
+    if text.len() > MAX_TEXT_CHARS {
+        let cut = text.floor_char_boundary(MAX_TEXT_CHARS);
+        text.truncate(cut);
+    }
+
+    text = text.replace('\r', "\n");
+    text = text.replace('\t', " ");
+
+    let mut cleaned = String::with_capacity(text.len());
+    let mut newline_run = 0usize;
+    for ch in text.chars() {
+        let code = ch as u32;
+        let printable =
+            ch == '\n' || (!ch.is_control() && !(0xE000..=0xF8FF).contains(&code) && code < 0xFFF0);
+        if !printable {
+            continue;
+        }
+
+        if ch == '\n' {
+            newline_run += 1;
+            if newline_run > 2 {
+                continue;
+            }
+        } else {
+            newline_run = 0;
+        }
+        cleaned.push(ch);
+    }
+
+    let mut deduped = String::new();
+    let mut prev = String::new();
+    let mut run = 0usize;
+    for line in cleaned.lines() {
+        let normalized = line.trim();
+        if normalized.is_empty() {
+            deduped.push('\n');
+            prev.clear();
+            run = 0;
+            continue;
+        }
+
+        if normalized == prev {
+            run += 1;
+            if run >= 3 {
+                continue;
+            }
+        } else {
+            prev = normalized.to_string();
+            run = 0;
+        }
+
+        deduped.push_str(normalized);
+        deduped.push('\n');
+    }
+
+    deduped.trim().to_string()
+}
+
+fn paginate_text(text: &str) -> Vec<DocumentPage> {
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    if text.len() <= PAGE_CHAR_BUDGET {
+        return vec![DocumentPage {
+            page_number: 1,
+            text: text.to_string(),
+        }];
+    }
+
+    let mut pages = Vec::new();
+    let mut start = 0usize;
+    let mut page_number = 1u32;
+    while start < text.len() {
+        let mut end = (start + PAGE_CHAR_BUDGET).min(text.len());
+        end = text.floor_char_boundary(end);
+        if end < text.len() {
+            let window = &text[start..end];
+            if let Some(idx) = window.rfind('\n') {
+                let candidate = start + idx;
+                if candidate > start + PAGE_CHAR_BUDGET / 2 {
+                    end = candidate;
+                }
+            }
+        }
+        if end <= start {
+            break;
+        }
+
+        let page = text[start..end].trim();
+        if !page.is_empty() {
+            pages.push(DocumentPage {
+                page_number,
+                text: page.to_string(),
+            });
+            page_number += 1;
+        }
+        start = end;
+    }
+    pages
+}
+
+fn parse_plain_text(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Text read error: {e}"))?;
+    let text = normalize_text(String::from_utf8_lossy(&bytes).into_owned());
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("No text content found".to_string());
+    }
+    Ok(pages)
+}
+
+fn parse_markdown(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Markdown read error: {e}"))?;
+    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    // Keep heading words, drop markdown punctuation to reduce token overhead.
+    let re_md = Regex::new(r"(?m)^\s{0,3}([#>\-\*\+]\s+|`{3,}.*$)").map_err(|e| e.to_string())?;
+    text = re_md.replace_all(&text, "").to_string();
+    let text = normalize_text(text);
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("No markdown content found".to_string());
+    }
+    Ok(pages)
+}
+
+fn parse_csv(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+
+    let mut rdr = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_path(path)
+        .map_err(|e| format!("CSV parse error: {e}"))?;
+
+    let headers = rdr
+        .headers()
+        .map_err(|e| format!("CSV headers error: {e}"))?
+        .iter()
+        .map(|h| h.trim().to_string())
+        .collect::<Vec<String>>();
+
+    let mut rows: Vec<String> = Vec::new();
+    for (idx, rec) in rdr.records().enumerate() {
+        if idx >= 50_000 {
+            break;
+        }
+        let record = rec.map_err(|e| format!("CSV row error: {e}"))?;
+        let mut parts = Vec::new();
+        for (col_i, val) in record.iter().enumerate().take(200) {
+            let cell = val.trim();
+            if cell.is_empty() {
+                continue;
+            }
+            let key = headers
+                .get(col_i)
+                .cloned()
+                .unwrap_or_else(|| format!("col_{}", col_i + 1));
+            let clipped = cell.chars().take(500).collect::<String>();
+            parts.push(format!("{key}: {clipped}"));
+        }
+        if parts.is_empty() {
+            continue;
+        }
+        rows.push(format!("Row {} | {}", idx + 1, parts.join(" | ")));
+    }
+
+    if rows.is_empty() {
+        return Err("No usable CSV rows found".to_string());
+    }
+
+    let text = normalize_text(rows.join("\n"));
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("No CSV content found".to_string());
+    }
+    Ok(pages)
+}
+
+fn html_to_text(html: &str) -> Result<String, String> {
+    let re_script = Regex::new(r"(?is)<script[^>]*>.*?</script>").map_err(|e| e.to_string())?;
+    let re_style = Regex::new(r"(?is)<style[^>]*>.*?</style>").map_err(|e| e.to_string())?;
+    let re_nav = Regex::new(r"(?is)<nav[^>]*>.*?</nav>").map_err(|e| e.to_string())?;
+    let re_footer = Regex::new(r"(?is)<footer[^>]*>.*?</footer>").map_err(|e| e.to_string())?;
+    let re_aside = Regex::new(r"(?is)<aside[^>]*>.*?</aside>").map_err(|e| e.to_string())?;
+    let no_script = re_script.replace_all(html, " ");
+    let no_style = re_style.replace_all(&no_script, " ");
+    let no_nav = re_nav.replace_all(&no_style, " ");
+    let no_footer = re_footer.replace_all(&no_nav, " ");
+    let reduced = re_aside.replace_all(&no_footer, " ");
+    Ok(html2text::from_read(reduced.as_bytes(), 120))
+}
+
+fn parse_html(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+    let bytes = std::fs::read(path).map_err(|e| format!("HTML read error: {e}"))?;
+    let text = html_to_text(&String::from_utf8_lossy(&bytes))?;
+    let text = normalize_text(text);
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("No HTML content found".to_string());
+    }
+    Ok(pages)
+}
+
+fn collect_mail_bodies(
+    part: &mailparse::ParsedMail<'_>,
+    plain: &mut Vec<String>,
+    html: &mut Vec<String>,
+) {
+    if part.subparts.is_empty() {
+        let mime = part.ctype.mimetype.to_ascii_lowercase();
+        if mime == "text/plain" {
+            if let Ok(body) = part.get_body() {
+                plain.push(body);
+            }
+        } else if mime == "text/html" {
+            if let Ok(body) = part.get_body() {
+                html.push(body);
+            }
+        }
+        return;
+    }
+    for sub in &part.subparts {
+        collect_mail_bodies(sub, plain, html);
+    }
+}
+
+fn parse_eml(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+    let bytes = std::fs::read(path).map_err(|e| format!("EML read error: {e}"))?;
+    let parsed = mailparse::parse_mail(&bytes).map_err(|e| format!("EML parse error: {e}"))?;
+
+    let mut out = String::new();
+    for header in ["Subject", "From", "To", "Cc", "Date"] {
+        if let Some(v) = parsed.headers.get_first_value(header) {
+            out.push_str(&format!("{header}: {}\n", v.trim()));
+        }
+    }
+    out.push('\n');
+
+    let mut plain = Vec::new();
+    let mut html = Vec::new();
+    collect_mail_bodies(&parsed, &mut plain, &mut html);
+
+    if !plain.is_empty() {
+        out.push_str("Email Body:\n");
+        out.push_str(&plain.join("\n\n"));
+    } else if !html.is_empty() {
+        out.push_str("Email Body:\n");
+        out.push_str(&html_to_text(&html.join("\n\n"))?);
+    }
+
+    let text = normalize_text(out);
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("No email content found".to_string());
+    }
+    Ok(pages)
+}
+
+fn parse_mhtml(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+    let bytes = std::fs::read(path).map_err(|e| format!("MHTML read error: {e}"))?;
+    let parsed = mailparse::parse_mail(&bytes).map_err(|e| format!("MHTML parse error: {e}"))?;
+
+    let mut plain = Vec::new();
+    let mut html = Vec::new();
+    collect_mail_bodies(&parsed, &mut plain, &mut html);
+
+    let body = if !html.is_empty() {
+        html_to_text(&html.join("\n\n"))?
+    } else {
+        plain.join("\n\n")
+    };
+
+    let text = normalize_text(body);
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("No MHTML content found".to_string());
+    }
+    Ok(pages)
+}
+
+fn parse_xml(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("XML read error: {e}"))?;
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("<!doctype") || lower.contains("<!entity") {
+        return Err(
+            "XML DOCTYPE/ENTITY declarations are not allowed for security reasons.".to_string(),
+        );
+    }
+
+    let doc = roxmltree::Document::parse(&raw).map_err(|e| format!("XML parse error: {e}"))?;
+    let mut lines = Vec::<String>::new();
+    for node in doc.descendants().filter(|n| n.is_element()) {
+        let path = node
+            .ancestors()
+            .filter(|n| n.is_element())
+            .map(|n| n.tag_name().name())
+            .collect::<Vec<&str>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<&str>>()
+            .join("/");
+
+        if let Some(text) = node.text().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+            let clipped = text.chars().take(500).collect::<String>();
+            lines.push(format!("{path}: {clipped}"));
+        }
+
+        for attr in node.attributes() {
+            let v = attr.value().trim();
+            if !v.is_empty() {
+                let clipped = v.chars().take(300).collect::<String>();
+                lines.push(format!("{path}@{}: {clipped}", attr.name()));
+            }
+        }
+
+        if lines.len() > 100_000 {
+            break;
+        }
+    }
+
+    if lines.is_empty() {
+        return Err("No XML textual content found".to_string());
+    }
+
+    let text = normalize_text(lines.join("\n"));
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("No XML content found".to_string());
+    }
+    Ok(pages)
+}
+
+fn cell_to_string<T: std::fmt::Display>(v: T) -> String {
+    let s = v.to_string();
+    s.trim().to_string()
+}
+
+fn parse_xlsx(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+    let mut workbook = open_workbook_auto(path).map_err(|e| format!("XLSX open error: {e}"))?;
+
+    let mut lines = Vec::<String>::new();
+    let sheets = workbook.sheet_names().to_owned();
+    for sheet in sheets {
+        let Ok(range) = workbook.worksheet_range(&sheet) else {
+            continue;
+        };
+        let mut header: Vec<String> = Vec::new();
+
+        for (row_idx, row) in range.rows().enumerate() {
+            if row_idx >= 10_000 {
+                break;
+            }
+            let values: Vec<String> = row.iter().map(cell_to_string).collect();
+            if values.iter().all(|v| v.is_empty()) {
+                continue;
+            }
+
+            if header.is_empty() {
+                header = values;
+                continue;
+            }
+
+            let mut parts = Vec::new();
+            for (i, cell) in values.iter().enumerate().take(200) {
+                if cell.is_empty() {
+                    continue;
+                }
+                let key = header
+                    .get(i)
+                    .filter(|h| !h.trim().is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| format!("col_{}", i + 1));
+                let clipped = cell.chars().take(500).collect::<String>();
+                parts.push(format!("{key}: {clipped}"));
+            }
+            if !parts.is_empty() {
+                lines.push(format!(
+                    "Sheet {sheet} | Row {} | {}",
+                    row_idx + 1,
+                    parts.join(" | ")
+                ));
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        return Err("No tabular XLSX content found".to_string());
+    }
+
+    let text = normalize_text(lines.join("\n"));
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("No XLSX content found".to_string());
+    }
+    Ok(pages)
+}
+
+fn parse_image_ocr(path: &str) -> Result<Vec<DocumentPage>, String> {
+    enforce_file_security(path)?;
+
+    let bin = tesseract_binary().ok_or_else(|| {
+        "OCR unavailable: Tesseract is not installed. The app can auto-install it during setup on supported platforms."
+            .to_string()
+    })?;
+
+    let output = std::process::Command::new(bin)
+        .arg(path)
+        .arg("stdout")
+        .arg("-l")
+        .arg("eng")
+        .arg("--psm")
+        .arg("6")
+        .output()
+        .map_err(|e| {
+            format!(
+                "OCR unavailable: could not execute 'tesseract' ({e}). Install Tesseract OCR to ingest images."
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("OCR failed: {}", stderr.trim()));
+    }
+
+    let text = normalize_text(String::from_utf8_lossy(&output.stdout).into_owned());
+    let pages = paginate_text(&text);
+    if pages.is_empty() {
+        return Err("OCR produced no text".to_string());
+    }
+    Ok(pages)
+}
+
+pub fn tesseract_binary() -> Option<std::path::PathBuf> {
+    let candidates = [
+        std::path::PathBuf::from("tesseract"),
+        std::path::PathBuf::from("/opt/homebrew/bin/tesseract"),
+        std::path::PathBuf::from("/usr/local/bin/tesseract"),
+        std::path::PathBuf::from("/usr/bin/tesseract"),
+    ];
+
+    for candidate in candidates {
+        let output = std::process::Command::new(&candidate)
+            .arg("--version")
+            .output();
+        if output.map(|o| o.status.success()).unwrap_or(false) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1530,7 +2261,11 @@ mod tests {
         eprintln!("Pages: {}, total chars: {}", pages.len(), total_chars);
 
         for page in pages.iter().take(3) {
-            eprintln!("\n--- PAGE {} ({} chars) ---", page.page_number, page.text.len());
+            eprintln!(
+                "\n--- PAGE {} ({} chars) ---",
+                page.page_number,
+                page.text.len()
+            );
             eprintln!("{}", &page.text[..page.text.len().min(500)]);
 
             // No private-use-area characters should survive
@@ -1545,7 +2280,9 @@ mod tests {
             }
             // No control characters except newline/tab
             for ch in page.text.chars() {
-                if ch == '\n' || ch == '\t' { continue; }
+                if ch == '\n' || ch == '\t' {
+                    continue;
+                }
                 assert!(
                     !ch.is_control(),
                     "Control char U+{:04X} found on page {} — sanitization failed",
@@ -1571,7 +2308,11 @@ mod tests {
         assert!(cleaned.contains("$85,000"));
         for ch in cleaned.chars() {
             let code = ch as u32;
-            assert!(!(0xE000..=0xF8FF).contains(&code), "PUA char U+{:04X} not stripped", code);
+            assert!(
+                !(0xE000..=0xF8FF).contains(&code),
+                "PUA char U+{:04X} not stripped",
+                code
+            );
         }
     }
 
@@ -1599,7 +2340,10 @@ mod tests {
     fn test_hyphen_line_break_removal() {
         let raw = "The agree-\nment shall terminate upon written notice.";
         let cleaned = clean_pdf_text(raw);
-        assert!(cleaned.contains("agreement"), "hyphen line break not joined: got {cleaned:?}");
+        assert!(
+            cleaned.contains("agreement"),
+            "hyphen line break not joined: got {cleaned:?}"
+        );
         assert!(!cleaned.contains("-\n"));
     }
 
@@ -1608,7 +2352,10 @@ mod tests {
         // A real hyphen at end of line NOT followed by a letter should stay
         let raw = "Items:\n- First item\n- Second item";
         let cleaned = clean_pdf_text(raw);
-        assert!(cleaned.contains("- First"), "list hyphen incorrectly removed");
+        assert!(
+            cleaned.contains("- First"),
+            "list hyphen incorrectly removed"
+        );
     }
 
     #[test]
@@ -1616,7 +2363,10 @@ mod tests {
         let raw = "Section 1\n\n\n\n\nSection 2";
         let cleaned = clean_pdf_text(raw);
         // Should have at most 2 consecutive newlines
-        assert!(!cleaned.contains("\n\n\n"), "3+ consecutive newlines not collapsed: got {cleaned:?}");
+        assert!(
+            !cleaned.contains("\n\n\n"),
+            "3+ consecutive newlines not collapsed: got {cleaned:?}"
+        );
         assert!(cleaned.contains("Section 1"));
         assert!(cleaned.contains("Section 2"));
     }
@@ -1625,20 +2375,77 @@ mod tests {
     fn test_nonbreaking_space_normalized() {
         let raw = "Party\u{00A0}A agrees.";
         let cleaned = clean_pdf_text(raw);
-        assert!(cleaned.contains("Party A"), "non-breaking space not normalized");
+        assert!(
+            cleaned.contains("Party A"),
+            "non-breaking space not normalized"
+        );
     }
 
     #[test]
     fn test_soft_hyphen_removed() {
         let raw = "agree\u{00AD}ment";
         let cleaned = clean_pdf_text(raw);
-        assert_eq!(cleaned, "agreement", "soft hyphen not removed: got {cleaned:?}");
+        assert_eq!(
+            cleaned, "agreement",
+            "soft hyphen not removed: got {cleaned:?}"
+        );
     }
 
     #[test]
     fn test_en_dash_normalized() {
         let raw = "pages 1\u{2013}5 of the agreement";
         let cleaned = clean_pdf_text(raw);
-        assert!(cleaned.contains("pages 1-5"), "en dash not normalized: got {cleaned:?}");
+        assert!(
+            cleaned.contains("pages 1-5"),
+            "en dash not normalized: got {cleaned:?}"
+        );
+    }
+
+    #[test]
+    fn test_parse_plain_text() {
+        let path =
+            std::env::temp_dir().join(format!("justice_ai_test_{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&path, "Line one\nLine two\n\nLine three").expect("write temp txt");
+        let pages = parse_plain_text(path.to_string_lossy().as_ref()).expect("parse txt");
+        assert!(!pages.is_empty());
+        assert!(pages[0].text.contains("Line one"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_parse_csv() {
+        let path =
+            std::env::temp_dir().join(format!("justice_ai_test_{}.csv", uuid::Uuid::new_v4()));
+        std::fs::write(&path, "name,amount\nAlice,100\nBob,200\n").expect("write temp csv");
+        let pages = parse_csv(path.to_string_lossy().as_ref()).expect("parse csv");
+        assert!(!pages.is_empty());
+        assert!(pages[0].text.contains("name: Alice"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_xml_rejects_doctype() {
+        let path =
+            std::env::temp_dir().join(format!("justice_ai_test_{}.xml", uuid::Uuid::new_v4()));
+        let xml = r#"<?xml version="1.0"?>
+<!DOCTYPE foo [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
+<root><name>&xxe;</name></root>"#;
+        std::fs::write(&path, xml).expect("write temp xml");
+        let err =
+            parse_xml(path.to_string_lossy().as_ref()).expect_err("doctype should be rejected");
+        assert!(err.to_lowercase().contains("doctype") || err.to_lowercase().contains("entity"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_parse_html() {
+        let path =
+            std::env::temp_dir().join(format!("justice_ai_test_{}.html", uuid::Uuid::new_v4()));
+        let html = r#"<html><body><nav>menu</nav><h1>Case Summary</h1><p>Material fact.</p></body></html>"#;
+        std::fs::write(&path, html).expect("write temp html");
+        let pages = parse_html(path.to_string_lossy().as_ref()).expect("parse html");
+        assert!(!pages.is_empty());
+        assert!(pages[0].text.contains("Case Summary"));
+        let _ = std::fs::remove_file(path);
     }
 }

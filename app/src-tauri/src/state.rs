@@ -79,6 +79,9 @@ pub struct ModelStatus {
     pub llm_ready: bool,
     pub llm_size_gb: f32,
     pub download_required_gb: f32,
+    pub ocr_ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ocr_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,8 +224,12 @@ impl RagState {
         if let Ok(data) = tokio::fs::read(&self.chunks_path()).await {
             if let Ok(chunks) = serde_json::from_slice::<Vec<EmbeddedChunkEntry>>(&data) {
                 for entry in chunks {
-                    self.chunk_registry.insert(entry.id.clone(), entry.meta.clone());
-                    let ids = self.doc_chunk_ids.entry(entry.meta.document_id.clone()).or_default();
+                    self.chunk_registry
+                        .insert(entry.id.clone(), entry.meta.clone());
+                    let ids = self
+                        .doc_chunk_ids
+                        .entry(entry.meta.document_id.clone())
+                        .or_default();
                     if !ids.contains(&entry.id) {
                         ids.push(entry.id.clone());
                     }
@@ -238,7 +245,9 @@ impl RagState {
         let mut doc_map: HashMap<String, (ChunkMetadata, usize, u32)> = HashMap::new();
         for chunk in &self.embedded_chunks {
             let meta = &chunk.meta;
-            let entry = doc_map.entry(meta.document_id.clone()).or_insert((meta.clone(), 0, 0));
+            let entry = doc_map
+                .entry(meta.document_id.clone())
+                .or_insert((meta.clone(), 0, 0));
             entry.1 += 1;
             if meta.page_number > entry.2 {
                 entry.2 = meta.page_number;
@@ -246,18 +255,21 @@ impl RagState {
         }
         for (doc_id, (meta, count, max_page)) in doc_map {
             if !self.file_registry.contains_key(&doc_id) {
-                self.file_registry.insert(doc_id.clone(), FileInfo {
-                    id: doc_id,
-                    file_name: meta.file_name,
-                    file_path: meta.file_path,
-                    total_pages: max_page,
-                    word_count: 0,
-                    loaded_at: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                    chunk_count: count,
-                });
+                self.file_registry.insert(
+                    doc_id.clone(),
+                    FileInfo {
+                        id: doc_id,
+                        file_name: meta.file_name,
+                        file_path: meta.file_path,
+                        total_pages: max_page,
+                        word_count: 0,
+                        loaded_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                        chunk_count: count,
+                    },
+                );
             }
         }
     }
@@ -304,7 +316,9 @@ impl RagState {
     /// Get all text chunks for a specific file+page from chunk registry,
     /// sorted by chunk_index and with overlapping prefix text deduplicated.
     pub fn get_page_text(&self, file_path: &str, page_number: u32) -> String {
-        let mut chunks: Vec<&ChunkMetadata> = self.chunk_registry.values()
+        let mut chunks: Vec<&ChunkMetadata> = self
+            .chunk_registry
+            .values()
             .filter(|c| c.file_path == file_path && c.page_number == page_number)
             .collect();
         chunks.sort_by_key(|c| c.chunk_index);
@@ -314,7 +328,9 @@ impl RagState {
         let mut result = String::new();
         for chunk in &chunks {
             let text = chunk.text.trim();
-            if text.is_empty() { continue; }
+            if text.is_empty() {
+                continue;
+            }
             if result.is_empty() {
                 result.push_str(text);
             } else {
@@ -342,13 +358,15 @@ impl RagState {
         // Sanitize first — PUA chars (U+E000–F8FF) and control chars from
         // lopdf/Identity-H font encoding look like garbage in every UI component
         // that renders the excerpt (SourceCard, ContextPanel, DocumentViewer).
-        let sanitized: String = text.chars().filter(|&c| {
-            let code = c as u32;
-            c == '\n' || c == '\t'
-                || (!c.is_control()
-                    && !(0xE000..=0xF8FF).contains(&code)
-                    && code < 0xFFF0)
-        }).collect();
+        let sanitized: String = text
+            .chars()
+            .filter(|&c| {
+                let code = c as u32;
+                c == '\n'
+                    || c == '\t'
+                    || (!c.is_control() && !(0xE000..=0xF8FF).contains(&code) && code < 0xFFF0)
+            })
+            .collect();
 
         let sentences: Vec<&str> = sanitized
             .split(|c: char| c == '.' || c == '!' || c == '?')
@@ -357,7 +375,11 @@ impl RagState {
             .collect();
 
         if sentences.is_empty() {
-            let end = sanitized.char_indices().nth(280).map(|(i, _)| i).unwrap_or(sanitized.len());
+            let end = sanitized
+                .char_indices()
+                .nth(280)
+                .map(|(i, _)| i)
+                .unwrap_or(sanitized.len());
             return sanitized[..end].to_string();
         }
 
@@ -373,7 +395,8 @@ impl RagState {
 
         for sentence in &sentences {
             let words: Vec<&str> = sentence.split(|c: char| !c.is_alphabetic()).collect();
-            let hits = words.iter()
+            let hits = words
+                .iter()
                 .filter(|w| query_words.contains(&w.to_lowercase()))
                 .count();
             let score = hits as f32 / (words.len() as f32).sqrt();
@@ -383,7 +406,11 @@ impl RagState {
             }
         }
 
-        let end = best.char_indices().nth(320).map(|(i, _)| i).unwrap_or(best.len());
+        let end = best
+            .char_indices()
+            .nth(320)
+            .map(|(i, _)| i)
+            .unwrap_or(best.len());
         if best.len() > 320 {
             format!("{}…", &best[..end])
         } else {

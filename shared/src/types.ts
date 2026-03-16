@@ -9,7 +9,7 @@ export interface ParsedDocument {
   id: string;
   filePath: string;
   fileName: string;
-  extension: 'pdf' | 'docx';
+  extension: 'pdf' | 'docx' | 'txt' | 'md' | 'csv' | 'eml' | 'html' | 'htm' | 'mhtml' | 'xml' | 'xlsx' | 'png' | 'jpg' | 'jpeg' | 'tif' | 'tiff';
   pages: DocumentPage[];
   totalPages: number;
   wordCount: number;
@@ -101,6 +101,14 @@ export interface ModelStatus {
   llmReady: boolean;
   llmSizeGb: number;
   downloadRequiredGb: number;
+  ocrReady: boolean;
+  ocrMessage?: string;
+}
+
+export interface OcrRuntimeStatus {
+  ready: boolean;
+  installAttempted: boolean;
+  message: string;
 }
 
 export interface DownloadProgress {

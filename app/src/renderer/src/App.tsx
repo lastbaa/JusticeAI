@@ -20,6 +20,7 @@ import ModelSetup from './components/ModelSetup'
 import Toast, { ToastMessage } from './components/Toast'
 
 type View = 'main' | 'settings'
+const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.csv', '.eml', '.html', '.htm', '.mhtml', '.xml', '.xlsx', '.png', '.jpg', '.jpeg', '.tif', '.tiff']
 
 /**
  * Generate a concise chat title from the first user message.
@@ -197,10 +198,10 @@ export default function App(): JSX.Element {
       if (loaded.length === 0) {
         const hasSupportedExtensions = paths.some((p) => {
           const lower = p.toLowerCase()
-          return lower.endsWith('.pdf') || lower.endsWith('.docx')
+          return SUPPORTED_EXTENSIONS.some((ext) => lower.endsWith(ext))
         })
         if (!hasSupportedExtensions) {
-          setLoadError('Unsupported format. Only PDF and DOCX files are supported.')
+          setLoadError('Unsupported format. Supported: PDF, DOCX, TXT, MD, CSV, EML, HTML/MHTML, XML, XLSX, and common image formats (OCR).')
         } else {
           setLoadError('Could not read the file. It may be scanned, password-protected, or corrupted.')
         }
