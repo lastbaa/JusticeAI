@@ -1,17 +1,38 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { LampContainer } from "@/components/ui/lamp";
 import Link from "next/link";
 
 export default function LampCTA() {
   return (
-    <LampContainer>
+    <section
+      className="relative py-32 px-6"
+      style={{ background: '#080808' }}
+    >
+      {/* Subtle radial gold glow — blends into surrounding #080808 */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse 60% 40% at 50% 45%, rgba(201,168,76,0.08) 0%, transparent 70%)',
+        }}
+      />
+
+      {/* Thin gold accent line */}
       <motion.div
-        initial={{ opacity: 0, y: 80 }}
+        initial={{ width: 0, opacity: 0 }}
+        whileInView={{ width: '12rem', opacity: 1 }}
+        transition={{ duration: 0.8, ease: 'easeOut' }}
+        viewport={{ once: true }}
+        className="mx-auto h-px mb-16"
+        style={{ background: 'linear-gradient(90deg, transparent, #c9a84c, transparent)' }}
+      />
+
+      <motion.div
+        initial={{ opacity: 0, y: 40 }}
         whileInView={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4, duration: 0.9, ease: "easeInOut" }}
-        className="flex flex-col items-center text-center gap-6"
+        transition={{ duration: 0.7, ease: "easeOut" }}
+        viewport={{ once: true }}
+        className="relative z-10 flex flex-col items-center text-center gap-6 max-w-2xl mx-auto"
       >
         {/* Gold badge */}
         <span
@@ -27,7 +48,7 @@ export default function LampCTA() {
 
         <h2
           className="text-4xl font-bold text-white sm:text-5xl md:text-6xl leading-tight"
-          style={{ letterSpacing: '-0.035em', maxWidth: 640 }}
+          style={{ letterSpacing: '-0.035em' }}
         >
           Your Documents.{' '}
           <span style={{ color: '#c9a84c' }}>Your AI.</span>{' '}
@@ -39,6 +60,7 @@ export default function LampCTA() {
           style={{ color: 'rgba(255,255,255,0.45)', maxWidth: 440 }}
         >
           Download Justice AI and start researching in minutes.
+          <br />
           No signup. No subscription. No compromise.
         </p>
 
@@ -53,7 +75,7 @@ export default function LampCTA() {
             Download Free — macOS
           </Link>
           <a
-            href="https://github.com/lastbaa/CS-370-Justice-AI-Project"
+            href="https://github.com/lastbaa/JusticeAI"
             target="_blank"
             rel="noopener noreferrer"
             className="gold-outline-btn inline-flex items-center gap-2 px-7 py-3 rounded-xl text-sm font-medium"
@@ -69,6 +91,6 @@ export default function LampCTA() {
           macOS arm64 · Open Source · MIT License
         </p>
       </motion.div>
-    </LampContainer>
+    </section>
   );
 }
