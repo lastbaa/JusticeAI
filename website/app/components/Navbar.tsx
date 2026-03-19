@@ -20,10 +20,12 @@ export default function Navbar() {
         </a>
         <div className="flex items-center gap-4">
           <a
-            href="/changelog"
+            href="https://github.com/lastbaa/JusticeAI"
+            target="_blank"
+            rel="noopener noreferrer"
             className="nav-link text-sm font-medium"
           >
-            Changelog
+            GitHub
           </a>
           <a
             href="#download"

@@ -3,9 +3,9 @@
 import { Typewriter } from './Typewriter'
 
 const stats = [
-  { value: '100%', label: 'Local Document Storage' },
-  { value: '0', label: 'Documents Uploaded' },
-  { value: '∞', label: 'Documents Supported' },
+  { value: '100%', label: 'On-Device Processing' },
+  { value: '0', label: 'Cloud Uploads Required' },
+  { value: '7B', label: 'Parameter Legal AI Model' },
 ]
 
 export default function Hero() {
