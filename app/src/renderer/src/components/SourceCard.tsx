@@ -4,6 +4,7 @@ import { Citation } from '../../../../../shared/src/types'
 interface Props {
   citation: Citation
   onView?: (citation: Citation) => void
+  isPrimary?: boolean
 }
 
 function relevanceLabel(score: number): { label: string; color: string } {
@@ -12,7 +13,7 @@ function relevanceLabel(score: number): { label: string; color: string } {
   return                    { label: 'Weak',   color: 'rgb(var(--ov) / 0.28)' }
 }
 
-export default function SourceCard({ citation, onView }: Props): JSX.Element {
+export default function SourceCard({ citation, onView, isPrimary = false }: Props): JSX.Element {
   const [hovered, setHovered] = useState(false)
   const [copied, setCopied] = useState(false)
   const ext = citation.fileName.split('.').pop()?.toUpperCase() ?? 'DOC'
@@ -29,23 +30,49 @@ export default function SourceCard({ citation, onView }: Props): JSX.Element {
   return (
     <div
       className="rounded-xl px-3.5 py-2.5 flex items-start gap-3 cursor-pointer transition-colors"
-      style={{
-        background: hovered ? 'var(--surface-hover)' : 'var(--surface)',
-        border: '1px solid rgb(var(--ov) / 0.07)',
-        borderLeft: '2px solid rgba(201,168,76,0.35)',
-      }}
+      style={
+        isPrimary
+          ? {
+              background: 'var(--surface-raised)',
+              border: '1px solid rgba(201,168,76,0.18)',
+              borderLeft: '3px solid rgba(201,168,76,0.75)',
+            }
+          : {
+              background: hovered ? 'var(--surface-hover)' : 'var(--surface)',
+              border: '1px solid rgb(var(--ov) / 0.07)',
+              borderLeft: '2px solid rgba(201,168,76,0.35)',
+              opacity: 0.85,
+            }
+      }
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={() => onView?.(citation)}
     >
       {/* Left: file icon + badge */}
-      <div className="shrink-0 mt-0.5">
+      <div className="shrink-0 mt-0.5 flex flex-col items-start gap-1">
         <span
           className="text-[9px] font-bold px-1.5 py-0.5 rounded"
           style={{ background: 'rgba(201,168,76,0.1)', color: 'rgba(201,168,76,0.7)' }}
         >
           {ext}
         </span>
+        {isPrimary && (
+          <span
+            style={{
+              background: 'rgba(201,168,76,0.15)',
+              color: 'rgba(201,168,76,0.9)',
+              border: '1px solid rgba(201,168,76,0.3)',
+              fontSize: 8,
+              fontWeight: 700,
+              padding: '2px 6px',
+              borderRadius: 4,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Key Source
+          </span>
+        )}
       </div>
 
       {/* Right: file info + excerpt */}
@@ -81,9 +108,11 @@ export default function SourceCard({ citation, onView }: Props): JSX.Element {
           className="text-[11px] leading-relaxed italic"
           style={{ color: 'rgb(var(--ov) / 0.35)' }}
         >
-          "{citation.excerpt.length > 140
-            ? citation.excerpt.slice(0, 140) + '…'
-            : citation.excerpt}"
+          "{isPrimary
+            ? citation.excerpt
+            : citation.excerpt.length > 140
+              ? citation.excerpt.slice(0, 140) + '…'
+              : citation.excerpt}"
         </p>
         <div className="mt-1.5 flex items-center gap-3">
             {onView && (

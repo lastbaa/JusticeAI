@@ -7,9 +7,26 @@ interface Props {
   onViewCitation?: (citation: Citation) => void
 }
 
+// ── Primary/secondary partition ───────────────────────────────────────────────
+// Top citation is always primary. Any subsequent citation within 0.05 score of
+// the top is also primary (handles ties), capped at 2 primaries total.
+function partitionCitations(items: Citation[]): { primary: Citation[]; secondary: Citation[] } {
+  if (items.length === 0) return { primary: [], secondary: [] }
+  if (items.length === 1) return { primary: items, secondary: [] }
+  const topScore = items[0].score
+  const primary: Citation[] = []
+  const secondary: Citation[] = []
+  for (const c of items) {
+    if (primary.length < 2 && topScore - c.score <= 0.05) primary.push(c)
+    else secondary.push(c)
+  }
+  return { primary, secondary }
+}
+
 // ── Deduplicated citation list with "show all" toggle ────────────────────────
 function CitationSources({ citations, onViewCitation }: { citations: Citation[]; onViewCitation?: (c: Citation) => void }): JSX.Element {
   const [showAll, setShowAll] = useState(false)
+  const [secondaryOpen, setSecondaryOpen] = useState(false)
 
   // Deduplicate by (fileName, pageNumber) — keep highest-scored citation per page
   const deduped: Citation[] = []
@@ -24,16 +41,20 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
   }
 
   const hasExtras = deduped.length < citations.length
-  const displayed = showAll ? citations.slice(0, 6) : deduped.slice(0, 6)
+
+  const displayBase = showAll ? citations : deduped
+  const { primary: primarySlice, secondary: secondaryAll } = partitionCitations(displayBase)
+  const secondarySlice = secondaryAll.slice(0, 6 - primarySlice.length)
 
   return (
     <div className="mt-3">
+      {/* Header row */}
       <div className="flex items-center justify-between mb-2">
         <p
           className="text-[10px] font-semibold uppercase tracking-[0.12em]"
           style={{ color: 'rgb(var(--ov) / 0.18)' }}
         >
-          Sources{!showAll && deduped.length > 0 ? ` (${deduped.length})` : showAll ? ` (${citations.length})` : ''}
+          Sources ({showAll ? citations.length : deduped.length})
         </p>
         {hasExtras && (
           <button
@@ -47,11 +68,63 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
           </button>
         )}
       </div>
-      <div className="flex flex-col gap-1.5">
-        {displayed.map((citation, idx) => (
-          <SourceCard key={idx} citation={citation} onView={onViewCitation} />
-        ))}
-      </div>
+
+      {/* Key Sources section */}
+      {primarySlice.length > 0 && (
+        <div className="mb-2">
+          <p
+            className="text-[9px] font-bold uppercase tracking-[0.14em] mb-1.5"
+            style={{ color: 'rgba(201,168,76,0.45)' }}
+          >
+            Key Sources
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {primarySlice.map((citation, idx) => (
+              <SourceCard key={`primary-${idx}`} citation={citation} onView={onViewCitation} isPrimary={true} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Supporting Sources section — collapsed by default */}
+      {secondarySlice.length > 0 && (
+        <div>
+          <button
+            onClick={() => setSecondaryOpen((v) => !v)}
+            className="flex items-center gap-1.5 mb-1.5"
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+          >
+            <p
+              className="text-[9px] font-bold uppercase tracking-[0.14em]"
+              style={{ color: 'rgb(var(--ov) / 0.18)' }}
+            >
+              Supporting Sources ({secondarySlice.length})
+            </p>
+            <svg
+              width="8"
+              height="8"
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="rgb(var(--ov) / 0.2)"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              style={{
+                transform: secondaryOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.18s ease',
+              }}
+            >
+              <path d="M2 3.5l3 3 3-3" />
+            </svg>
+          </button>
+          {secondaryOpen && (
+            <div className="flex flex-col gap-1.5">
+              {secondarySlice.map((citation, idx) => (
+                <SourceCard key={`secondary-${idx}`} citation={citation} onView={onViewCitation} isPrimary={false} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

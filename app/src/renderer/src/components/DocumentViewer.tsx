@@ -21,27 +21,29 @@ interface Props {
 function findHighlightItems(items: TextItem[], excerpt: string): TextItem[] {
   if (items.length === 0) return []
 
-  // Build a combined string and track per-item character ranges
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
+
+  // Pre-normalise each item's text, then build the combined string and ranges
+  // entirely in that normalised space so that indexOf positions map correctly.
   const ranges: { item: TextItem; start: number; end: number }[] = []
   let combined = ''
   for (const item of items) {
+    const s = norm(item.str)
+    if (!s) continue
     const start = combined.length
-    combined += item.str
+    combined += s
     ranges.push({ item, start, end: combined.length })
-    // Add a space between items (mirrors how text is typically read)
-    combined += ' '
+    combined += ' '  // single space separator — keeps combined already-normalised
   }
 
-  // Normalise whitespace for matching
-  const normalise = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
-  const needle = normalise(excerpt).slice(0, 80)
-  const haystack = normalise(combined)
+  // Use up to 250 chars of the excerpt so the full citation phrase is covered
+  const needle = norm(excerpt).slice(0, 250)
+  if (needle.length < 5) return []
 
-  const matchStart = haystack.indexOf(needle)
+  const matchStart = combined.indexOf(needle)   // combined is already lower-cased
   if (matchStart === -1) return []
   const matchEnd = matchStart + needle.length
 
-  // Return items whose ranges overlap the match
   return ranges
     .filter((r) => r.start < matchEnd && r.end > matchStart)
     .map((r) => r.item)
