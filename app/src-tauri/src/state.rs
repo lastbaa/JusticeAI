@@ -13,6 +13,17 @@ pub struct CloseAllowed(pub AtomicBool);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Case {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentPage {
     pub page_number: u32,
     pub text: String,
@@ -28,6 +39,8 @@ pub struct FileInfo {
     pub word_count: u32,
     pub loaded_at: u64,
     pub chunk_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +120,10 @@ pub struct ChatSession {
     pub messages: Vec<ChatMessage>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +176,7 @@ pub struct RagState {
     pub model_dir: PathBuf,
     pub settings: AppSettings,
     pub sessions: Vec<ChatSession>,
+    pub cases: Vec<Case>,
     /// Which embedding model produced the stored vectors. Empty string = pre-BGE (stale).
     pub embed_model: String,
     /// Cached llama model — loaded once on first query, reused thereafter.
@@ -177,6 +195,7 @@ impl RagState {
             data_dir,
             settings: AppSettings::default(),
             sessions: Vec::new(),
+            cases: Vec::new(),
             embed_model: String::new(),
             llama_model: Arc::new(Mutex::new(None)),
         }
@@ -198,6 +217,14 @@ impl RagState {
         self.data_dir.join("embed_model.json")
     }
 
+    fn cases_path(&self) -> PathBuf {
+        self.data_dir.join("cases.json")
+    }
+
+    fn file_registry_path(&self) -> PathBuf {
+        self.data_dir.join("file_registry.json")
+    }
+
     pub async fn load_from_disk(&mut self) {
         // Load settings
         if let Ok(data) = tokio::fs::read(&self.settings_path()).await {
@@ -210,6 +237,13 @@ impl RagState {
         if let Ok(data) = tokio::fs::read(&self.sessions_path()).await {
             if let Ok(s) = serde_json::from_slice::<Vec<ChatSession>>(&data) {
                 self.sessions = s;
+            }
+        }
+
+        // Load cases
+        if let Ok(data) = tokio::fs::read(&self.cases_path()).await {
+            if let Ok(c) = serde_json::from_slice::<Vec<Case>>(&data) {
+                self.cases = c;
             }
         }
 
@@ -237,6 +271,17 @@ impl RagState {
                 }
                 // Rebuild file registry
                 self.rebuild_file_registry();
+            }
+        }
+
+        // Restore case_id assignments from saved file registry
+        if let Ok(data) = tokio::fs::read(&self.file_registry_path()).await {
+            if let Ok(saved) = serde_json::from_slice::<HashMap<String, FileInfo>>(&data) {
+                for (id, saved_info) in saved {
+                    if let Some(entry) = self.file_registry.get_mut(&id) {
+                        entry.case_id = saved_info.case_id;
+                    }
+                }
             }
         }
     }
@@ -268,6 +313,7 @@ impl RagState {
                             .unwrap_or_default()
                             .as_millis() as u64,
                         chunk_count: count,
+                        case_id: None,
                     },
                 );
             }
@@ -295,6 +341,18 @@ impl RagState {
     pub async fn save_sessions(&self) {
         if let Ok(data) = serde_json::to_vec(&self.sessions) {
             tokio::fs::write(&self.sessions_path(), data).await.ok();
+        }
+    }
+
+    pub async fn save_cases(&self) {
+        if let Ok(data) = serde_json::to_vec(&self.cases) {
+            tokio::fs::write(&self.cases_path(), data).await.ok();
+        }
+    }
+
+    pub async fn save_file_registry(&self) {
+        if let Ok(data) = serde_json::to_vec(&self.file_registry) {
+            tokio::fs::write(&self.file_registry_path(), data).await.ok();
         }
     }
 

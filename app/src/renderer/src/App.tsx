@@ -4,6 +4,7 @@ import { confirm, save } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import {
   AppSettings,
+  Case,
   ChatMessage,
   ChatSession,
   Citation,
@@ -39,18 +40,23 @@ function makeSessionName(messages: ChatMessage[]): string {
   text = text.replace(/https?:\/\/\S+/g, '').replace(/\/[\w./\\-]+/g, '')
   text = text.trim()
 
-  // Use just the first sentence or line
-  const firstLine = text.split(/[.\n]/).filter(Boolean)[0]?.trim() ?? text
+  // Use the first line only (don't split on dots — legal text has "v.", "Mr.", "3.2", "U.S." etc.)
+  const firstLine = text.split('\n').filter(Boolean)[0]?.trim() ?? text
   let phrase = firstLine
 
-  // Strip leading filler: "Can you", "Please", "I want to", "Help me", etc.
-  phrase = phrase.replace(
-    /^(hey|hi|hello|ok|okay|so|well|um|uh|basically|actually),?\s*/i, ''
-  )
-  phrase = phrase.replace(
-    /^(can you|could you|would you|will you|please|i want to|i need to|i'd like to|help me|i want you to|let's|let me|go ahead and)\s+/i, ''
-  )
-  phrase = phrase.replace(/^(please\s+)/i, '')
+  // Strip leading filler — loop so "Can you please explain" cascades correctly.
+  const GREETINGS = /^(hey|hi|hello|ok|okay|so|well|um|uh|basically|actually),?\s*/i
+  const FILLER = /^(can you|could you|would you|will you|please|i want to|i need to|i'd like to|help me|i want you to|let's|let me|go ahead and|tell me about|what is|what are|explain|summarize|understand|know about|describe|review|analyze|look at|check)\s+/i
+  const ARTICLES = /^(the|a|an)\s+/i
+  let prev = ''
+  while (phrase !== prev) {
+    prev = phrase
+    phrase = phrase.replace(GREETINGS, '')
+    phrase = phrase.replace(FILLER, '')
+  }
+
+  // Strip leading articles (after all filler is gone)
+  phrase = phrase.replace(ARTICLES, '')
 
   // Remove trailing question mark for cleaner titles
   phrase = phrase.replace(/\?+$/, '').trim()
@@ -60,13 +66,18 @@ function makeSessionName(messages: ChatMessage[]): string {
     phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1)
   }
 
-  // Truncate at a word boundary around 45 chars
-  if (phrase.length > 48) {
-    const cut = phrase.lastIndexOf(' ', 45)
-    phrase = phrase.slice(0, cut > 20 ? cut : 45) + '…'
+  // Truncate at a word boundary around 40 chars (fits 240px sidebar at 12px)
+  if (phrase.length > 43) {
+    const cut = phrase.lastIndexOf(' ', 40)
+    phrase = phrase.slice(0, cut > 20 ? cut : 40) + '\u2026'
   }
 
   return phrase || 'New Chat'
+}
+
+function makeSessionSummary(messages: ChatMessage[]): string {
+  const userMsgs = messages.filter((m) => m.role === 'user').slice(0, 3)
+  return userMsgs.map((m) => m.content.trim().slice(0, 80)).join('; ')
 }
 
 export default function App(): JSX.Element {
@@ -88,15 +99,20 @@ export default function App(): JSX.Element {
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   // Tracks manually set session name — null means use auto-name from first message
   const [sessionCustomName, setSessionCustomName] = useState<string | null>(null)
+  // Case folders
+  const [cases, setCases] = useState<Case[]>([])
+  const [currentCaseId, setCurrentCaseId] = useState<string | null>(null)
 
   const messagesRef = useRef(messages)
   const sessionIdRef = useRef(currentSessionId)
   const sessionCreatedAtRef = useRef(sessionCreatedAt)
   const sessionCustomNameRef = useRef(sessionCustomName)
+  const currentCaseIdRef = useRef(currentCaseId)
   messagesRef.current = messages
   sessionIdRef.current = currentSessionId
   sessionCreatedAtRef.current = sessionCreatedAt
   sessionCustomNameRef.current = sessionCustomName
+  currentCaseIdRef.current = currentCaseId
 
   // Track busy state in a ref so the close listener always reads the current value
   const isBusyRef = useRef(false)
@@ -162,6 +178,10 @@ export default function App(): JSX.Element {
         setSessions(saved)
       } catch { }
       try {
+        const savedCases = await window.api.getCases()
+        setCases(savedCases)
+      } catch { }
+      try {
         const modelStatus = await window.api.checkModels()
         if (!modelStatus.llmReady) setShowModelSetup(true)
       } catch { }
@@ -179,6 +199,8 @@ export default function App(): JSX.Element {
         messages: messagesRef.current,
         createdAt: sessionCreatedAtRef.current,
         updatedAt: Date.now(),
+        caseId: currentCaseIdRef.current ?? undefined,
+        summary: makeSessionSummary(messagesRef.current) || undefined,
       }
       try {
         await window.api.saveSession(session)
@@ -194,7 +216,7 @@ export default function App(): JSX.Element {
     setLoadError(null)
     setIsLoading(true)
     try {
-      const loaded = await window.api.loadFiles(paths)
+      const loaded = await window.api.loadFiles(paths, currentCaseId ?? undefined)
       if (loaded.length === 0) {
         const hasSupportedExtensions = paths.some((p) => {
           const lower = p.toLowerCase()
@@ -366,7 +388,18 @@ export default function App(): JSX.Element {
         }
       )
 
-      const result = await window.api.query(question, recentHistory)
+      // Build cross-conversation context from sibling sessions in the same case
+      let caseContext: string | undefined
+      if (currentCaseId) {
+        try {
+          const summaries = await window.api.getCaseSummaries(currentCaseId, currentSessionId)
+          if (summaries.length > 0) {
+            caseContext = summaries.map((s) => s.summary).join('\n')
+          }
+        } catch { }
+      }
+
+      const result = await window.api.query(question, recentHistory, currentCaseId ?? undefined, caseContext)
 
       const finalMessage: ChatMessage = {
         id: streamingId,
@@ -491,6 +524,7 @@ export default function App(): JSX.Element {
     setLastCitations([])
     setViewerCitation(null)
     setSessionCustomName(null)
+    setCurrentCaseId(null)
     setView('main')
   }
 
@@ -516,6 +550,7 @@ export default function App(): JSX.Element {
     setViewerCitation(null)
     // Preserve the session's existing name (prevents auto-rename on next message)
     setSessionCustomName(session.name)
+    setCurrentCaseId(session.caseId ?? null)
     setView('main')
   }
 
@@ -546,18 +581,120 @@ export default function App(): JSX.Element {
       setSessionCustomName(trimmed)
     }
 
-    // Update sessions list
-    setSessions((prev) => prev.map((s) => s.id === id ? { ...s, name: trimmed } : s))
+    // Use functional update to read fresh state AND persist atomically
+    let sessionToSave: ChatSession | undefined
+    setSessions((prev) => {
+      const updated = prev.map((s) => {
+        if (s.id !== id) return s
+        const renamed = { ...s, name: trimmed, updatedAt: Date.now() }
+        sessionToSave = renamed
+        return renamed
+      })
+      return updated
+    })
 
-    // Persist to disk
-    const session = sessions.find((s) => s.id === id)
-    if (session) {
+    // Persist to disk using the fresh session object
+    if (sessionToSave) {
       try {
-        await window.api.saveSession({ ...session, name: trimmed, updatedAt: Date.now() })
+        await window.api.saveSession(sessionToSave)
       } catch { }
     }
     addToast('success', 'Conversation renamed')
   }
+
+  // ── Cases ───────────────────────────────────────────────────
+  async function handleCreateCase(name: string): Promise<void> {
+    const now = Date.now()
+    const newCase: Case = {
+      id: uuidv4(),
+      name: name.trim(),
+      createdAt: now,
+      updatedAt: now,
+    }
+    try {
+      await window.api.saveCase(newCase)
+      setCases((prev) => [...prev, newCase])
+      setCurrentCaseId(newCase.id)
+      addToast('success', `Case "${newCase.name}" created`)
+    } catch (err) {
+      console.error('Failed to create case:', err)
+      addToast('error', 'Failed to create case')
+    }
+  }
+
+  async function handleRenameCase(id: string, name: string): Promise<void> {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const existing = cases.find((c) => c.id === id)
+    if (!existing) return
+    const updated: Case = { ...existing, name: trimmed, updatedAt: Date.now() }
+    try {
+      await window.api.saveCase(updated)
+      setCases((prev) => prev.map((c) => (c.id === id ? updated : c)))
+      addToast('success', 'Case renamed')
+    } catch (err) {
+      console.error('Failed to rename case:', err)
+      addToast('error', 'Failed to rename case')
+    }
+  }
+
+  async function handleDeleteCase(id: string): Promise<void> {
+    const c = cases.find((c) => c.id === id)
+    const ok = await confirm(
+      `Delete case "${c?.name ?? 'this case'}"? Sessions and files will become uncategorized.`,
+      { title: 'Delete Case', kind: 'warning' }
+    )
+    if (!ok) return
+    try {
+      await window.api.deleteCase(id)
+      setCases((prev) => prev.filter((c) => c.id !== id))
+      // Update local state: orphan sessions/files
+      setSessions((prev) =>
+        prev.map((s) => (s.caseId === id ? { ...s, caseId: undefined } : s))
+      )
+      setFiles((prev) =>
+        prev.map((f) => (f.caseId === id ? { ...f, caseId: undefined } : f))
+      )
+      if (currentCaseId === id) setCurrentCaseId(null)
+      addToast('success', `Case "${c?.name}" deleted`)
+    } catch (err) {
+      console.error('Failed to delete case:', err)
+      addToast('error', 'Failed to delete case')
+    }
+  }
+
+  function handleSelectCase(id: string | null): void {
+    setCurrentCaseId(id)
+  }
+
+  async function handleMoveSessionToCase(sessionId: string, caseId: string | null): Promise<void> {
+    try {
+      await window.api.assignSessionToCase(sessionId, caseId)
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, caseId: caseId ?? undefined } : s))
+      )
+    } catch (err) {
+      console.error('Failed to move session:', err)
+      addToast('error', 'Failed to move session')
+    }
+  }
+
+  async function handleMoveFileToCase(fileId: string, caseId: string | null): Promise<void> {
+    try {
+      await window.api.assignFileToCase(fileId, caseId)
+      setFiles((prev) =>
+        prev.map((f) => (f.id === fileId ? { ...f, caseId: caseId ?? undefined } : f))
+      )
+    } catch (err) {
+      console.error('Failed to move file:', err)
+      addToast('error', 'Failed to move file')
+    }
+  }
+
+  // Filtered files based on current case
+  const caseFiles = currentCaseId
+    ? files.filter((f) => f.caseId === currentCaseId)
+    : files
 
   async function handleSaveSettings(newSettings: AppSettings): Promise<void> {
     try {
@@ -588,6 +725,14 @@ export default function App(): JSX.Element {
         onClearSessions={handleClearSessions}
         onAddFiles={handleAddFiles}
         onOpenSettings={() => setView('settings')}
+        files={files}
+        cases={cases}
+        currentCaseId={currentCaseId}
+        onCreateCase={handleCreateCase}
+        onSelectCase={handleSelectCase}
+        onDeleteCase={handleDeleteCase}
+        onRenameCase={handleRenameCase}
+        onMoveSession={handleMoveSessionToCase}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -612,7 +757,7 @@ export default function App(): JSX.Element {
       </div>
 
       <ContextPanel
-        files={files}
+        files={caseFiles}
         citations={lastCitations}
         isQuerying={isQuerying}
         isLoading={isLoading}
@@ -623,6 +768,7 @@ export default function App(): JSX.Element {
         onViewCitation={setViewerCitation}
         activeCitation={viewerCitation}
         onExportCitations={lastCitations.length > 0 ? handleExportCitations : undefined}
+        caseName={currentCaseId ? cases.find((c) => c.id === currentCaseId)?.name : undefined}
       />
 
       <DocumentViewer

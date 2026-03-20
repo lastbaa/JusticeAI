@@ -13,6 +13,7 @@ interface Props {
   onViewCitation: (citation: Citation) => void
   activeCitation?: Citation | null
   onExportCitations?: () => void
+  caseName?: string
 }
 
 function CitationRow({
@@ -33,12 +34,13 @@ function CitationRow({
 
   return (
     <div
-      className="rounded-xl px-4 py-3 flex flex-col gap-2 transition-all cursor-pointer"
+      className="rounded-xl px-4 py-3 flex flex-col gap-2 cursor-pointer"
       style={{
         background: isActive ? 'rgba(201,168,76,0.07)' : hovered ? 'var(--surface-hover)' : 'var(--bg-alt)',
-        border: `1px solid ${isActive ? 'rgba(201,168,76,0.3)' : 'rgba(201,168,76,0.14)'}`,
-        borderLeft: `2px solid ${isActive ? 'rgba(201,168,76,0.8)' : 'rgba(201,168,76,0.45)'}`,
-        transition: 'background 0.15s ease',
+        border: `1px solid ${isActive ? 'rgba(201,168,76,0.3)' : hovered ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.1)'}`,
+        borderLeft: `2.5px solid ${isActive ? 'rgba(201,168,76,0.8)' : 'rgba(201,168,76,0.45)'}`,
+        boxShadow: isActive ? '0 2px 8px rgba(201,168,76,0.06)' : 'none',
+        transition: 'all 0.18s ease',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -169,6 +171,7 @@ export default function ContextPanel({
   onClearFiles,
   onViewCitation,
   onExportCitations,
+  caseName,
 }: Props): JSX.Element {
   const hasCitations = citations.length > 0
   const showSources = hasCitations || isQuerying
@@ -194,8 +197,8 @@ export default function ContextPanel({
           <svg width="11" height="11" viewBox="0 0 16 16" fill="rgba(201,168,76,0.55)">
             <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25z" />
           </svg>
-          <span className="text-[12px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--text)' }}>
-            Documents
+          <span className="text-[12px] font-semibold tracking-[-0.01em] truncate" style={{ color: 'var(--text)' }} title={caseName ? `${caseName} — Documents` : 'Documents'}>
+            {caseName ? `${caseName} — Documents` : 'Documents'}
           </span>
           {files.length > 0 && (
             <span
@@ -370,22 +373,24 @@ export default function ContextPanel({
             </>
           ) : (
             /* Empty state */
-            <div className="flex flex-col items-center py-16 px-4 text-center">
+            <div className="flex flex-col items-center py-16 px-6 text-center">
               <div
-                className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl"
-                style={{ background: 'rgb(var(--ov) / 0.03)', border: '1px solid rgb(var(--ov) / 0.06)' }}
+                className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl"
+                style={{ background: 'rgba(201,168,76,0.04)', border: '1px solid rgba(201,168,76,0.1)' }}
               >
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
                   <path
                     d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25z"
-                    stroke="rgb(var(--ov) / 0.12)"
+                    stroke="rgba(201,168,76,0.3)"
                     strokeWidth="1.2"
                     fill="none"
                   />
                 </svg>
               </div>
-              <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>No documents loaded</p>
-              <p className="mt-0.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.14)' }}>Add files to begin</p>
+              <p className="text-[12px] font-medium" style={{ color: 'rgb(var(--ov) / 0.3)' }}>No documents loaded</p>
+              <p className="mt-1 text-[10.5px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.16)', maxWidth: 180 }}>
+                Add PDF or DOCX files to start querying
+              </p>
             </div>
           )}
         </div>

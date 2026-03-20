@@ -34,8 +34,9 @@ export default function SourceCard({ citation, onView, isPrimary = false }: Prop
         isPrimary
           ? {
               background: 'var(--surface-raised)',
-              border: '1px solid rgba(201,168,76,0.18)',
+              border: '1px solid rgba(201,168,76,0.22)',
               borderLeft: '3px solid rgba(201,168,76,0.75)',
+              boxShadow: '0 2px 8px rgba(201,168,76,0.06)',
             }
           : {
               background: hovered ? 'var(--surface-hover)' : 'var(--surface)',

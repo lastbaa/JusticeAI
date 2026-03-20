@@ -1,3 +1,13 @@
+// ─── Case Types ───────────────────────────────────────────────────────────────
+
+export interface Case {
+  id: string
+  name: string
+  description?: string
+  createdAt: number
+  updatedAt: number
+}
+
 // ─── Document Types ────────────────────────────────────────────────────────────
 
 export interface DocumentPage {
@@ -139,6 +149,13 @@ export const IPC = {
   // Document viewer
   GET_FILE_DATA: 'get-file-data',
   GET_PAGE_TEXT: 'get-page-text',
+  // Case management
+  GET_CASES: 'get-cases',
+  SAVE_CASE: 'save-case',
+  DELETE_CASE: 'delete-case',
+  ASSIGN_SESSION_TO_CASE: 'assign-session-to-case',
+  ASSIGN_FILE_TO_CASE: 'assign-file-to-case',
+  GET_CASE_SUMMARIES: 'get-case-summaries',
 } as const
 
 // ─── Chat Session Types ────────────────────────────────────────────────────────
@@ -149,6 +166,8 @@ export interface ChatSession {
   messages: ChatMessage[]
   createdAt: number
   updatedAt: number
+  caseId?: string
+  summary?: string
 };
 
 // ─── IPC Payload Types ─────────────────────────────────────────────────────────
@@ -176,4 +195,5 @@ export interface FileInfo {
   wordCount: number;
   loadedAt: number;
   chunkCount: number;
+  caseId?: string;
 }

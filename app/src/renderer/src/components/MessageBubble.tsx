@@ -411,7 +411,7 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
             style={{
               background: 'var(--bg-alt)',
               border: '1px solid rgb(var(--ov) / 0.06)',
-              borderLeft: '2px solid rgba(201,168,76,0.22)',
+              borderLeft: '2.5px solid rgba(201,168,76,0.28)',
             }}
           >
             <div className="text-[13.5px] leading-[1.75]" style={{ color: 'var(--text)' }}>

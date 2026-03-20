@@ -53,6 +53,7 @@ function findHighlightItems(items: TextItem[], excerpt: string): TextItem[] {
 function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const hlCanvasRef = useRef<HTMLCanvasElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(citation.pageNumber)
@@ -126,8 +127,9 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
               const matchedItems = findHighlightItems(allItems, citation.excerpt)
 
               hlCtx.clearRect(0, 0, hlCanvas.width, hlCanvas.height)
-              hlCtx.fillStyle = 'rgba(201, 168, 76, 0.38)'
+              hlCtx.fillStyle = 'rgba(234, 197, 80, 0.45)'
 
+              let firstHighlightY = -1
               for (const item of matchedItems) {
                 // applyTransform mutates the point array in-place (returns void in v5)
                 const pt = [item.transform[4], item.transform[5]]
@@ -139,6 +141,17 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
 
                 // ty is the text baseline in canvas coords; draw rect upward from baseline
                 hlCtx.fillRect(tx, ty - fontH * 1.15, w, fontH * 1.25)
+                if (firstHighlightY < 0) firstHighlightY = ty - fontH * 1.15
+              }
+
+              // Auto-scroll to the first highlight
+              if (firstHighlightY > 0 && scrollContainerRef.current) {
+                requestAnimationFrame(() => {
+                  scrollContainerRef.current?.scrollTo({
+                    top: Math.max(0, firstHighlightY - 80),
+                    behavior: 'smooth',
+                  })
+                })
               }
             }
           }
@@ -172,7 +185,7 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
       {/* Excerpt strip */}
       <div
         className="shrink-0 px-4 py-2.5 flex items-center gap-3"
-        style={{ background: 'rgba(201,168,76,0.04)', borderBottom: '1px solid rgba(201,168,76,0.1)' }}
+        style={{ background: 'rgba(201,168,76,0.04)', borderBottom: '1px solid rgba(201,168,76,0.1)', borderLeft: '2.5px solid rgba(201,168,76,0.35)' }}
       >
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none" className="shrink-0">
           <circle cx="6" cy="6" r="4.5" stroke="rgba(201,168,76,0.5)" strokeWidth="1.4" />
@@ -209,10 +222,11 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
         </button>
       </div>
 
-      {/* Canvas viewport — white bg matches PDF page colour */}
+      {/* Canvas viewport */}
       <div
+        ref={scrollContainerRef}
         className="flex-1 overflow-auto flex justify-center"
-        style={{ padding: '16px', background: '#f5f5f5' }}
+        style={{ padding: '16px', background: 'rgb(var(--ov) / 0.04)' }}
       >
         {loading && (
           <div className="flex items-center justify-center" style={{ minHeight: 200, width: '100%' }}>
@@ -334,11 +348,11 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
             <mark
               key={i}
               style={{
-                background: 'rgba(201,168,76,0.32)',
+                background: 'rgba(234,197,80,0.35)',
                 color: 'var(--text)',
                 borderRadius: 3,
-                padding: '1px 2px',
-                boxShadow: '0 0 0 1px rgba(201,168,76,0.4)',
+                padding: '2px 3px',
+                boxShadow: '0 0 0 1px rgba(234,197,80,0.5), 0 1px 4px rgba(234,197,80,0.15)',
               }}
             >
               {part}
@@ -356,10 +370,12 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
 function ScoreBadge({ score }: { score: number }): JSX.Element {
   const label = score >= 0.40 ? 'Strong' : score >= 0.22 ? 'Good' : 'Weak'
   const color = score >= 0.40 ? '#3fb950' : score >= 0.22 ? '#c9a84c' : 'rgb(var(--ov) / 0.3)'
+  const bgAlpha = score >= 0.40 ? 'rgba(63,185,80,0.08)' : score >= 0.22 ? 'rgba(201,168,76,0.08)' : 'rgb(var(--ov) / 0.04)'
+  const borderAlpha = score >= 0.40 ? 'rgba(63,185,80,0.18)' : score >= 0.22 ? 'rgba(201,168,76,0.18)' : 'rgb(var(--ov) / 0.08)'
   return (
     <span
-      className="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded"
-      style={{ background: `${color}18`, color, border: `1px solid ${color}30` }}
+      className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+      style={{ background: bgAlpha, color, border: `1px solid ${borderAlpha}` }}
     >
       {label}
     </span>

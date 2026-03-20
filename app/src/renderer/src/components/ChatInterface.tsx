@@ -281,13 +281,14 @@ export default function ChatInterface({
 
           {/* Heading */}
           <h1 className="mb-2 text-[28px] font-bold tracking-[-0.03em] leading-tight text-center" style={{ color: 'var(--text)' }}>
-            Justice <span style={{ color: '#c9a84c' }}>AI</span>
+            Justice <span style={{ color: 'var(--gold)' }}>AI</span>
           </h1>
           <p
             className="mb-10 text-[13.5px] text-center leading-relaxed"
-            style={{ color: 'rgb(var(--ov) / 0.3)', maxWidth: 320 }}
+            style={{ color: 'rgb(var(--ov) / 0.3)', maxWidth: 340 }}
           >
             Ask anything about your case files.
+            <br />
             Every query runs locally — nothing leaves your device.
           </p>
 
@@ -697,14 +698,15 @@ export default function ChatInterface({
                 <h3 className="mb-7 text-[22px] font-semibold tracking-[-0.02em]" style={{ color: 'var(--text)' }}>
                   What would you like to know?
                 </h3>
-                <div className="grid grid-cols-2 gap-2 w-full max-w-lg">
+                <div className="grid grid-cols-2 gap-2.5 w-full max-w-lg">
                   {EXAMPLES.map((q) => (
                     <button
                       key={q}
                       onClick={() => { setInput(q); textareaRef.current?.focus() }}
-                      className="btn-surface rounded-xl px-4 py-3.5 text-left text-[12px] leading-relaxed"
+                      className="btn-surface rounded-xl px-4 py-3.5 text-left text-[12px] leading-relaxed group"
+                      style={{ minHeight: 64 }}
                     >
-                      {q}
+                      <span className="opacity-80 group-hover:opacity-100 transition-opacity">{q}</span>
                     </button>
                   ))}
                 </div>
@@ -754,6 +756,7 @@ export default function ChatInterface({
             style={{
               background: 'var(--bg-alt)',
               border: '1px solid rgb(var(--ov) / 0.08)',
+              boxShadow: '0 -1px 12px var(--shadow)',
             }}
           >
             <div className="flex items-end gap-3 px-4 py-3.5">

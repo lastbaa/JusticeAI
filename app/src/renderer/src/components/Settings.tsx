@@ -154,7 +154,8 @@ export default function Settings({ settings, onSave, onClose }: Props): JSX.Elem
         style={{
           background: 'var(--modal-bg)',
           border: '1px solid rgb(var(--ov) / 0.08)',
-          boxShadow: '0 40px 100px var(--shadow-heavy)',
+          boxShadow: '0 40px 100px var(--shadow-heavy), 0 0 0 1px rgb(var(--ov) / 0.03)',
+          animation: 'scaleIn 0.2s ease both',
         }}
       >
         {/* Header */}

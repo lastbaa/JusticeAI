@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChatSession } from '../../../../../shared/src/types'
+import { Case, ChatSession, FileInfo } from '../../../../../shared/src/types'
 
 interface Props {
   sessions: ChatSession[]
@@ -13,6 +13,15 @@ interface Props {
   onClearSessions: () => void
   onAddFiles: () => void
   onOpenSettings: () => void
+  files: FileInfo[]
+  // Case props
+  cases: Case[]
+  currentCaseId: string | null
+  onCreateCase: (name: string) => void
+  onSelectCase: (id: string | null) => void
+  onDeleteCase: (id: string) => void
+  onRenameCase: (id: string, name: string) => void
+  onMoveSession: (sessionId: string, caseId: string | null) => void
 }
 
 function ScalesIcon({ size = 16 }: { size?: number }): JSX.Element {
@@ -58,26 +67,32 @@ function SessionItem({
   onLoad,
   onDelete,
   onRename,
+  onMove,
 }: {
   session: ChatSession
   isActive: boolean
   onLoad: () => void
   onDelete: () => void
   onRename: (newName: string) => void
+  onMove?: () => void
 }): JSX.Element {
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const committedRef = useRef(false)
 
   function startEdit(e: React.MouseEvent): void {
     e.stopPropagation()
     setEditName(session.name)
     setEditing(true)
+    committedRef.current = false
     setTimeout(() => inputRef.current?.select(), 0)
   }
 
   function commitEdit(): void {
+    if (committedRef.current) return
+    committedRef.current = true
     setEditing(false)
     const trimmed = editName.trim()
     if (trimmed && trimmed !== session.name) {
@@ -87,7 +102,7 @@ function SessionItem({
 
   function handleEditKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
     if (e.key === 'Enter') { e.preventDefault(); commitEdit() }
-    if (e.key === 'Escape') setEditing(false)
+    if (e.key === 'Escape') { committedRef.current = true; setEditing(false) }
   }
 
   if (editing) {
@@ -151,10 +166,148 @@ function SessionItem({
               <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064l6.286-6.286zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086z" />
             </svg>
           </button>
+          {/* Move to case button */}
+          {onMove && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onMove() }}
+              title="Move to case"
+              className="flex h-4 w-4 items-center justify-center rounded transition-colors"
+              style={{ color: 'rgb(var(--ov) / 0.18)' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.7)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.18)' }}
+            >
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
+              </svg>
+            </button>
+          )}
           {/* Delete button */}
           <button
             onClick={(e) => { e.stopPropagation(); onDelete() }}
             title="Delete"
+            className="flex h-4 w-4 items-center justify-center rounded transition-colors"
+            style={{ color: 'rgb(var(--ov) / 0.18)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.18)' }}
+          >
+            <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
+            </svg>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CaseRow({
+  caseItem,
+  isActive,
+  sessionCount,
+  docCount,
+  onSelect,
+  onDelete,
+  onRename,
+}: {
+  caseItem: Case
+  isActive: boolean
+  sessionCount: number
+  docCount: number
+  onSelect: () => void
+  onDelete: () => void
+  onRename: (name: string) => void
+}): JSX.Element {
+  const [hovered, setHovered] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const committedRef = useRef(false)
+
+  function startEdit(e: React.MouseEvent): void {
+    e.stopPropagation()
+    setEditName(caseItem.name)
+    setEditing(true)
+    committedRef.current = false
+    setTimeout(() => inputRef.current?.select(), 0)
+  }
+
+  function commitEdit(): void {
+    if (committedRef.current) return
+    committedRef.current = true
+    setEditing(false)
+    const trimmed = editName.trim()
+    if (trimmed && trimmed !== caseItem.name) onRename(trimmed)
+  }
+
+  if (editing) {
+    return (
+      <div
+        className="flex items-center gap-2 rounded-lg px-3 py-1.5"
+        style={{ background: 'var(--surface-active)', border: '1px solid rgba(201,168,76,0.3)' }}
+      >
+        <input
+          ref={inputRef}
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commitEdit() }
+            if (e.key === 'Escape') { committedRef.current = true; setEditing(false) }
+          }}
+          autoFocus
+          className="flex-1 bg-transparent text-[12px] leading-snug outline-none"
+          style={{ minWidth: 0, color: 'var(--text)' }}
+          maxLength={60}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      onClick={onSelect}
+      onDoubleClick={startEdit}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="group flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer transition-all"
+      style={{
+        background: isActive ? 'rgba(201,168,76,0.06)' : hovered ? 'var(--surface-hover)' : 'transparent',
+        border: isActive ? '1px solid rgba(201,168,76,0.15)' : '1px solid transparent',
+      }}
+    >
+      {/* Folder icon */}
+      <svg width="12" height="12" viewBox="0 0 16 16" fill={isActive ? '#c9a84c' : 'rgb(var(--ov) / 0.25)'} className="shrink-0">
+        <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
+      </svg>
+      <div className="flex-1 min-w-0">
+        <span
+          className="text-[12px] font-medium truncate block leading-snug"
+          style={{ color: isActive ? '#c9a84c' : 'rgb(var(--ov) / 0.55)' }}
+          title={caseItem.name}
+        >
+          {caseItem.name}
+        </span>
+        <span className="text-[9px]" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+          {sessionCount} chat{sessionCount !== 1 ? 's' : ''} · {docCount} doc{docCount !== 1 ? 's' : ''}
+        </span>
+      </div>
+      {hovered && (
+        <div className="no-drag shrink-0 flex items-center gap-1">
+          <button
+            onClick={startEdit}
+            title="Rename"
+            className="flex h-4 w-4 items-center justify-center rounded transition-colors"
+            style={{ color: 'rgb(var(--ov) / 0.18)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.55)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.18)' }}
+          >
+            <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064l6.286-6.286zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086z" />
+            </svg>
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            title="Delete case"
             className="flex h-4 w-4 items-center justify-center rounded transition-colors"
             style={{ color: 'rgb(var(--ov) / 0.18)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
@@ -182,21 +335,37 @@ export default function Sidebar({
   onClearSessions,
   onAddFiles,
   onOpenSettings,
+  files,
+  cases,
+  currentCaseId,
+  onCreateCase,
+  onSelectCase,
+  onDeleteCase,
+  onRenameCase,
+  onMoveSession,
 }: Props): JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
   const [collapsed, setCollapsed] = useState(false)
+  const [creatingCase, setCreatingCase] = useState(false)
+  const [newCaseName, setNewCaseName] = useState('')
+  const [moveSessionId, setMoveSessionId] = useState<string | null>(null)
+  const newCaseInputRef = useRef<HTMLInputElement>(null)
+  const caseCreatedRef = useRef(false)
 
   useEffect(() => {
     if (collapsed) setSearchQuery('')
   }, [collapsed])
 
-  const filteredSessions = searchQuery.trim()
+  // When searching, search across all sessions; otherwise filter by case
+  const visibleSessions = searchQuery.trim()
     ? sessions.filter((s) =>
         s.name.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : sessions
+    : currentCaseId
+      ? sessions.filter((s) => s.caseId === currentCaseId)
+      : sessions
 
-  const groups = groupSessions(filteredSessions)
+  const groups = groupSessions(visibleSessions)
 
   return (
     <aside
@@ -211,7 +380,7 @@ export default function Sidebar({
       }}
     >
       {/* Drag region + logo */}
-      <div className="drag-region flex items-center gap-2.5 px-4 pt-4 pb-4">
+      <div className="drag-region flex items-center gap-2.5 px-4 pt-4 pb-3">
         <button
           onClick={onGoHome}
           className="no-drag flex items-center gap-2 hover:opacity-75 transition-opacity flex-1 min-w-0"
@@ -243,12 +412,12 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* New Chat button */}
-      <div className="px-3 pt-0 pb-3">
+      {/* New Chat + New Case buttons */}
+      <div className="px-3 pt-0 pb-3 flex gap-2">
         <button
           onClick={onNewChat}
           title={collapsed ? 'New chat' : undefined}
-          className="no-drag flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[12px] font-medium transition-all"
+          className="no-drag flex flex-1 items-center gap-2.5 rounded-xl px-3 py-2.5 text-[12px] font-medium transition-all"
           style={{
             background: 'rgb(var(--ov) / 0.04)',
             border: '1px solid rgb(var(--ov) / 0.07)',
@@ -273,17 +442,126 @@ export default function Sidebar({
           </svg>
           {!collapsed && 'New chat'}
         </button>
+        {!collapsed && (
+          <button
+            onClick={() => { setCreatingCase(true); caseCreatedRef.current = false; setTimeout(() => newCaseInputRef.current?.focus(), 0) }}
+            title="New case"
+            className="no-drag flex items-center gap-1.5 rounded-xl px-3 py-2.5 text-[12px] font-medium transition-all shrink-0"
+            style={{
+              background: 'rgba(201,168,76,0.05)',
+              border: '1px solid rgba(201,168,76,0.12)',
+              color: 'rgba(201,168,76,0.6)',
+            }}
+            onMouseEnter={(e) => {
+              const el = e.currentTarget as HTMLButtonElement
+              el.style.background = 'rgba(201,168,76,0.1)'
+              el.style.color = '#c9a84c'
+            }}
+            onMouseLeave={(e) => {
+              const el = e.currentTarget as HTMLButtonElement
+              el.style.background = 'rgba(201,168,76,0.05)'
+              el.style.color = 'rgba(201,168,76,0.6)'
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
+            </svg>
+            Case
+          </button>
+        )}
       </div>
+
+      {/* New case inline input */}
+      {creatingCase && !collapsed && (
+        <div className="px-3 pb-2">
+          <div
+            className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+            style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)' }}
+          >
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="rgba(201,168,76,0.6)" className="shrink-0">
+              <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
+            </svg>
+            <input
+              ref={newCaseInputRef}
+              value={newCaseName}
+              onChange={(e) => setNewCaseName(e.target.value)}
+              onBlur={() => {
+                if (!caseCreatedRef.current) {
+                  caseCreatedRef.current = true
+                  const trimmed = newCaseName.trim()
+                  if (trimmed) onCreateCase(trimmed)
+                }
+                setNewCaseName('')
+                setCreatingCase(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (!caseCreatedRef.current) {
+                    caseCreatedRef.current = true
+                    const trimmed = newCaseName.trim()
+                    if (trimmed) onCreateCase(trimmed)
+                  }
+                  setNewCaseName('')
+                  setCreatingCase(false)
+                }
+                if (e.key === 'Escape') { caseCreatedRef.current = true; setNewCaseName(''); setCreatingCase(false) }
+              }
+              placeholder="Case name…"
+              className="flex-1 bg-transparent text-[11px] outline-none placeholder:text-[rgba(201,168,76,0.35)]"
+              style={{ color: 'var(--text)' }}
+              maxLength={60}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Divider */}
       <div className="mx-3 mb-2 h-px" style={{ background: 'rgb(var(--ov) / 0.04)' }} />
+
+      {/* Cases section */}
+      {!collapsed && cases.length > 0 && (
+        <div className="px-2 pb-2">
+          <div className="flex items-center justify-between px-3 mb-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>
+              Cases
+            </span>
+            {currentCaseId && (
+              <button
+                onClick={() => onSelectCase(null)}
+                title="Show all"
+                className="text-[9px] font-semibold px-2 py-0.5 rounded-md transition-all"
+                style={{ color: 'rgba(201,168,76,0.5)', background: 'rgba(201,168,76,0.06)' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#c9a84c' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.5)' }}
+              >
+                All
+              </button>
+            )}
+          </div>
+          <div className="flex flex-col gap-0.5">
+            {cases.map((c) => (
+              <CaseRow
+                key={c.id}
+                caseItem={c}
+                isActive={c.id === currentCaseId}
+                sessionCount={sessions.filter((s) => s.caseId === c.id).length}
+                docCount={files.filter((f) => f.caseId === c.id).length}
+                onSelect={() => onSelectCase(c.id === currentCaseId ? null : c.id)}
+                onDelete={() => onDeleteCase(c.id)}
+                onRename={(name) => onRenameCase(c.id, name)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Sessions header + search */}
       {!collapsed && sessions.length > 0 && (
         <>
           <div className="flex items-center justify-between px-5 mb-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>
-              Chats
+              {currentCaseId ? (cases.find((c) => c.id === currentCaseId)?.name ?? 'Case') + ' — Chats' : 'Chats'}
             </span>
             <button
               onClick={onClearSessions}
@@ -340,11 +618,47 @@ export default function Sidebar({
         </>
       )}
 
+      {/* Move-to-case popover */}
+      {moveSessionId && !collapsed && (
+        <div
+          className="mx-3 mb-2 rounded-lg px-3 py-2 flex flex-col gap-1"
+          style={{ background: 'rgb(var(--ov) / 0.04)', border: '1px solid rgb(var(--ov) / 0.08)' }}
+        >
+          <p className="text-[10px] font-semibold mb-1" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
+            Move "{sessions.find((s) => s.id === moveSessionId)?.name ?? 'chat'}" to:
+          </p>
+          <button
+            onClick={() => { onMoveSession(moveSessionId, null); setMoveSessionId(null) }}
+            className="text-left text-[11px] px-2 py-1 rounded hover:bg-[rgb(var(--ov)/0.06)] transition-colors"
+            style={{ color: 'rgb(var(--ov) / 0.5)' }}
+          >
+            Uncategorized
+          </button>
+          {cases.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => { onMoveSession(moveSessionId, c.id); setMoveSessionId(null) }}
+              className="text-left text-[11px] px-2 py-1 rounded hover:bg-[rgba(201,168,76,0.08)] transition-colors"
+              style={{ color: 'rgba(201,168,76,0.7)' }}
+            >
+              {c.name}
+            </button>
+          ))}
+          <button
+            onClick={() => setMoveSessionId(null)}
+            className="text-[10px] mt-1 self-end"
+            style={{ color: 'rgb(var(--ov) / 0.25)' }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       {/* Sessions list */}
       <div className="flex-1 overflow-y-auto px-2 py-1">
         {collapsed ? (
           <div className="flex flex-col gap-0.5 py-1 px-1.5">
-            {sessions.slice(0, 15).map((session) => (
+            {visibleSessions.slice(0, 15).map((session) => (
               <button
                 key={session.id}
                 onClick={() => onLoadSession(session)}
@@ -382,9 +696,13 @@ export default function Sidebar({
             <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.15)' }}>No chats yet</p>
             <p className="mt-0.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.09)' }}>Sessions auto-save</p>
           </div>
-        ) : filteredSessions.length === 0 ? (
+        ) : visibleSessions.length === 0 ? (
           <div className="flex flex-col items-center py-8 text-center px-4">
-            <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>No results for "{searchQuery}"</p>
+            {searchQuery ? (
+              <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>No results for "{searchQuery}"</p>
+            ) : (
+              <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>No chats in this case yet</p>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-5 py-1">
@@ -405,6 +723,7 @@ export default function Sidebar({
                       onLoad={() => onLoadSession(session)}
                       onDelete={() => onDeleteSession(session.id)}
                       onRename={(name) => onRenameSession(session.id, name)}
+                      onMove={cases.length > 0 ? () => setMoveSessionId(session.id) : undefined}
                     />
                   ))}
                 </div>

@@ -3,8 +3,8 @@ use crate::pipeline::{
     SCORE_THRESHOLD,
 };
 use crate::state::{
-    AppSettings, ChatSession, ChunkMetadata, Citation, EmbeddedChunkEntry, FileInfo, ModelStatus,
-    QueryResult, RagState,
+    AppSettings, Case, ChatSession, ChunkMetadata, Citation, EmbeddedChunkEntry, FileInfo,
+    ModelStatus, QueryResult, RagState,
 };
 use base64::Engine;
 use serde::Serialize;
@@ -315,6 +315,7 @@ pub async fn migrate_embeddings(state: &mut crate::state::RagState) {
 #[tauri::command]
 pub async fn load_files(
     file_paths: Vec<String>,
+    case_id: Option<String>,
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
 ) -> Result<Vec<FileInfo>, String> {
     let (settings, model_dir) = {
@@ -345,11 +346,20 @@ pub async fn load_files(
     let mut last_error: Option<String> = None;
     for file_path in expanded {
         match process_file(&file_path, &settings, &model_dir, &state).await {
-            Ok(info) => {
+            Ok(mut info) => {
                 if info.chunk_count == 0 {
                     let msg = format!("File loaded but embedding failed — check that the embedding model downloaded correctly: {}", info.file_name);
                     log::warn!("{}", msg);
                     last_error = Some(msg);
+                }
+                // Assign to case if specified
+                if let Some(ref cid) = case_id {
+                    info.case_id = Some(cid.clone());
+                    let mut s = state.lock().await;
+                    if let Some(fr) = s.file_registry.get_mut(&info.id) {
+                        fr.case_id = Some(cid.clone());
+                    }
+                    s.save_file_registry().await;
                 }
                 results.push(info);
             }
@@ -463,6 +473,7 @@ async fn process_file(
         word_count,
         loaded_at: now,
         chunk_count: item_ids.len(),
+        case_id: None,
     };
 
     // Single lock acquisition: insert all chunks + registry entries + save.
@@ -489,6 +500,8 @@ async fn process_file(
 pub async fn query(
     question: String,
     history: Vec<(String, String)>,
+    case_id: Option<String>,
+    case_context: Option<String>,
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
     window: tauri::Window,
 ) -> Result<QueryResult, String> {
@@ -510,15 +523,39 @@ pub async fn query(
     let results = {
         let s = state.lock().await;
 
+        // When case_id is set, filter to only chunks belonging to that case's files.
+        // Build a mapping from filtered index → global index so we can map results back.
+        let (filtered_chunks, global_indices): (Vec<&EmbeddedChunkEntry>, Vec<usize>) =
+            if let Some(ref cid) = case_id {
+                let case_doc_ids: std::collections::HashSet<&str> = s
+                    .file_registry
+                    .values()
+                    .filter(|f| f.case_id.as_deref() == Some(cid.as_str()))
+                    .map(|f| f.id.as_str())
+                    .collect();
+                s.embedded_chunks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| case_doc_ids.contains(e.meta.document_id.as_str()))
+                    .map(|(i, e)| (e, i))
+                    .unzip()
+            } else {
+                s.embedded_chunks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| (e, i))
+                    .unzip()
+            };
+
         window
             .emit(
                 "query-status",
-                serde_json::json!({"phase": "searching", "chunks": s.embedded_chunks.len()}),
+                serde_json::json!({"phase": "searching", "chunks": filtered_chunks.len()}),
             )
             .ok();
 
         // No chunks at all → no files were successfully embedded.
-        if s.embedded_chunks.is_empty() {
+        if filtered_chunks.is_empty() {
             return Ok(QueryResult {
                 answer: "I could not find information about this in your loaded documents. Please ensure the relevant files are loaded.".to_string(),
                 citations: vec![],
@@ -529,16 +566,8 @@ pub async fn query(
         // Use the pluggable retrieval backend.
         let backend = pipeline::default_backend();
         let corpus = pipeline::RetrievalCorpus {
-            texts: s
-                .embedded_chunks
-                .iter()
-                .map(|e| e.meta.text.as_str())
-                .collect(),
-            vectors: s
-                .embedded_chunks
-                .iter()
-                .map(|e| e.vector.as_slice())
-                .collect(),
+            texts: filtered_chunks.iter().map(|e| e.meta.text.as_str()).collect(),
+            vectors: filtered_chunks.iter().map(|e| e.vector.as_slice()).collect(),
         };
         let config = pipeline::RetrievalConfig {
             top_k: settings.top_k,
@@ -552,10 +581,13 @@ pub async fn query(
         // Always include filled form data chunks — they're tiny and contain the actual answers.
         pipeline::ensure_form_data_included(&mut ranked, &corpus, 2);
 
-        // Map ScoredResult indices back to (score, ChunkMetadata) for downstream use.
+        // Map ScoredResult indices back via global_indices to (score, ChunkMetadata).
         ranked
             .into_iter()
-            .map(|r| (r.score, s.embedded_chunks[r.chunk_index].meta.clone()))
+            .map(|r| {
+                let global_idx = global_indices[r.chunk_index];
+                (r.score, s.embedded_chunks[global_idx].meta.clone())
+            })
             .collect::<Vec<(f32, ChunkMetadata)>>()
     };
 
@@ -597,7 +629,16 @@ pub async fn query(
         parts
     };
 
-    let mut raw_context = context_parts.join("\n\n---\n\n");
+    let mut raw_context = String::new();
+    // Prepend cross-conversation case context if available
+    if let Some(ref cc) = case_context {
+        if !cc.is_empty() {
+            raw_context.push_str("--- Related conversations in this case ---\n");
+            raw_context.push_str(cc);
+            raw_context.push_str("\n\n");
+        }
+    }
+    raw_context.push_str(&context_parts.join("\n\n---\n\n"));
     if !neighbor_context_parts.is_empty() {
         raw_context.push_str("\n\n--- Surrounding Context ---\n\n");
         raw_context.push_str(&neighbor_context_parts.join("\n\n"));
@@ -763,7 +804,7 @@ pub async fn save_session(
                 ..session
             },
         );
-        s.sessions.truncate(50);
+        s.sessions.truncate(200);
     }
 
     s.save_sessions().await;
@@ -787,6 +828,120 @@ pub async fn delete_session(
     s.sessions.retain(|sess| sess.id != session_id);
     s.save_sessions().await;
     Ok(true)
+}
+
+// ── Case Management ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_cases(
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<Vec<Case>, String> {
+    let s = state.lock().await;
+    Ok(s.cases.clone())
+}
+
+#[tauri::command]
+pub async fn save_case(
+    case: Case,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<(), String> {
+    let mut s = state.lock().await;
+    if let Some(existing) = s.cases.iter_mut().find(|c| c.id == case.id) {
+        *existing = case;
+    } else {
+        s.cases.push(case);
+    }
+    s.save_cases().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_case(
+    case_id: String,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<(), String> {
+    let mut s = state.lock().await;
+    s.cases.retain(|c| c.id != case_id);
+    // Orphan sessions and files belonging to this case
+    for session in &mut s.sessions {
+        if session.case_id.as_deref() == Some(&case_id) {
+            session.case_id = None;
+        }
+    }
+    for file in s.file_registry.values_mut() {
+        if file.case_id.as_deref() == Some(&case_id) {
+            file.case_id = None;
+        }
+    }
+    s.save_cases().await;
+    s.save_sessions().await;
+    s.save_file_registry().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn assign_file_to_case(
+    file_id: String,
+    case_id: Option<String>,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<(), String> {
+    let mut s = state.lock().await;
+    if let Some(file) = s.file_registry.get_mut(&file_id) {
+        file.case_id = case_id;
+    }
+    s.save_file_registry().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn assign_session_to_case(
+    session_id: String,
+    case_id: Option<String>,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<(), String> {
+    let mut s = state.lock().await;
+    if let Some(session) = s.sessions.iter_mut().find(|sess| sess.id == session_id) {
+        session.case_id = case_id;
+    }
+    s.save_sessions().await;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaseSummary {
+    pub session_id: String,
+    pub summary: String,
+}
+
+#[tauri::command]
+pub async fn get_case_summaries(
+    case_id: String,
+    exclude_session_id: Option<String>,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<Vec<CaseSummary>, String> {
+    let s = state.lock().await;
+    let summaries: Vec<CaseSummary> = s
+        .sessions
+        .iter()
+        .filter(|sess| {
+            sess.case_id.as_deref() == Some(&case_id)
+                && sess
+                    .summary
+                    .as_ref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false)
+                && exclude_session_id
+                    .as_ref()
+                    .map(|eid| sess.id != *eid)
+                    .unwrap_or(true)
+        })
+        .map(|sess| CaseSummary {
+            session_id: sess.id.clone(),
+            summary: sess.summary.clone().unwrap_or_default(),
+        })
+        .collect();
+    Ok(summaries)
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

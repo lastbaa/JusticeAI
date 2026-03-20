@@ -206,6 +206,12 @@ pub fn run() {
             commands::rag::get_file_data,
             commands::rag::get_page_text,
             commands::rag::save_file,
+            commands::rag::get_cases,
+            commands::rag::save_case,
+            commands::rag::delete_case,
+            commands::rag::assign_file_to_case,
+            commands::rag::assign_session_to_case,
+            commands::rag::get_case_summaries,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
