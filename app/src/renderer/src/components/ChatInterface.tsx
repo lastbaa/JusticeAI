@@ -180,6 +180,7 @@ export default function ChatInterface({
   const [input, setInput] = useState('')
   const [isDragging, setIsDragging] = useState(false)
   const [justLoaded, setJustLoaded] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const prevIsLoadingRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -627,6 +628,31 @@ export default function ChatInterface({
               {files.length} {files.length === 1 ? 'doc' : 'docs'}
             </div>
           )}
+          {/* Help button */}
+          <button
+            onClick={() => setShowHelp(true)}
+            aria-label="Quick reference"
+            className="flex items-center justify-center h-6 w-6 rounded-full text-[11px] font-bold transition-all"
+            style={{
+              border: '1px solid rgb(var(--ov) / 0.08)',
+              color: 'rgb(var(--ov) / 0.3)',
+              background: 'rgb(var(--ov) / 0.02)',
+            }}
+            onMouseEnter={(e) => {
+              const el = e.currentTarget as HTMLButtonElement
+              el.style.color = 'rgba(201,168,76,0.8)'
+              el.style.borderColor = 'rgba(201,168,76,0.25)'
+              el.style.background = 'rgba(201,168,76,0.06)'
+            }}
+            onMouseLeave={(e) => {
+              const el = e.currentTarget as HTMLButtonElement
+              el.style.color = 'rgb(var(--ov) / 0.3)'
+              el.style.borderColor = 'rgb(var(--ov) / 0.08)'
+              el.style.background = 'rgb(var(--ov) / 0.02)'
+            }}
+          >
+            ?
+          </button>
           {/* Export button */}
           {onExportChat && !isEmpty && (
             <button
@@ -807,6 +833,114 @@ export default function ChatInterface({
           </div>
         </div>
       </div>
+
+      {/* Help modal */}
+      {showHelp && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'var(--backdrop)', backdropFilter: 'blur(8px)' }}
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl overflow-hidden"
+            style={{
+              background: 'var(--modal-bg)',
+              border: '1px solid rgb(var(--ov) / 0.08)',
+              boxShadow: '0 40px 100px var(--shadow-heavy), 0 0 0 1px rgb(var(--ov) / 0.03)',
+              animation: 'scaleIn 0.2s ease both',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center justify-between px-6 py-4"
+              style={{ borderBottom: '1px solid rgb(var(--ov) / 0.06)' }}
+            >
+              <h2 className="text-[14px] font-semibold" style={{ color: 'var(--text)' }}>Quick Reference</h2>
+              <button
+                onClick={() => setShowHelp(false)}
+                aria-label="Close help"
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"
+                style={{ color: 'rgb(var(--ov) / 0.3)' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.7)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.3)' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 flex flex-col gap-5">
+              {/* Keyboard shortcuts */}
+              <div>
+                <h3
+                  className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-3 pb-2 border-b"
+                  style={{ color: 'rgb(var(--ov) / 0.3)', borderColor: 'rgb(var(--ov) / 0.06)' }}
+                >
+                  Keyboard Shortcuts
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {[
+                    { keys: 'Enter', desc: 'Send message' },
+                    { keys: 'Shift + Enter', desc: 'New line' },
+                    { keys: 'Esc', desc: 'Close settings / dialogs' },
+                    { keys: 'Drag & Drop', desc: 'Add files to your session' },
+                  ].map((item) => (
+                    <div key={item.keys} className="flex items-center justify-between">
+                      <span
+                        className="text-[11px] font-mono px-2 py-0.5 rounded"
+                        style={{ background: 'rgb(var(--ov) / 0.05)', color: 'rgba(201,168,76,0.7)', border: '1px solid rgb(var(--ov) / 0.08)' }}
+                      >
+                        {item.keys}
+                      </span>
+                      <span className="text-[12px]" style={{ color: 'rgb(var(--ov) / 0.5)' }}>{item.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Usage tips */}
+              <div>
+                <h3
+                  className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-3 pb-2 border-b"
+                  style={{ color: 'rgb(var(--ov) / 0.3)', borderColor: 'rgb(var(--ov) / 0.06)' }}
+                >
+                  Usage Tips
+                </h3>
+                <ul className="flex flex-col gap-2">
+                  {[
+                    'Load your documents first — PDFs and DOCX files are supported.',
+                    'Ask questions in plain, natural language.',
+                    'Citations link directly to the source page in your documents.',
+                    'Use cases to organize research across different matters.',
+                  ].map((tip) => (
+                    <li key={tip} className="flex items-start gap-2">
+                      <span className="mt-1.5 w-1 h-1 rounded-full shrink-0" style={{ background: 'rgba(201,168,76,0.5)' }} />
+                      <span className="text-[12px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.5)' }}>{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="flex justify-end px-6 py-4"
+              style={{ borderTop: '1px solid rgb(var(--ov) / 0.06)' }}
+            >
+              <button
+                onClick={() => setShowHelp(false)}
+                className="rounded-lg px-5 py-2 text-[12px] font-semibold transition-colors"
+                style={{ background: 'var(--gold)', color: 'var(--text-on-gold)' }}
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

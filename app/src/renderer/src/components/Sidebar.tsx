@@ -157,6 +157,7 @@ function SessionItem({
           <button
             onClick={startEdit}
             title="Rename (or double-click)"
+            aria-label="Rename session"
             className="flex h-4 w-4 items-center justify-center rounded transition-colors"
             style={{ color: 'rgb(var(--ov) / 0.18)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.55)' }}
@@ -171,6 +172,7 @@ function SessionItem({
             <button
               onClick={(e) => { e.stopPropagation(); onMove() }}
               title="Move to case"
+              aria-label="Move to case"
               className="flex h-4 w-4 items-center justify-center rounded transition-colors"
               style={{ color: 'rgb(var(--ov) / 0.18)' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.7)' }}
@@ -185,6 +187,7 @@ function SessionItem({
           <button
             onClick={(e) => { e.stopPropagation(); onDelete() }}
             title="Delete"
+            aria-label="Delete session"
             className="flex h-4 w-4 items-center justify-center rounded transition-colors"
             style={{ color: 'rgb(var(--ov) / 0.18)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
@@ -296,6 +299,7 @@ function CaseRow({
           <button
             onClick={startEdit}
             title="Rename"
+            aria-label="Rename case"
             className="flex h-4 w-4 items-center justify-center rounded transition-colors"
             style={{ color: 'rgb(var(--ov) / 0.18)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.55)' }}
@@ -308,6 +312,7 @@ function CaseRow({
           <button
             onClick={(e) => { e.stopPropagation(); onDelete() }}
             title="Delete case"
+            aria-label="Delete case"
             className="flex h-4 w-4 items-center justify-center rounded transition-colors"
             style={{ color: 'rgb(var(--ov) / 0.18)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
@@ -383,6 +388,7 @@ export default function Sidebar({
       <div className="drag-region flex items-center gap-2.5 px-4 pt-4 pb-3">
         <button
           onClick={onGoHome}
+          aria-label="Go to home screen"
           className="no-drag flex items-center gap-2 hover:opacity-75 transition-opacity flex-1 min-w-0"
         >
           <ScalesIcon size={17} />
@@ -396,6 +402,7 @@ export default function Sidebar({
           onClick={() => setCollapsed((v) => !v)}
           className="no-drag flex h-6 w-6 items-center justify-center rounded transition-opacity"
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           style={{ color: 'rgb(var(--ov) / 0.25)', flexShrink: 0 }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.6)' }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.25)' }}
@@ -417,6 +424,7 @@ export default function Sidebar({
         <button
           onClick={onNewChat}
           title={collapsed ? 'New chat' : undefined}
+          aria-label="New chat"
           className="no-drag flex flex-1 items-center gap-2.5 rounded-xl px-3 py-2.5 text-[12px] font-medium transition-all"
           style={{
             background: 'rgb(var(--ov) / 0.04)',
@@ -566,6 +574,7 @@ export default function Sidebar({
             <button
               onClick={onClearSessions}
               title="Clear all conversations"
+              aria-label="Clear all conversations"
               className="flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-md transition-all"
               style={{
                 background: 'rgb(var(--ov) / 0.04)',
@@ -607,7 +616,7 @@ export default function Sidebar({
                 style={{ color: 'var(--text)' }}
               />
               {searchQuery && (
-                <button onClick={() => setSearchQuery('')} style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+                <button onClick={() => setSearchQuery('')} aria-label="Clear search" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
                   <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
                     <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
                   </svg>
@@ -663,6 +672,7 @@ export default function Sidebar({
                 key={session.id}
                 onClick={() => onLoadSession(session)}
                 title={session.name}
+                aria-label={session.name}
                 className="flex items-center justify-center w-full py-1.5 rounded-lg transition-all"
                 style={{
                   background: session.id === currentSessionId ? 'rgb(var(--ov) / 0.06)' : 'transparent',
@@ -742,6 +752,7 @@ export default function Sidebar({
           onClick={onAddFiles}
           disabled={isLoading}
           title={collapsed ? 'Add Documents' : undefined}
+          aria-label="Add documents"
           className="no-drag flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-[12px] transition-all disabled:opacity-40"
           style={{ color: 'rgb(var(--ov) / 0.35)', justifyContent: collapsed ? 'center' : undefined }}
           onMouseEnter={(e) => {
@@ -763,6 +774,7 @@ export default function Sidebar({
         <button
           onClick={onOpenSettings}
           title={collapsed ? 'Settings' : undefined}
+          aria-label="Settings"
           className="no-drag flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-[12px] transition-all"
           style={{ color: 'rgb(var(--ov) / 0.35)', justifyContent: collapsed ? 'center' : undefined }}
           onMouseEnter={(e) => {

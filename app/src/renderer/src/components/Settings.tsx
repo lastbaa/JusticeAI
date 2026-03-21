@@ -81,6 +81,7 @@ function ThemeToggle({ value, onChange }: { value: Theme; onChange: (t: Theme) =
         <button
           key={t}
           onClick={() => onChange(t)}
+          aria-label={`Switch to ${t} theme`}
           className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-[12px] font-medium transition-all"
           style={{
             background: value === t ? 'rgba(201,168,76,0.12)' : 'transparent',
@@ -299,6 +300,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
           </div>
           <button
             onClick={handleClose}
+            aria-label="Close settings"
             className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"
             style={{ color: 'rgb(var(--ov) / 0.3)' }}
             onMouseEnter={(e) => {
@@ -374,6 +376,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
                     <button
                       key={p.name}
                       onClick={() => applyPreset(p)}
+                      aria-label={`Apply ${p.name} preset`}
                       className="rounded-full px-3 py-1.5 text-[11px] font-medium transition-all"
                       style={{
                         background: isActive ? 'rgba(201,168,76,0.12)' : 'var(--surface-dark)',
@@ -519,6 +522,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
           <div className="flex items-center gap-3">
           <button
             onClick={handleClose}
+            aria-label="Cancel"
             className="rounded-lg px-4 py-2 text-[12px] font-medium transition-colors"
             style={{
               background: 'transparent',
@@ -536,6 +540,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
           </button>
           <button
             onClick={handleSave}
+            aria-label="Save settings"
             className="rounded-lg px-5 py-2 text-[12px] font-semibold transition-colors"
             style={{ background: 'var(--gold)', color: 'var(--text-on-gold)' }}
             onMouseEnter={(e) => {

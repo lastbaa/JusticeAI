@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Justice AI is a privacy-first legal research desktop app (Electron + React). Documents are stored and processed on-device — parsing and semantic search use a local Ollama embedding model. Answer generation calls the Saul-7B-Instruct model via HuggingFace Inference API (requires a free HF token).
+Justice AI is a privacy-first legal research desktop app built with Tauri 2 (Rust backend + React frontend). All processing runs locally — document parsing, embedding (fastembed BGE-small-en-v1.5), and LLM inference (Saul-7B-Instruct Q4_K_M via llama-cpp-2) happen on-device. No cloud services, no API keys required.
 
 ## Monorepo Structure
 
 ```
 /
-├── app/          # Electron + React desktop app (primary codebase)
+├── app/          # Tauri 2 + React desktop app (primary codebase)
 ├── website/      # Next.js marketing site
 ├── shared/       # Shared TypeScript types (IPC channels, DTOs, models)
 └── package.json  # Workspace root
@@ -21,59 +21,54 @@ Justice AI is a privacy-first legal research desktop app (Electron + React). Doc
 All commands run from the **repo root** unless noted:
 
 ```bash
-npm run app              # Start desktop app in dev mode (hot reload via electron-vite)
+npm run app              # Start desktop app in dev mode (Tauri dev with Vite HMR)
 npm run website          # Start Next.js site at localhost:3000
-npm run build:app        # Build app bundle
+npm run build:app        # Build production app bundle
 npm run build:website    # Build website for production
-cd app && npm run package  # Create macOS .dmg → app/dist/
+cd app/src-tauri && cargo test  # Run Rust unit tests
 ```
-
-There are no lint or test commands configured.
 
 ## Prerequisites
 
-1. A free HuggingFace account + API token (read access) — for LLM answer generation
-2. Ollama running locally — for embeddings:
-```bash
-ollama pull nomic-embed-text   # Default embedding model
-ollama serve
-```
+- Node.js 20+
+- Rust toolchain (install via [rustup](https://rustup.rs/))
+- Platform build tools required by Tauri (see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/))
 
-## Architecture: Desktop App (`app/`)
+No external services needed — models auto-download on first launch.
 
-The app uses a standard Electron architecture with a strict main/renderer separation enforced by a context bridge preload.
+## Architecture: Rust Backend (`app/src-tauri/src/`)
 
-### Main Process (`src/main/`)
+All business logic lives in Rust, exposed to the frontend via Tauri IPC commands:
 
-All business logic lives here, exposed to the renderer only via IPC:
-
-- **`index.ts`** — Window management, registers all `ipcMain` handlers, wires up services
-- **`services/ragPipeline.ts`** — The core RAG pipeline: document chunking (500 tokens, 50 overlap), embedding generation, Vectra vector index management, and citation-grounded answer generation. Vector index stored at `userData/vector-index`.
-- **`services/ollama.ts`** — HTTP client for Ollama at `http://localhost:11434`. Endpoint: `/api/embeddings` (embeddings only; LLM inference moved to HuggingFace).
-- **`services/docParser.ts`** — PDF (via `pdf-parse`) and DOCX (via `mammoth`) parsing with page-level text extraction.
+- **`lib.rs`** — Tauri setup, state initialization, plugin registration
+- **`state.rs`** — `RagState`, `AppSettings`, and all domain types
+- **`pipeline.rs`** — Core RAG pipeline: document chunking, embedding via fastembed, BM25 + cosine hybrid retrieval with Reciprocal Rank Fusion (RRF), MMR for diversity, and LLM inference via llama-cpp-2
+- **`commands/rag.rs`** — Tauri command handlers (IPC bridge between frontend and pipeline)
+- **`commands/doc_parser.rs`** — PDF (`lopdf`), DOCX (`zip` + `roxmltree`), TXT, CSV, HTML, EML, XLSX, and image OCR parsing
+- **`assertions.rs`** — Citation format validation, number exactness checks, hallucination detection
 
 Storage:
-- **Settings** — `electron-store` (plain JSON)
-- **Chat history** — `electron-store` with AES encryption (key: `'justice-ai-chat-v1-a8f3c2e9b4d7f1a6'`)
+- **Vector store** — In-memory `Vec<EmbeddedChunkEntry>` with cosine similarity, persisted to `{app_data}/chunks.json`
+- **Models** — Saul-7B GGUF (~4.5 GB) at `{app_data}/models/saul.gguf`, fastembed ONNX (~33 MB) at `{app_data}/models/fastembed-bge/`
+- **Settings & chat history** — Tauri-managed app data directory
 
-### Preload (`src/preload/index.ts`)
-
-Exposes `window.api` to the renderer via `contextBridge`. All IPC channel names are defined in `shared/src/types.ts`.
-
-### Renderer (`src/renderer/src/`)
+## Architecture: Frontend (`app/src/renderer/src/`)
 
 React app. State management lives in `App.tsx` (messages, files, sessions, settings). Key components:
 
-- **`ChatInterface.tsx`** — Main chat UI. Sends queries through the RAG pipeline via IPC.
-- **`MessageBubble.tsx`** — Renders chat messages. Uses `react-markdown` for assistant responses.
-- **`Sidebar.tsx`** — Session list + file management
-- **`Settings.tsx`** — Configures HF token, Ollama URL, embedding model, chunk size, topK. Shows first-run setup guide when HF token is missing.
+- **`App.tsx`** — Root state management (messages, files, sessions, settings)
+- **`components/ChatInterface.tsx`** — Main chat UI. Sends queries through the RAG pipeline via Tauri invoke.
+- **`components/MessageBubble.tsx`** — Renders chat messages. Uses `react-markdown` for assistant responses.
+- **`components/Sidebar.tsx`** — Session list, case management, file organization
+- **`components/Settings.tsx`** — RAG configuration (chunk size, topK), practice area presets, theme selection
+- **`components/ModelSetup.tsx`** — First-launch model download screen with progress tracking
+- **`api.ts`** — `window.api` shim using Tauri `invoke()` and `@tauri-apps/plugin-dialog`
 
 ## Shared Types (`shared/src/types.ts`)
 
-All IPC channel names, request/response DTOs, and domain models (`ParsedDocument`, `DocumentChunk`, `ChatMessage`, `AppSettings`, etc.) are defined here. **Always update this file when adding new IPC channels.**
+All IPC contracts and domain models (`AppSettings`, `ChatSession`, `FileInfo`, `ModelStatus`, `DownloadProgress`, etc.) are defined here. **Always update this file when adding new Tauri commands.**
 
-Default settings: `embedModel: 'nomic-embed-text'`, `chunkSize: 500`, `chunkOverlap: 50`, `topK: 5`. LLM is Saul-7B-Instruct via HuggingFace (requires `hfToken` in settings).
+Default settings: `chunkSize: 500`, `chunkOverlap: 50`, `topK: 5`.
 
 ## Styling
 
@@ -81,7 +76,9 @@ Tailwind CSS with a Navy (`#0d1117`) + Gold (`#c9a84c`) color scheme. Both `app/
 
 ## Key Technical Notes
 
-- **Minimal cloud calls** — Documents never leave the machine. Only query text goes to HuggingFace for LLM inference. Don't introduce additional external API calls without explicit user confirmation.
-- **Electron security** — `contextBridge` is the only way to communicate between main and renderer. Never add `nodeIntegration: true`.
-- **TypeScript** — The app uses project references: `tsconfig.node.json` for main/preload, `tsconfig.web.json` for renderer.
-- **Path alias** — `@renderer` resolves to `src/renderer/src` (configured in `electron.vite.config.ts`).
+- **Zero cloud calls** — All documents, embeddings, and LLM inference stay on-device. Do not introduce external API calls without explicit user confirmation.
+- **Tauri security** — Commands are exposed via `invoke()`. No node integration. File dialogs use `@tauri-apps/plugin-dialog` on the JS side to avoid async deadlocks.
+- **TypeScript** — Vite + React with `@renderer` path alias resolving to `src/renderer/src` (configured in `vite.config.ts`).
+- **Retrieval pipeline** — Hybrid BM25 + cosine similarity with Reciprocal Rank Fusion (RRF). MMR reranking for diversity. Legal synonym expansion in BM25. Pluggable `RetrievalBackend` trait.
+- **Models auto-download** — On first launch, `ModelSetup.tsx` triggers `download_models` Tauri command. Saul-7B GGUF (~4.5 GB) + fastembed BGE ONNX (~33 MB). Progress reported via `download-progress` events.
+- **Eval system** — `cargo run --bin harness` runs 77 eval cases across 8 fixtures. Metrics: MRR, P@1, recall, partial score. Design doc at `app/src-tauri/EVAL_SYSTEM_DESIGN.md`.
