@@ -46,6 +46,19 @@
       "providerShortName": null,
       "entitlements": null,
       "exceptionDomain": null
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
     }
   }
 }

@@ -1,10 +1,41 @@
 import { useState, useEffect } from 'react'
 import { AppSettings, Theme } from '../../../../../shared/src/types'
 
+// ── Practice Area Presets ─────────────────────────────────────────────────────
+
+interface Preset {
+  name: string
+  chunkSize: number
+  chunkOverlap: number
+  topK: number
+}
+
+const PRESETS: Preset[] = [
+  { name: 'General',               chunkSize: 1000, chunkOverlap: 150, topK: 6 },
+  { name: 'Criminal Law',          chunkSize: 1200, chunkOverlap: 200, topK: 8 },
+  { name: 'Family / Domestic',     chunkSize: 800,  chunkOverlap: 100, topK: 5 },
+  { name: 'Corporate / Contract',  chunkSize: 1500, chunkOverlap: 200, topK: 8 },
+  { name: 'Immigration',           chunkSize: 1000, chunkOverlap: 150, topK: 7 },
+  { name: 'Personal Injury',       chunkSize: 1000, chunkOverlap: 150, topK: 7 },
+  { name: 'Real Estate / Property',chunkSize: 1200, chunkOverlap: 180, topK: 7 },
+  { name: 'Employment / Labor',    chunkSize: 1000, chunkOverlap: 150, topK: 6 },
+  { name: 'Regulatory / Compliance', chunkSize: 1400, chunkOverlap: 200, topK: 8 },
+]
+
+function findActivePreset(s: AppSettings): string | null {
+  const match = PRESETS.find(
+    (p) => p.chunkSize === s.chunkSize && p.chunkOverlap === s.chunkOverlap && p.topK === s.topK
+  )
+  return match?.name ?? null
+}
+
+// ── Shared UI Components ──────────────────────────────────────────────────────
+
 interface Props {
   settings: AppSettings
   onSave: (settings: AppSettings) => void
   onClose: () => void
+  onReindex?: () => void
 }
 
 function Field({
@@ -26,36 +57,6 @@ function Field({
       )}
       {children}
     </div>
-  )
-}
-
-function NumberInput({
-  value,
-  onChange,
-  min,
-  max,
-}: {
-  value: number
-  onChange: (v: number) => void
-  min: number
-  max: number
-}): JSX.Element {
-  return (
-    <input
-      type="number"
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      min={min}
-      max={max}
-      className="w-full rounded-lg px-3 py-2 text-[12px] outline-none transition-colors"
-      style={{ background: 'var(--surface-dark)', border: '1px solid rgb(var(--ov) / 0.08)', color: 'var(--text)' }}
-      onFocus={(e) => {
-        ;(e.target as HTMLInputElement).style.borderColor = 'rgba(201,168,76,0.4)'
-      }}
-      onBlur={(e) => {
-        ;(e.target as HTMLInputElement).style.borderColor = 'rgb(var(--ov) / 0.08)'
-      }}
-    />
   )
 }
 
@@ -103,10 +104,101 @@ function ThemeToggle({ value, onChange }: { value: Theme; onChange: (t: Theme) =
   )
 }
 
-export default function Settings({ settings, onSave, onClose }: Props): JSX.Element {
+// ── Slider ────────────────────────────────────────────────────────────────────
+
+function Slider({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+  step: number
+}): JSX.Element {
+  const pct = ((value - min) / (max - min)) * 100
+
+  return (
+    <div className="mb-1">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[12px] font-medium" style={{ color: 'var(--text)' }}>{label}</span>
+        <span
+          className="text-[13px] font-mono font-semibold tabular-nums"
+          style={{ color: 'var(--gold)' }}
+        >
+          {value}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="slider-range w-full h-[6px] rounded-full appearance-none cursor-pointer outline-none"
+        style={{
+          background: `linear-gradient(to right, var(--gold) 0%, var(--gold) ${pct}%, rgb(var(--ov) / 0.1) ${pct}%, rgb(var(--ov) / 0.1) 100%)`,
+        }}
+      />
+      <div className="flex justify-between mt-1">
+        <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>{min}</span>
+        <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>{max}</span>
+      </div>
+    </div>
+  )
+}
+
+// Inject slider thumb styles (can't style ::-webkit-slider-thumb inline)
+function useSliderStyles(): void {
+  useEffect(() => {
+    if (document.getElementById('slider-thumb-styles')) return
+    const style = document.createElement('style')
+    style.id = 'slider-thumb-styles'
+    style.textContent = `
+      .slider-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--gold);
+        border: 2px solid var(--surface-dark);
+        cursor: pointer;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        transition: transform 0.1s;
+      }
+      .slider-range::-webkit-slider-thumb:hover {
+        transform: scale(1.15);
+      }
+      .slider-range::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--gold);
+        border: 2px solid var(--surface-dark);
+        cursor: pointer;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+      }
+    `
+    document.head.appendChild(style)
+  }, [])
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+
+export default function Settings({ settings, onSave, onClose, onReindex }: Props): JSX.Element {
   const [local, setLocal] = useState<AppSettings>({ ...settings })
   const [validationError, setValidationError] = useState<string | null>(null)
   const [buildInfo, setBuildInfo] = useState<string>('')
+  const [showReindexWarning, setShowReindexWarning] = useState(false)
+
+  useSliderStyles()
 
   useEffect(() => {
     window.api.getBuildInfo().then(setBuildInfo).catch(() => {})
@@ -121,7 +213,14 @@ export default function Settings({ settings, onSave, onClose }: Props): JSX.Elem
   }, [onClose])
 
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]): void {
-    setLocal((prev) => ({ ...prev, [key]: value }))
+    setLocal((prev) => {
+      const next = { ...prev, [key]: value }
+      // Dismiss re-index warning if chunk settings revert to original
+      if (showReindexWarning && next.chunkSize === settings.chunkSize && next.chunkOverlap === settings.chunkOverlap) {
+        setShowReindexWarning(false)
+      }
+      return next
+    })
   }
 
   // Apply theme preview instantly while editing
@@ -141,7 +240,34 @@ export default function Settings({ settings, onSave, onClose }: Props): JSX.Elem
       return
     }
     setValidationError(null)
+
+    // Show re-index warning if chunk settings changed
+    if (local.chunkSize !== settings.chunkSize || local.chunkOverlap !== settings.chunkOverlap) {
+      setShowReindexWarning(true)
+      return
+    }
+
     onSave(local)
+  }
+
+  function handleSaveAndReindex(): void {
+    onSave(local)
+    onReindex?.()
+  }
+
+  function handleSaveSkipReindex(): void {
+    onSave(local)
+  }
+
+  const activePreset = findActivePreset(local)
+
+  function applyPreset(p: Preset): void {
+    setLocal((prev) => ({
+      ...prev,
+      chunkSize: p.chunkSize,
+      chunkOverlap: p.chunkOverlap,
+      topK: p.topK,
+    }))
   }
 
   return (
@@ -235,33 +361,105 @@ export default function Settings({ settings, onSave, onClose }: Props): JSX.Elem
           {/* ── RAG Configuration ── */}
           <div>
             <SectionHeader>Search Configuration</SectionHeader>
-            <div className="grid grid-cols-3 gap-4">
-              <Field label="Chunk Size" description="Chars per chunk (100–2000)">
-                <NumberInput
-                  value={local.chunkSize}
-                  onChange={(v) => update('chunkSize', Math.max(100, Math.min(2000, v)))}
-                  min={100}
-                  max={2000}
-                />
-              </Field>
-              <Field label="Chunk Overlap" description="Overlap between chunks (0–200)">
-                <NumberInput
-                  value={local.chunkOverlap}
-                  onChange={(v) => update('chunkOverlap', Math.max(0, Math.min(200, v)))}
-                  min={0}
-                  max={200}
-                />
-              </Field>
-              <Field label="Top-K Results" description="Chunks per query (1–20)">
-                <NumberInput
-                  value={local.topK}
-                  onChange={(v) => update('topK', Math.max(1, Math.min(20, v)))}
-                  min={1}
-                  max={20}
-                />
-              </Field>
+
+            {/* Practice Area Presets */}
+            <div className="mb-5">
+              <label className="block text-[12px] font-medium mb-2" style={{ color: 'var(--text)' }}>
+                Practice Area
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {PRESETS.map((p) => {
+                  const isActive = activePreset === p.name
+                  return (
+                    <button
+                      key={p.name}
+                      onClick={() => applyPreset(p)}
+                      className="rounded-full px-3 py-1.5 text-[11px] font-medium transition-all"
+                      style={{
+                        background: isActive ? 'rgba(201,168,76,0.12)' : 'var(--surface-dark)',
+                        color: isActive ? 'var(--gold)' : 'rgb(var(--ov) / 0.4)',
+                        border: isActive
+                          ? '1px solid rgba(201,168,76,0.3)'
+                          : '1px solid rgb(var(--ov) / 0.08)',
+                      }}
+                    >
+                      {p.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Sliders */}
+            <div className="flex flex-col gap-4">
+              <Slider
+                label="Chunk Size"
+                value={local.chunkSize}
+                onChange={(v) => update('chunkSize', v)}
+                min={100}
+                max={2000}
+                step={50}
+              />
+              <Slider
+                label="Chunk Overlap"
+                value={local.chunkOverlap}
+                onChange={(v) => update('chunkOverlap', v)}
+                min={0}
+                max={200}
+                step={10}
+              />
+              <Slider
+                label="Top-K Results"
+                value={local.topK}
+                onChange={(v) => update('topK', v)}
+                min={1}
+                max={20}
+                step={1}
+              />
             </div>
           </div>
+
+          {/* ── Re-index Warning ── */}
+          {showReindexWarning && (
+            <div
+              className="rounded-xl px-4 py-3 flex flex-col gap-3"
+              style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)' }}
+            >
+              <div className="flex items-start gap-3">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="var(--gold)" className="shrink-0 mt-0.5">
+                  <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm6.5-.25A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75zM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" />
+                </svg>
+                <div>
+                  <p className="text-[12px] font-semibold mb-1" style={{ color: 'var(--gold)' }}>
+                    Chunk settings changed
+                  </p>
+                  <p className="text-[11px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
+                    Existing documents were indexed with the previous settings. Re-indexing will re-process all documents with the new chunk size and overlap.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 ml-[26px]">
+                <button
+                  onClick={handleSaveAndReindex}
+                  className="rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors"
+                  style={{ background: 'var(--gold)', color: 'var(--text-on-gold)' }}
+                >
+                  Re-index Documents
+                </button>
+                <button
+                  onClick={handleSaveSkipReindex}
+                  className="rounded-lg px-3 py-1.5 text-[11px] font-medium transition-colors"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid rgb(var(--ov) / 0.1)',
+                    color: 'rgb(var(--ov) / 0.4)',
+                  }}
+                >
+                  Skip, apply to new docs only
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* ── Privacy notice ── */}
           <div

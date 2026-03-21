@@ -36,13 +36,14 @@ const platforms: {
   {
     key: 'windows',
     label: 'Windows',
-    sub: 'Coming soon',
-    file: 'https://github.com/lastbaa/CS-370-Justice-AI-Project/releases/latest',
-    available: false,
+    sub: 'Windows 10+ · x64 · Vulkan GPU recommended',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v1.4.0/Justice.AI_1.4.0_x64-setup.exe',
+    available: true,
     installSteps: [
-      'Windows builds are not yet available.',
-      'macOS is fully supported today — download above.',
-      'Watch the GitHub releases page for Windows support.',
+      'Run the installer (.exe). Windows SmartScreen may warn about an unrecognized publisher — click "More info" → "Run anyway".',
+      'Justice AI installs to your Program Files folder. A desktop shortcut is created automatically.',
+      'On first launch the app downloads the Saul legal AI model (~4.5 GB). This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
+      'Drag in your PDFs or Word documents, ask any legal question in plain English, and get cited answers grounded in your own files.',
     ],
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -53,13 +54,14 @@ const platforms: {
   {
     key: 'linux',
     label: 'Linux',
-    sub: 'Coming soon',
-    file: 'https://github.com/lastbaa/CS-370-Justice-AI-Project/releases/latest',
-    available: false,
+    sub: 'Ubuntu 22.04+ / Fedora 38+ · x64 · AppImage',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v1.4.0/Justice.AI_1.4.0_amd64.AppImage',
+    available: true,
     installSteps: [
-      'Linux builds are not yet available.',
-      'macOS is fully supported today — download above.',
-      'Watch the GitHub releases page for Linux support.',
+      'Download the .AppImage file. Make it executable: chmod +x Justice.AI_1.4.0_amd64.AppImage, then double-click or run it from a terminal.',
+      'If your desktop environment supports it, you can right-click the AppImage → Properties → Permissions → "Allow executing file as program".',
+      'On first launch the app downloads the Saul legal AI model (~4.5 GB). This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
+      'Drag in your PDFs or Word documents, ask any legal question in plain English, and get cited answers grounded in your own files.',
     ],
     icon: (
       <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
@@ -71,7 +73,8 @@ const platforms: {
 
 const requirements = [
   { label: 'macOS', value: 'macOS 12 Monterey+ · Apple Silicon or Intel', highlight: false },
-  { label: 'Windows / Linux', value: 'Coming soon — macOS available now', highlight: false },
+  { label: 'Windows', value: 'Windows 10+ · x64 · Vulkan-compatible GPU recommended', highlight: false },
+  { label: 'Linux', value: 'Ubuntu 22.04+ / Fedora 38+ · x64 · AppImage', highlight: false },
   { label: 'RAM', value: '8 GB minimum · 16 GB recommended for best performance', highlight: false },
   { label: 'Storage', value: '~5 GB total (app + Saul model, downloaded once)', highlight: false },
   { label: 'Network', value: 'Only on first launch to download the model — all AI runs fully offline after that', highlight: true },
@@ -82,7 +85,7 @@ const setupSteps = [
   {
     number: '01',
     title: 'Download & Install',
-    body: 'Open the DMG, drag to Applications, done. No terminal, no dependencies, no configuration. It just works.',
+    body: 'Choose your platform above. macOS: drag to Applications. Windows: run the installer. Linux: make the AppImage executable and run it. No terminal, no dependencies.',
   },
   {
     number: '02',
@@ -109,9 +112,7 @@ export default function Download() {
 
   function handleDownload(platform: typeof platforms[0]) {
     setActivePlatform(platform.key)
-    if (platform.available) {
-      window.open(platform.file, '_blank', 'noopener')
-    }
+    window.open(platform.file, '_blank', 'noopener')
   }
 
   const shownSteps = activePlatform
@@ -196,48 +197,41 @@ export default function Download() {
                 {platforms.map((p) => {
                   const isDetected = p.key === detected
                   const isActive = p.key === activePlatform
-                  const isMac = p.key === 'mac'
-                  const isUnavailable = !p.available
+                  const isPrimary = isDetected && p.available
 
                   return (
                     <button
                       key={p.key}
                       onClick={() => handleDownload(p)}
-                      disabled={isUnavailable}
-                      className={`group relative overflow-hidden rounded-2xl text-left transition-all duration-200 ${isMac ? 'flex-[2]' : 'flex-1'} ${isUnavailable ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                      className={`group relative overflow-hidden rounded-2xl text-left transition-all duration-200 cursor-pointer ${isPrimary ? 'flex-[2]' : 'flex-1'}`}
                       style={{
-                        background: isUnavailable
-                          ? 'rgba(255,255,255,0.01)'
-                          : isActive
+                        background: isActive
                           ? 'rgba(201,168,76,0.07)'
-                          : isMac
+                          : isPrimary
                           ? 'rgba(255,255,255,0.05)'
                           : 'rgba(255,255,255,0.025)',
                         border: `1px solid ${
                           isActive
                             ? 'rgba(201,168,76,0.3)'
-                            : isMac && !isUnavailable
+                            : isPrimary
                             ? 'rgba(255,255,255,0.16)'
                             : 'rgba(255,255,255,0.06)'
                         }`,
-                        opacity: isUnavailable ? 0.45 : 1,
                       }}
                       onMouseEnter={(e) => {
-                        if (isUnavailable) return
                         const el = e.currentTarget as HTMLButtonElement
                         el.style.transform = 'translateY(-2px)'
                         el.style.boxShadow = '0 12px 40px rgba(0,0,0,0.5)'
-                        if (!isActive && !isMac) {
+                        if (!isActive && !isPrimary) {
                           el.style.background = 'rgba(255,255,255,0.05)'
                           el.style.borderColor = 'rgba(255,255,255,0.14)'
                         }
                       }}
                       onMouseLeave={(e) => {
-                        if (isUnavailable) return
                         const el = e.currentTarget as HTMLButtonElement
                         el.style.transform = 'translateY(0)'
                         el.style.boxShadow = 'none'
-                        if (!isActive && !isMac) {
+                        if (!isActive && !isPrimary) {
                           el.style.background = 'rgba(255,255,255,0.025)'
                           el.style.borderColor = 'rgba(255,255,255,0.06)'
                         }
@@ -250,11 +244,11 @@ export default function Download() {
                             style={{
                               background: isActive
                                 ? 'rgba(201,168,76,0.12)'
-                                : isMac && !isUnavailable
+                                : isPrimary
                                 ? 'rgba(201,168,76,0.07)'
                                 : 'rgba(255,255,255,0.04)',
-                              border: `1px solid ${isActive ? 'rgba(201,168,76,0.25)' : isMac && !isUnavailable ? 'rgba(201,168,76,0.18)' : 'rgba(255,255,255,0.07)'}`,
-                              color: isActive || (isMac && !isUnavailable) ? '#c9a84c' : 'rgba(255,255,255,0.4)',
+                              border: `1px solid ${isActive ? 'rgba(201,168,76,0.25)' : isPrimary ? 'rgba(201,168,76,0.18)' : 'rgba(255,255,255,0.07)'}`,
+                              color: isActive || isPrimary ? '#c9a84c' : 'rgba(255,255,255,0.4)',
                             }}
                           >
                             {isActive ? (
@@ -265,30 +259,28 @@ export default function Download() {
                               p.icon
                             )}
                           </div>
-                          {!isUnavailable && (
-                            <div
-                              className="w-7 h-7 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}
-                            >
-                              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                                <path d="M8 2v9M4.5 7.5L8 11l3.5-3.5" stroke="rgba(255,255,255,0.7)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            </div>
-                          )}
+                          <div
+                            className="w-7 h-7 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                              <path d="M8 2v9M4.5 7.5L8 11l3.5-3.5" stroke="rgba(255,255,255,0.7)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </div>
                         </div>
 
-                        <p className="text-sm font-semibold mb-0.5" style={{ color: isUnavailable ? 'rgba(255,255,255,0.5)' : 'white' }}>
-                          {isActive ? 'Downloading…' : isUnavailable ? `${p.label} — Coming Soon` : `Download for ${p.label}`}
+                        <p className="text-sm font-semibold mb-0.5" style={{ color: 'white' }}>
+                          {isActive ? 'Downloading…' : `Download for ${p.label}`}
                         </p>
                         <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                          {isActive ? 'Check your Downloads folder' : isMac && !isUnavailable && isDetected ? '✦ Recommended for your device' : p.sub}
+                          {isActive ? 'Check your Downloads folder' : isPrimary ? '✦ Recommended for your device' : p.sub}
                         </p>
-                        {isMac && !isActive && (
+                        {isPrimary && !isActive && (
                           <span
                             className="inline-block mt-2 text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded"
                             style={{ background: 'rgba(201,168,76,0.1)', color: 'rgba(201,168,76,0.7)', border: '1px solid rgba(201,168,76,0.2)' }}
                           >
-                            Available Now
+                            Recommended
                           </span>
                         )}
                       </div>

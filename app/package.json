@@ -4,8 +4,8 @@
   "description": "Justice AI — Private Legal Research Desktop App",
   "private": true,
   "scripts": {
-    "dev": "MACOSX_DEPLOYMENT_TARGET=14.0 CMAKE_OSX_DEPLOYMENT_TARGET=14.0 tauri dev",
-    "build": "MACOSX_DEPLOYMENT_TARGET=14.0 CMAKE_OSX_DEPLOYMENT_TARGET=14.0 tauri build",
+    "dev": "tauri dev",
+    "build": "tauri build",
     "dev:vite": "vite",
     "build:vite": "vite build",
     "tauri": "tauri"

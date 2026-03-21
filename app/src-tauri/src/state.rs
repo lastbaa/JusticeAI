@@ -79,7 +79,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             chunk_size: 1000,
-            chunk_overlap: 300,
+            chunk_overlap: 150,
             top_k: 6,
             theme: default_theme(),
         }

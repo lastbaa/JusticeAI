@@ -72,7 +72,7 @@ export default function LampCTA() {
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M7.47 10.78a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.44V1.75a.75.75 0 0 0-1.5 0v6.69L4.78 5.97a.75.75 0 0 0-1.06 1.06l3.75 3.75zM3.75 13a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5z" />
             </svg>
-            Download Free — macOS
+            Download Free
           </Link>
           <a
             href="https://github.com/lastbaa/JusticeAI"
@@ -88,7 +88,7 @@ export default function LampCTA() {
         </div>
 
         <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
-          macOS arm64 · Open Source · MIT License
+          macOS · Windows · Linux · Open Source · MIT License
         </p>
       </motion.div>
     </section>

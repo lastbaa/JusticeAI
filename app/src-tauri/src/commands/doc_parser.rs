@@ -2224,12 +2224,26 @@ fn parse_image_ocr(path: &str) -> Result<Vec<DocumentPage>, String> {
 }
 
 pub fn tesseract_binary() -> Option<std::path::PathBuf> {
-    let candidates = [
-        std::path::PathBuf::from("tesseract"),
-        std::path::PathBuf::from("/opt/homebrew/bin/tesseract"),
-        std::path::PathBuf::from("/usr/local/bin/tesseract"),
-        std::path::PathBuf::from("/usr/bin/tesseract"),
+    let mut candidates = vec![
+        std::path::PathBuf::from("tesseract"), // PATH lookup (all platforms)
     ];
+
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(std::path::PathBuf::from("/opt/homebrew/bin/tesseract"));
+        candidates.push(std::path::PathBuf::from("/usr/local/bin/tesseract"));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push(std::path::PathBuf::from("/usr/bin/tesseract"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        candidates.push(std::path::PathBuf::from(r"C:\Program Files\Tesseract-OCR\tesseract.exe"));
+        candidates.push(std::path::PathBuf::from(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"));
+    }
 
     for candidate in candidates {
         let output = std::process::Command::new(&candidate)

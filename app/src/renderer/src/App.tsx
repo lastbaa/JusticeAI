@@ -706,6 +706,51 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function handleReindex(): Promise<void> {
+    if (files.length === 0) return
+    setIsLoading(true)
+    try {
+      // Snapshot current files with their case assignments
+      const snapshot = files.map((f) => ({ id: f.id, filePath: f.filePath, caseId: f.caseId }))
+
+      // Remove all files (clears old chunks)
+      await Promise.all(snapshot.map((f) => window.api.removeFile(f.id)))
+
+      // Collect unique file paths
+      const paths = [...new Set(snapshot.map((f) => f.filePath))]
+
+      // Re-load all files (re-chunks with new settings)
+      const reloaded = await window.api.loadFiles(paths)
+
+      // Re-assign case IDs based on original file paths
+      const pathToCaseId = new Map<string, string>()
+      for (const f of snapshot) {
+        if (f.caseId) pathToCaseId.set(f.filePath, f.caseId)
+      }
+
+      for (const file of reloaded) {
+        const caseId = pathToCaseId.get(file.filePath)
+        if (caseId) {
+          await window.api.assignFileToCase(file.id, caseId)
+          file.caseId = caseId
+        }
+      }
+
+      setFiles(reloaded)
+      addToast('success', `Re-indexed ${reloaded.length} document${reloaded.length === 1 ? '' : 's'}`)
+    } catch (err) {
+      console.error('Re-index failed:', err)
+      addToast('error', 'Re-indexing failed. Some documents may need to be re-added.')
+      // Refresh file list from backend
+      try {
+        const remaining = await window.api.getFiles()
+        setFiles(remaining)
+      } catch { }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   // Apply theme to root so CSS variables cascade
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', settings.theme)
@@ -785,6 +830,7 @@ export default function App(): JSX.Element {
           settings={settings}
           onSave={handleSaveSettings}
           onClose={() => setView('main')}
+          onReindex={handleReindex}
         />
       )}
 

@@ -1177,11 +1177,26 @@ async fn main() {
     }
 
     let data_dir = data_dir.unwrap_or_else(|| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join("com.justiceai.app")
+        #[cfg(target_os = "macos")]
+        {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("com.justiceai.app")
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = std::env::var("APPDATA").unwrap_or_else(|_| r"C:\temp".into());
+            PathBuf::from(appdata).join("com.justiceai.app")
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            let data_home = std::env::var("XDG_DATA_HOME")
+                .unwrap_or_else(|_| format!("{home}/.local/share"));
+            PathBuf::from(data_home).join("com.justiceai.app")
+        }
     });
     let model_dir = data_dir.join("models");
 
