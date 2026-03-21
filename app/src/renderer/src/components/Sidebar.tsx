@@ -506,7 +506,7 @@ export default function Sidebar({
                   setCreatingCase(false)
                 }
                 if (e.key === 'Escape') { caseCreatedRef.current = true; setNewCaseName(''); setCreatingCase(false) }
-              }
+              }}
               placeholder="Case name…"
               className="flex-1 bg-transparent text-[11px] outline-none placeholder:text-[rgba(201,168,76,0.35)]"
               style={{ color: 'var(--text)' }}
