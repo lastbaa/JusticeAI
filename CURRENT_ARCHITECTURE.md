@@ -29,7 +29,7 @@
 - `.github/workflows/deploy.yml` - GitHub Pages deployment workflow for `website`.
 - `.gitignore` - ignore rules for node/tauri/next/build artifacts.
 - `README.md` - project overview; partially stale vs current Tauri runtime.
-- `CLAUDE.md` - collaborator guidance; partially stale (Electron-era assumptions).
+- `CLAUDE.md` - project guidance and architecture reference.
 - `BUG_CONTEXT.md` - deep investigation of PDF extraction bug and mitigation context.
 - `USABILITY_REPORT.md` - UX/accessibility audit and prioritized improvement roadmap.
 - `research_query.md` - retrieval/re-ranking research framing and experiment context.

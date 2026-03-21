@@ -276,7 +276,7 @@ Each returns `Vec<AssertionResult>` with pass/fail, type, and human-readable mes
 Run with `--mode full`. Calls `ask_saul` for each case, applies Tier 1 assertions on the actual generated answer. Slow but catches prompt regressions and LLM reasoning failures.
 
 ### Tier 3: LLM-as-Judge (stretch goal, ~$0.30/run)
-For the 10 hardest open-ended cases, call Claude Haiku as a judge with a rubric:
+For the 10 hardest open-ended cases, call an LLM judge with a rubric:
 - Does the answer address every part of the question? (0/1)
 - Are all citations traceable to provided chunks? (0/1)
 - Any facts not in the chunks (hallucination)? (0/1)
@@ -328,7 +328,7 @@ Requires: `SourcedChunk` wrapper tracking origin PDF, merged `RetrievalCorpus`, 
 - [ ] `--filter-tag` / `--filter-tier` for targeted runs
 - [ ] DOCX test fixture
 - [ ] CI integration via GitHub Actions (retrieval-only, cached embeddings)
-- [ ] LLM-as-judge via Claude API
+- [ ] LLM-as-judge via external API
 - [ ] Latency tracking (embed_ms, search_ms, generate_ms)
 
 ## 10. What NOT to Build

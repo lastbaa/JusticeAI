@@ -25,8 +25,7 @@ const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.csv', '.eml', '.
 
 /**
  * Generate a concise chat title from the first user message.
- * Mirrors the style of Claude's browser UI: short noun-phrase titles
- * like "Lease Agreement Questions" or "W-9 Form Details".
+ * Short noun-phrase titles like "Lease Agreement Questions" or "W-9 Form Details".
  */
 function makeSessionName(messages: ChatMessage[]): string {
   const first = messages.find((m) => m.role === 'user')
