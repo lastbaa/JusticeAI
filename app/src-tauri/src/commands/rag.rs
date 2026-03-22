@@ -623,42 +623,66 @@ pub async fn query(
         parts
     };
 
-    let mut raw_context = String::new();
+    // Assemble context with per-chunk budget so no chunk is cut mid-sentence.
+    // Saul-7B has a 4096-token context. Budget: 4096 − 1024 (generation) − 250 (overhead) = 2822
+    // tokens for context. Legal text tokenizes at ~2.5 chars/token → 2822 × 2.5 ≈ 7055 chars max.
+    const MAX_CONTEXT_CHARS: usize = 7_000;
+    let separator = "\n\n---\n\n";
+    let mut context = String::new();
+
     // Prepend cross-conversation case context if available
     if let Some(ref cc) = case_context {
         if !cc.is_empty() {
-            raw_context.push_str("--- Related conversations in this case ---\n");
-            raw_context.push_str(cc);
-            raw_context.push_str("\n\n");
+            let prefix = format!("--- Related conversations in this case ---\n{cc}\n\n");
+            if prefix.len() <= MAX_CONTEXT_CHARS {
+                context.push_str(&prefix);
+            }
         }
     }
-    raw_context.push_str(&context_parts.join("\n\n---\n\n"));
-    if !neighbor_context_parts.is_empty() {
-        raw_context.push_str("\n\n--- Surrounding Context ---\n\n");
-        raw_context.push_str(&neighbor_context_parts.join("\n\n"));
-        log::info!(
-            "Neighbor expansion added {} extra chunks ({} total context chars).",
-            neighbor_context_parts.len(),
-            raw_context.len()
-        );
+
+    // Add primary context chunks (each stays complete)
+    for part in &context_parts {
+        let addition = if context.is_empty() { part.len() } else { part.len() + separator.len() };
+        if context.len() + addition > MAX_CONTEXT_CHARS {
+            log::warn!(
+                "Context budget exhausted at {} chars; skipping remaining chunks.",
+                context.len()
+            );
+            break;
+        }
+        if !context.is_empty() {
+            context.push_str(separator);
+        }
+        context.push_str(part);
     }
 
-    // Pre-truncate context chars before prompt assembly.
-    // Saul-7B has a 4096-token context. Budget: 4096 − 1024 (generation) − 250 (overhead) = 2822
-    // tokens for context. Legal text tokenizes at ~2.5 chars/token → 2822 × 2.5 ≈ 7055 chars max.
-    // Using 7000 fits cleanly and avoids the head+tail truncation fallback.
-    const MAX_CONTEXT_CHARS: usize = 7_000;
-    let context = if raw_context.len() > MAX_CONTEXT_CHARS {
-        let safe_end = raw_context.floor_char_boundary(MAX_CONTEXT_CHARS);
-        log::warn!(
-            "Document context truncated from {} to {} chars to fit context window.",
-            raw_context.len(),
-            safe_end
-        );
-        raw_context[..safe_end].to_string()
-    } else {
-        raw_context
-    };
+    // Append neighbor context only if budget remains
+    if !neighbor_context_parts.is_empty() {
+        let header = "\n\n--- Surrounding Context ---\n\n";
+        let header_len = header.len();
+        let mut added = 0usize;
+        let mut neighbor_buf = String::new();
+        for part in &neighbor_context_parts {
+            let addition = if neighbor_buf.is_empty() { part.len() } else { part.len() + separator.len() };
+            if context.len() + header_len + neighbor_buf.len() + addition > MAX_CONTEXT_CHARS {
+                break;
+            }
+            if !neighbor_buf.is_empty() {
+                neighbor_buf.push_str("\n\n");
+            }
+            neighbor_buf.push_str(part);
+            added += 1;
+        }
+        if !neighbor_buf.is_empty() {
+            context.push_str(header);
+            context.push_str(&neighbor_buf);
+            log::info!(
+                "Neighbor expansion added {} extra chunks ({} total context chars).",
+                added,
+                context.len()
+            );
+        }
+    }
 
     window
         .emit("query-status", serde_json::json!({"phase": "generating"}))

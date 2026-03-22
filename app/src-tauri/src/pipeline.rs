@@ -32,7 +32,14 @@ to determine which date answers the question. Prefer the labeled match over prox
 - State each fact once only. Do not restart or repeat a list you have already written.\n\
 - If the answer is not present in the excerpts, say exactly: \"I could not find information about this in your loaded documents.\"\n\
 - When no excerpts are provided, answer from your knowledge of US law; note when answers may vary by state or when a licensed attorney should be consulted.\n\
-- Never fabricate case citations, statutes, or facts. Do not give specific legal advice.";
+- Never fabricate case citations, statutes, or facts. Do not give specific legal advice.\n\n\
+Format:\n\
+- Begin with a direct one-sentence answer, then elaborate.\n\
+- Use **bold** for key legal terms, parties, dates, and dollar amounts.\n\
+- Use bullet points (- ) for lists of multiple items or findings.\n\
+- Use ### headers only to separate distinct topics in longer answers.\n\
+- Keep paragraphs to 2-3 sentences.\n\
+- No pleasantries, preambles, or sign-offs.";
 
 // ── Singletons ─────────────────────────────────────────────────────────────────
 
@@ -191,7 +198,7 @@ Answer the current question using ONLY these excerpts.\n\n\
     };
 
     // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
-    let prompt = format!("[INST] <<SYS>>\n{RULES_PROMPT}\n<</SYS>>\n\n{user_content} [/INST] Answer:");
+    let prompt = format!("[INST] <<SYS>>\n{RULES_PROMPT}\n<</SYS>>\n\n{user_content} [/INST]");
 
     tokio::task::spawn_blocking(move || {
         // Get (or lazily initialize) the global llama.cpp backend.
@@ -270,9 +277,9 @@ Answer the current question using ONLY these excerpts.\n\n\
 
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::penalties(64, 1.1, 0.0, 0.0),
-            LlamaSampler::top_k(40),
-            LlamaSampler::top_p(0.9, 1),
-            LlamaSampler::temp(0.3),
+            LlamaSampler::min_p(0.05, 1),
+            LlamaSampler::top_p(0.95, 1),
+            LlamaSampler::temp(0.35),
             LlamaSampler::dist(42),
         ]);
         let mut response = String::new();
@@ -331,17 +338,78 @@ Answer the current question using ONLY these excerpts.\n\n\
             })
             .collect();
 
-        let answer = answer
-            .strip_prefix("Answer:")
-            .or_else(|| answer.strip_prefix("Answer: "))
-            .unwrap_or(&answer)
-            .trim()
-            .to_string();
+        let answer = answer.trim().to_string();
+
+        // Strip conversational filler from the tail of the response
+        let answer = strip_trailing_filler(&answer);
+
+        // Truncate incomplete trailing sentence if generation hit token limit
+        let answer = truncate_incomplete_sentence(&answer);
 
         Ok(answer)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// ── Post-processing helpers ──────────────────────────────────────────────────
+
+const FILLER_PATTERNS: &[&str] = &[
+    "I hope this helps",
+    "Let me know if you have",
+    "Please let me know if",
+    "If you have any further",
+    "Feel free to ask",
+    "Is there anything else",
+    "Please note that this is not legal advice",
+    "Please consult a licensed attorney",
+    "I recommend consulting",
+];
+
+/// Strip conversational filler from the tail of the response.
+/// Only removes if the pattern appears in the last ~200 chars (sign-off position).
+fn strip_trailing_filler(text: &str) -> String {
+    let trimmed = text.trim_end();
+    if trimmed.len() < 10 {
+        return trimmed.to_string();
+    }
+    let tail_start = trimmed.len().saturating_sub(200);
+    let tail = &trimmed[tail_start..];
+    let lower_tail = tail.to_lowercase();
+
+    for pattern in FILLER_PATTERNS {
+        if let Some(pos) = lower_tail.find(&pattern.to_lowercase()) {
+            let cut = tail_start + pos;
+            let result = trimmed[..cut].trim_end().trim_end_matches(&['.', ',', ';', ' '][..]);
+            if !result.is_empty() {
+                return result.to_string();
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+/// Truncate incomplete trailing sentence when generation hits the token limit.
+/// Only trims if keeping >50% of the response and it doesn't end with sentence punctuation.
+fn truncate_incomplete_sentence(text: &str) -> String {
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let last_char = trimmed.chars().last().unwrap();
+    if matches!(last_char, '.' | '!' | '?' | ')' | ']') {
+        return trimmed.to_string();
+    }
+
+    // Find last sentence boundary
+    let boundary = trimmed.rfind(|c: char| matches!(c, '.' | '!' | '?'));
+    if let Some(pos) = boundary {
+        if pos > trimmed.len() / 2 {
+            return trimmed[..=pos].to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 // ── Chunking ──────────────────────────────────────────────────────────────────

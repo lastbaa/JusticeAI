@@ -245,7 +245,7 @@ function renderMarkdown(text: string): JSX.Element {
       elements.push(
         <ul key={i} style={{ listStyle: 'disc', paddingLeft: '1.25em', margin: '4px 0 6px' }}>
           {items.map((item, j) => (
-            <li key={j} style={{ marginBottom: '0.15em' }}>{inlineMarkdown(item)}</li>
+            <li key={j} style={{ marginBottom: '0.35em' }}>{inlineMarkdown(item)}</li>
           ))}
         </ul>
       )
@@ -262,7 +262,7 @@ function renderMarkdown(text: string): JSX.Element {
       elements.push(
         <ol key={i} style={{ listStyle: 'decimal', paddingLeft: '1.25em', margin: '4px 0 6px' }}>
           {items.map((item, j) => (
-            <li key={j} style={{ marginBottom: '0.15em' }}>{inlineMarkdown(item)}</li>
+            <li key={j} style={{ marginBottom: '0.35em' }}>{inlineMarkdown(item)}</li>
           ))}
         </ol>
       )
@@ -274,7 +274,7 @@ function renderMarkdown(text: string): JSX.Element {
     if (headingMatch) {
       const level = headingMatch[1].length
       const content = headingMatch[2]
-      const style: React.CSSProperties = { fontWeight: 600, color: 'var(--text)', margin: '8px 0 3px', lineHeight: 1.3, fontSize: level === 1 ? '1.05em' : level === 2 ? '0.98em' : '0.93em' }
+      const style: React.CSSProperties = { fontWeight: 600, color: 'var(--text)', margin: '14px 0 3px', lineHeight: 1.3, fontSize: level === 1 ? '1.05em' : level === 2 ? '0.98em' : '0.93em' }
       elements.push(<p key={i} style={style}>{inlineMarkdown(content)}</p>)
       i++
       continue
@@ -330,10 +330,34 @@ function renderMarkdown(text: string): JSX.Element {
       i -= tableLines.length
     }
 
+    // Horizontal rule
+    if (/^(---|\*\*\*|___)$/.test(line.trim())) {
+      elements.push(<hr key={i} style={{ border: 'none', borderTop: '1px solid rgb(var(--ov) / 0.1)', margin: '8px 0' }} />)
+      i++
+      continue
+    }
+
+    // Blockquote
+    if (line.startsWith('> ')) {
+      const quoteLines: string[] = []
+      while (i < lines.length && lines[i].startsWith('> ')) {
+        quoteLines.push(lines[i].slice(2))
+        i++
+      }
+      elements.push(
+        <blockquote key={i} style={{ borderLeft: '3px solid rgba(201,168,76,0.3)', paddingLeft: '1em', margin: '6px 0', color: 'rgb(var(--ov) / 0.7)' }}>
+          {quoteLines.map((ql, qi) => (
+            <p key={qi} style={{ margin: '2px 0' }}>{inlineMarkdown(ql)}</p>
+          ))}
+        </blockquote>
+      )
+      continue
+    }
+
     // Blank line
     if (line.trim() === '') {
       if (elements.length > 0) {
-        elements.push(<div key={i} style={{ height: '0.4em' }} />)
+        elements.push(<div key={i} style={{ height: '0.75em' }} />)
       }
       i++
       continue
