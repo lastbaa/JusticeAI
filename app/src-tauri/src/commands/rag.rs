@@ -33,9 +33,27 @@ fn available_disk_space(path: &std::path::Path) -> Option<u64> {
     Some(stat.f_bavail as u64 * stat.f_frsize as u64)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn available_disk_space(path: &std::path::Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+
+    // GetDiskFreeSpaceExW requires a null-terminated wide string.
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free_bytes: u64 = 0;
+    let ok = unsafe {
+        windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_bytes as *mut u64,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if ok != 0 { Some(free_bytes) } else { None }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn available_disk_space(_path: &std::path::Path) -> Option<u64> {
-    None // On non-Unix platforms, skip the check gracefully
+    None // On other platforms, skip the check gracefully
 }
 
 // ── Model Management ─────────────────────────────────────────────────────────
@@ -200,9 +218,29 @@ pub async fn download_models(
     file.flush().await.map_err(|e| e.to_string())?;
     drop(file);
 
-    tokio::fs::rename(&tmp_path, &gguf_path)
-        .await
-        .map_err(|e| e.to_string())?;
+    // Rename tmp → final. On Windows, antivirus or indexing services may hold
+    // the file briefly after close, so retry a few times before giving up.
+    let mut rename_err = None;
+    for attempt in 0..5 {
+        match tokio::fs::rename(&tmp_path, &gguf_path).await {
+            Ok(()) => { rename_err = None; break; }
+            Err(e) => {
+                rename_err = Some(e);
+                if attempt < 4 {
+                    log::warn!("Rename attempt {} failed, retrying in 500ms…", attempt + 1);
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+            }
+        }
+    }
+    if let Some(e) = rename_err {
+        // Last resort: try copy + delete instead of atomic rename
+        log::warn!("Rename failed after retries, falling back to copy: {e}");
+        tokio::fs::copy(&tmp_path, &gguf_path)
+            .await
+            .map_err(|e2| format!("Failed to move model file: rename={e}, copy={e2}"))?;
+        tokio::fs::remove_file(&tmp_path).await.ok();
+    }
 
     // Download OCR models (~10MB total, fast)
     download_ocr_models(&model_dir).await?;

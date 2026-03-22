@@ -51,7 +51,13 @@
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
+      "timestampUrl": "",
+      "nsis": {
+        "installMode": "both"
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
     },
     "linux": {
       "deb": {

@@ -8,8 +8,16 @@ on:
 
 jobs:
   rust:
-    name: Rust checks (macOS)
-    runs-on: macos-latest
+    name: Rust checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            cargo_flags: ""
+          - os: windows-latest
+            cargo_flags: ""
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -20,6 +28,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri
+
+      # Windows: install Vulkan SDK for llama-cpp-2 compilation
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        uses: humbletim/install-vulkan-sdk@v1.1.1
+        with:
+          version: latest
+          cache: true
 
       - name: Cargo check
         working-directory: app/src-tauri

@@ -32,6 +32,28 @@ fn percent_decode_path(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Normalize a URL path from the file server into a filesystem path.
+///
+/// On Unix the HTTP path IS the filesystem path (`/Users/foo/file.pdf`).
+/// On Windows the frontend sends `/C:/Users/foo/file.pdf` — we strip the
+/// leading slash so it becomes the valid Windows path `C:\Users\foo\file.pdf`.
+fn url_path_to_fs_path(raw_url_path: &str) -> String {
+    let decoded = percent_decode_path(raw_url_path);
+
+    #[cfg(windows)]
+    {
+        // Strip leading `/` before a drive letter: `/C:/path` → `C:/path`
+        let trimmed = decoded.strip_prefix('/').unwrap_or(&decoded);
+        // Normalize forward slashes to backslashes for Windows
+        trimmed.replace('/', "\\")
+    }
+
+    #[cfg(not(windows))]
+    {
+        decoded
+    }
+}
+
 /// Start a minimal Tokio HTTP server on a random loopback port.
 /// The server serves files from the filesystem by path — used by the document
 /// viewer iframe. WKWebView reliably renders PDFs from http://127.0.0.1 URLs.
@@ -64,10 +86,9 @@ async fn start_file_server() -> u16 {
                     .and_then(|l| l.split_whitespace().nth(1))
                     .unwrap_or("/");
 
-                // Strip the leading '/' then re-add it so we get an absolute path.
-                // encodeURI on the frontend leaves slashes intact, so the path is
-                // already properly structured — just decode percent-encoded chars.
-                let file_path = percent_decode_path(raw_path);
+                // Decode percent-encoded chars and normalize for the current platform.
+                // On Windows `/C:/Users/foo/file.pdf` → `C:\Users\foo\file.pdf`.
+                let file_path = url_path_to_fs_path(raw_path);
 
                 match tokio::fs::read(&file_path).await {
                     Ok(bytes) => {
@@ -215,4 +236,75 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_decode_basic() {
+        assert_eq!(percent_decode_path("/foo%20bar.pdf"), "/foo bar.pdf");
+    }
+
+    #[test]
+    fn percent_decode_no_encoding() {
+        assert_eq!(percent_decode_path("/simple/path.pdf"), "/simple/path.pdf");
+    }
+
+    #[test]
+    fn percent_decode_special_chars() {
+        assert_eq!(percent_decode_path("/a%23b%25c"), "/a#b%c");
+    }
+
+    // On macOS/Linux, url_path_to_fs_path just percent-decodes.
+    // On Windows, it also strips leading `/` and normalizes separators.
+    // These tests verify the non-Windows (current platform) behavior.
+    #[cfg(not(windows))]
+    #[test]
+    fn url_path_to_fs_path_unix() {
+        assert_eq!(
+            url_path_to_fs_path("/Users/test/my%20file.pdf"),
+            "/Users/test/my file.pdf"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn url_path_to_fs_path_unix_preserves_slashes() {
+        assert_eq!(
+            url_path_to_fs_path("/a/b/c/d.pdf"),
+            "/a/b/c/d.pdf"
+        );
+    }
+
+    // These tests verify the Windows path normalization logic.
+    // They compile on all platforms but only run on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn url_path_to_fs_path_windows_drive_letter() {
+        assert_eq!(
+            url_path_to_fs_path("/C:/Users/test/file.pdf"),
+            r"C:\Users\test\file.pdf"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn url_path_to_fs_path_windows_spaces() {
+        assert_eq!(
+            url_path_to_fs_path("/D:/My%20Documents/Legal%20Files/contract.pdf"),
+            r"D:\My Documents\Legal Files\contract.pdf"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn url_path_to_fs_path_windows_no_leading_slash() {
+        // Edge case: path already doesn't have leading slash
+        assert_eq!(
+            url_path_to_fs_path("C:/Users/test/file.pdf"),
+            r"C:\Users\test\file.pdf"
+        );
+    }
 }
