@@ -11,7 +11,6 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
   const [speed, setSpeed] = useState('')
   const [eta, setEta] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [ocrMessage, setOcrMessage] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState(false)
   // Incrementing this triggers a fresh download attempt via useEffect dependency.
   const [attempt, setAttempt] = useState(0)
@@ -69,13 +68,6 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
 
     async function run(): Promise<void> {
       try {
-        const ocr = await window.api.ensureOcrRuntime()
-        if (!ocr.ready) {
-          setOcrMessage(ocr.message)
-        } else {
-          setOcrMessage(null)
-        }
-
         unlisten = await window.api.onDownloadProgress((progress) => {
           if (!isMounted) return
 
@@ -188,23 +180,13 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
         <p className="text-[13.5px] text-center mb-10 leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.35)' }}>
           Downloading the Saul legal AI model.
           <br />
-          <span style={{ color: 'rgb(var(--ov) / 0.22)' }}>This only happens once.</span>
+          <span style={{ color: 'rgb(var(--ov) / 0.45)' }}>This only happens once.</span>
         </p>
-
-        {ocrMessage && (
-          <div
-            className="w-full rounded-xl px-4 py-3 mb-4"
-            style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.22)' }}
-          >
-            <p className="text-[12.5px] leading-relaxed" style={{ color: 'rgba(201,168,76,0.9)' }}>
-              {ocrMessage}
-            </p>
-          </div>
-        )}
 
         {error ? (
           <div className="w-full flex flex-col items-center gap-5">
             <div
+              role="alert"
               className="w-full rounded-xl px-5 py-4"
               style={{
                 background: 'rgba(248,81,73,0.06)',
@@ -222,6 +204,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
             </div>
             <button
               onClick={() => setAttempt((n) => n + 1)}
+              aria-label="Retry download"
               className="rounded-xl px-8 py-3 text-[13.5px] font-semibold"
               style={{
                 background: '#c9a84c',
@@ -281,7 +264,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
                     <>
                       {downloadedGb.toFixed(2)} GB / {totalGb.toFixed(1)} GB
                       {speed && (
-                        <span style={{ color: 'rgb(var(--ov) / 0.28)', marginLeft: '8px' }}>
+                        <span style={{ color: 'rgb(var(--ov) / 0.45)', marginLeft: '8px' }}>
                           {speed}
                         </span>
                       )}
@@ -295,7 +278,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
               </span>
               <span className="flex items-center gap-2">
                 {eta && percent < 100 && (
-                  <span className="text-[11px] tabular-nums" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+                  <span className="text-[11px] tabular-nums" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                     {eta}
                   </span>
                 )}
@@ -332,7 +315,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
                   strokeLinejoin="round"
                 />
               </svg>
-              <p className="text-[12.5px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.38)' }}>
+              <p className="text-[12.5px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
                 Saul runs entirely on your device. No accounts, no API keys, no data sent to the cloud.
               </p>
             </div>

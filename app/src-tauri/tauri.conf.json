@@ -19,7 +19,8 @@
         "minHeight": 600,
         "titleBarStyle": "Overlay",
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "maximized": true
       }
     ],
     "macOSPrivateApi": true,

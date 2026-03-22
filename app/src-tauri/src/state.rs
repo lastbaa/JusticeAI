@@ -59,6 +59,8 @@ pub struct QueryResult {
     pub answer: String,
     pub citations: Vec<Citation>,
     pub not_found: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<crate::assertions::AssertionResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

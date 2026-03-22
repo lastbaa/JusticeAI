@@ -1,10 +1,13 @@
 import { useState } from 'react'
-import { ChatMessage, Citation } from '../../../../../shared/src/types'
+import { AssertionResult, ChatMessage, Citation } from '../../../../../shared/src/types'
 import SourceCard from './SourceCard'
 
 interface Props {
   message: ChatMessage
   onViewCitation?: (citation: Citation) => void
+  onDeleteMessage?: (id: string) => void
+  onRetryMessage?: (id: string) => void
+  isLastAssistant?: boolean
 }
 
 // ── Primary/secondary partition ───────────────────────────────────────────────
@@ -170,6 +173,7 @@ function CopyButton({ text, className, style }: { text: string; className?: stri
     <button
       onClick={handleCopy}
       title="Copy"
+      aria-label="Copy to clipboard"
       className={`flex items-center justify-center rounded transition-all ${className ?? ''}`}
       style={{
         color: copied ? '#3fb950' : 'rgb(var(--ov) / 0.22)',
@@ -276,6 +280,56 @@ function renderMarkdown(text: string): JSX.Element {
       continue
     }
 
+    // Table
+    if (line.includes('|') && line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      const tableLines: string[] = []
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i])
+        i++
+      }
+      if (tableLines.length >= 2) {
+        const parseRow = (row: string): string[] =>
+          row.split('|').slice(1, -1).map((c) => c.trim())
+        const isSeparator = (row: string): boolean =>
+          /^\|[\s:|-]+\|$/.test(row.trim())
+        const sepIdx = tableLines.findIndex(isSeparator)
+        const headerRow = sepIdx > 0 ? parseRow(tableLines[0]) : null
+        const bodyStart = sepIdx >= 0 ? sepIdx + 1 : headerRow ? 1 : 0
+        const bodyRows = tableLines.slice(bodyStart).filter((r) => !isSeparator(r)).map(parseRow)
+        elements.push(
+          <div key={i} style={{ overflowX: 'auto', margin: '8px 0' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.88em' }}>
+              {headerRow && (
+                <thead>
+                  <tr>
+                    {headerRow.map((cell, ci) => (
+                      <th key={ci} style={{ border: '1px solid rgb(var(--ov) / 0.1)', padding: '6px 10px', background: 'rgb(var(--ov) / 0.04)', fontWeight: 600, textAlign: 'left' }}>
+                        {inlineMarkdown(cell)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+              )}
+              <tbody>
+                {bodyRows.map((row, ri) => (
+                  <tr key={ri}>
+                    {row.map((cell, ci) => (
+                      <td key={ci} style={{ border: '1px solid rgb(var(--ov) / 0.1)', padding: '5px 10px' }}>
+                        {inlineMarkdown(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+        continue
+      }
+      // Not a valid table — fall through, reset i
+      i -= tableLines.length
+    }
+
     // Blank line
     if (line.trim() === '') {
       if (elements.length > 0) {
@@ -295,10 +349,10 @@ function renderMarkdown(text: string): JSX.Element {
   return <>{elements}</>
 }
 
-// Inline markdown: **bold**, *italic*, `code`
+// Inline markdown: **bold**, *italic*, `code`, [links](url)
 function inlineMarkdown(text: string): (string | JSX.Element)[] {
   const parts: (string | JSX.Element)[] = []
-  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g
+  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g
   let last = 0
   let m: RegExpExecArray | null
 
@@ -308,6 +362,14 @@ function inlineMarkdown(text: string): (string | JSX.Element)[] {
       parts.push(<strong key={m.index} style={{ color: 'var(--text)', fontWeight: 600 }}>{m[2]}</strong>)
     } else if (m[0].startsWith('*')) {
       parts.push(<em key={m.index}>{m[3]}</em>)
+    } else if (m[0].startsWith('[')) {
+      parts.push(
+        <a key={m.index} href={m[6]} target="_blank" rel="noopener noreferrer"
+          style={{ color: 'var(--gold)', textDecoration: 'none' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
+        >{m[5]}</a>
+      )
     } else {
       parts.push(
         <code key={m.index} style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.85em', background: 'rgb(var(--ov) / 0.07)', border: '1px solid rgb(var(--ov) / 0.08)', borderRadius: 4, padding: '0.1em 0.35em' }}>
@@ -322,7 +384,87 @@ function inlineMarkdown(text: string): (string | JSX.Element)[] {
   return parts
 }
 
-export default function MessageBubble({ message, onViewCitation }: Props): JSX.Element {
+// ── Quality badges for answer assertions ──────────────────────────────────────
+function QualityBadges({ assertions }: { assertions: AssertionResult[] }): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const passed = assertions.filter((a) => a.passed).length
+  const total = assertions.length
+  const allPassed = passed === total
+  const hasHallucination = assertions.some((a) => !a.passed && a.assertionType === 'hallucination')
+
+  const color = allPassed ? '#3fb950' : hasHallucination ? '#f85149' : '#d29922'
+  const bgColor = allPassed ? 'rgba(63,185,80,0.08)' : hasHallucination ? 'rgba(248,81,73,0.08)' : 'rgba(210,153,34,0.08)'
+  const borderColor = allPassed ? 'rgba(63,185,80,0.2)' : hasHallucination ? 'rgba(248,81,73,0.2)' : 'rgba(210,153,34,0.2)'
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10.5px] font-medium transition-all"
+        style={{ background: bgColor, border: `1px solid ${borderColor}`, color }}
+      >
+        {/* Shield icon */}
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 1L2 4v4c0 3.5 2.5 6.5 6 7.5 3.5-1 6-4 6-7.5V4L8 1z" />
+          {allPassed && <path d="M5.5 8l2 2 3.5-3.5" />}
+          {!allPassed && <>
+            <line x1="8" y1="5.5" x2="8" y2="9" />
+            <circle cx="8" cy="11" r="0.5" fill={color} />
+          </>}
+        </svg>
+        {allPassed ? `${passed}/${total} checks passed` : `${total - passed} issue${total - passed !== 1 ? 's' : ''} found`}
+        <svg
+          width="8" height="8" viewBox="0 0 10 10" fill="none"
+          stroke={color} strokeWidth="1.8" strokeLinecap="round"
+          style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.18s ease' }}
+        >
+          <path d="M2 3.5l3 3 3-3" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div
+          className="mt-1.5 rounded-lg px-3 py-2.5 flex flex-col gap-1.5"
+          style={{ background: 'rgb(var(--ov) / 0.02)', border: '1px solid rgb(var(--ov) / 0.06)' }}
+        >
+          {assertions.map((a, idx) => (
+            <div key={idx} className="flex items-start gap-2 text-[11px]" style={{ color: 'rgb(var(--ov) / 0.6)' }}>
+              {a.passed ? (
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#3fb950" strokeWidth="1.6" strokeLinecap="round" className="shrink-0 mt-0.5">
+                  <path d="M2 5l2 2 4-4" />
+                </svg>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#f85149" strokeWidth="1.6" strokeLinecap="round" className="shrink-0 mt-0.5">
+                  <path d="M2.5 2.5l5 5M7.5 2.5l-5 5" />
+                </svg>
+              )}
+              <span style={{ color: a.passed ? 'rgb(var(--ov) / 0.45)' : 'rgb(var(--ov) / 0.7)' }}>{a.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Action bar button ────────────────────────────────────────────────────────
+function ActionButton({ title, onClick, children }: { title: string; onClick: (e: React.MouseEvent) => void; children: React.ReactNode }): JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="flex items-center justify-center h-6 w-6 rounded transition-all"
+      style={{ color: 'rgb(var(--ov) / 0.22)' }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.55)' }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.22)' }}
+    >
+      {children}
+    </button>
+  )
+}
+
+export default function MessageBubble({ message, onViewCitation, onDeleteMessage, onRetryMessage, isLastAssistant }: Props): JSX.Element {
   const [hovered, setHovered] = useState(false)
   const isUser = message.role === 'user'
 
@@ -347,12 +489,19 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
               {message.content}
             </p>
             {hovered && (
-              <div style={{ position: 'absolute', top: 6, right: 6 }}>
+              <div className="flex items-center gap-0.5" style={{ position: 'absolute', top: 6, right: 6 }}>
                 <CopyButton text={message.content} />
+                {onDeleteMessage && (
+                  <ActionButton title="Delete" onClick={(e) => { e.stopPropagation(); onDeleteMessage(message.id) }}>
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25ZM4.997 6.178a.75.75 0 1 0-1.493.144l.684 7.084A1.75 1.75 0 0 0 5.926 15h4.148a1.75 1.75 0 0 0 1.738-1.594l.684-7.084a.75.75 0 0 0-1.493-.144l-.684 7.084a.25.25 0 0 1-.245.228H5.926a.25.25 0 0 1-.245-.228L4.997 6.178Z" />
+                    </svg>
+                  </ActionButton>
+                )}
               </div>
             )}
           </div>
-          <p className="mt-1.5 text-right text-[10px]" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+          <p className="mt-1.5 text-right text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
             {formatTime(message.timestamp)}
           </p>
         </div>
@@ -380,7 +529,23 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
             Justice AI
           </p>
           {hovered && !isNotFound && !message.isStreaming && message.content.trim() && (
-            <CopyButton text={message.content} />
+            <div className="flex items-center gap-0.5">
+              <CopyButton text={message.content} />
+              {onDeleteMessage && (
+                <ActionButton title="Delete" onClick={(e) => { e.stopPropagation(); onDeleteMessage(message.id) }}>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25ZM4.997 6.178a.75.75 0 1 0-1.493.144l.684 7.084A1.75 1.75 0 0 0 5.926 15h4.148a1.75 1.75 0 0 0 1.738-1.594l.684-7.084a.75.75 0 0 0-1.493-.144l-.684 7.084a.25.25 0 0 1-.245.228H5.926a.25.25 0 0 1-.245-.228L4.997 6.178Z" />
+                  </svg>
+                </ActionButton>
+              )}
+              {isLastAssistant && onRetryMessage && (
+                <ActionButton title="Regenerate" onClick={(e) => { e.stopPropagation(); onRetryMessage(message.id) }}>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z" />
+                  </svg>
+                </ActionButton>
+              )}
+            </div>
           )}
         </div>
 
@@ -438,9 +603,43 @@ export default function MessageBubble({ message, onViewCitation }: Props): JSX.E
           </div>
         )}
 
-        <p className="mt-1.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.22)' }}>
+        <p className="mt-1.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
           {formatTime(message.timestamp)}
         </p>
+
+        {!message.isStreaming && message.qualityAssertions && message.qualityAssertions.length > 0 && (
+          <QualityBadges assertions={message.qualityAssertions} />
+        )}
+
+        {isLastAssistant && !message.isStreaming && onRetryMessage && (
+          <button
+            onClick={() => onRetryMessage(message.id)}
+            aria-label="Regenerate response"
+            className="flex items-center gap-1.5 mt-2 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-all"
+            style={{
+              border: '1px solid rgb(var(--ov) / 0.08)',
+              color: 'rgb(var(--ov) / 0.3)',
+              background: 'rgb(var(--ov) / 0.02)',
+            }}
+            onMouseEnter={(e) => {
+              const el = e.currentTarget as HTMLButtonElement
+              el.style.color = 'rgba(201,168,76,0.8)'
+              el.style.borderColor = 'rgba(201,168,76,0.25)'
+              el.style.background = 'rgba(201,168,76,0.06)'
+            }}
+            onMouseLeave={(e) => {
+              const el = e.currentTarget as HTMLButtonElement
+              el.style.color = 'rgb(var(--ov) / 0.3)'
+              el.style.borderColor = 'rgb(var(--ov) / 0.08)'
+              el.style.background = 'rgb(var(--ov) / 0.02)'
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z" />
+            </svg>
+            Regenerate
+          </button>
+        )}
 
         {!isNotFound && message.citations && message.citations.length > 0 && (
           <CitationSources citations={message.citations} onViewCitation={onViewCitation} />

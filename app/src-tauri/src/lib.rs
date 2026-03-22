@@ -191,7 +191,6 @@ pub fn run() {
             get_build_info,
             commands::ollama::check_ollama,
             commands::rag::check_models,
-            commands::rag::ensure_ocr_runtime,
             commands::rag::download_models,
             commands::rag::set_can_close,
             commands::rag::load_files,

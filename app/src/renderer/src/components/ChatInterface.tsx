@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, KeyboardEvent } from 'react'
-import { ChatMessage, Citation, FileInfo } from '../../../../../shared/src/types'
+import { ChatMessage, Citation, FileInfo, Theme } from '../../../../../shared/src/types'
 import MessageBubble from './MessageBubble'
 import QueryTemplates from './QueryTemplates'
 import FactsPanel from './FactsPanel'
@@ -23,6 +23,10 @@ interface Props {
   onExportChat?: () => void
   practiceArea?: string | null
   chunkTexts?: string[]
+  theme?: Theme
+  onToggleTheme?: () => void
+  onDeleteMessage?: (id: string) => void
+  onRetryMessage?: (id: string) => void
 }
 
 // ── Thinking animation ────────────────────────────────────────────────────────
@@ -65,7 +69,7 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
   const displayKey = phase ? phase : phraseKey
 
   return (
-    <div className="flex gap-3 max-w-3xl mx-auto w-full" style={{ animation: 'fadeUp 0.3s ease both' }}>
+    <div className="flex gap-3 max-w-3xl mx-auto w-full" style={{ animation: 'fadeUp 0.3s ease both' }} role="status" aria-live="polite">
       {/* Avatar */}
       <div
         className="flex h-7 w-7 shrink-0 mt-1 items-center justify-center rounded-full"
@@ -141,7 +145,7 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
         {elapsed >= 5 && (
           <p
             className="text-[10px]"
-            style={{ color: 'rgb(var(--ov) / 0.18)', animation: 'fadeUp 0.4s ease both' }}
+            style={{ color: 'rgb(var(--ov) / 0.45)', animation: 'fadeUp 0.4s ease both' }}
           >
             {elapsed < 60
               ? `${elapsed}s`
@@ -182,6 +186,10 @@ export default function ChatInterface({
   onExportChat,
   practiceArea,
   chunkTexts,
+  theme,
+  onToggleTheme,
+  onDeleteMessage,
+  onRetryMessage,
 }: Props): JSX.Element {
   const [input, setInput] = useState('')
   const [isDragging, setIsDragging] = useState(false)
@@ -292,7 +300,7 @@ export default function ChatInterface({
           </h1>
           <p
             className="mb-10 text-[13.5px] text-center leading-relaxed"
-            style={{ color: 'rgb(var(--ov) / 0.3)', maxWidth: 340 }}
+            style={{ color: 'rgb(var(--ov) / 0.45)', maxWidth: 340 }}
           >
             Ask anything about your case files.
             <br />
@@ -364,7 +372,7 @@ export default function ChatInterface({
                 <p className="text-[15.5px] font-semibold tracking-[-0.01em] leading-snug" style={{ color: isDragging ? '#c9a84c' : 'var(--text)' }}>
                   {isDragging ? 'Release to load documents' : 'Drop your documents here'}
                 </p>
-                <p className="mt-1.5 text-[12.5px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+                <p className="mt-1.5 text-[12.5px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                   PDF and DOCX supported · or click to browse
                 </p>
               </div>
@@ -387,6 +395,7 @@ export default function ChatInterface({
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); onAddFolder() }}
+                  aria-label="Load folder"
                   className="btn-outline text-[12px] no-drag px-3 py-2 rounded-lg"
                 >
                   Load folder
@@ -416,6 +425,7 @@ export default function ChatInterface({
               )}
               {loadError && (
                 <div
+                  role="alert"
                   className="flex items-start gap-2.5 rounded-xl px-4 py-3 mt-1 w-full"
                   style={{
                     background: 'rgba(201,168,76,0.06)',
@@ -526,7 +536,7 @@ export default function ChatInterface({
                 </div>
                 <div>
                   <p className="text-[11.5px] font-semibold leading-tight" style={{ color: 'var(--text)' }}>{card.title}</p>
-                  <p className="text-[10.5px] mt-0.5 leading-snug" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
+                  <p className="text-[10.5px] mt-0.5 leading-snug" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                     {card.desc}
                   </p>
                 </div>
@@ -634,6 +644,43 @@ export default function ChatInterface({
               {files.length} {files.length === 1 ? 'doc' : 'docs'}
             </div>
           )}
+          {/* Theme toggle */}
+          {onToggleTheme && (
+            <button
+              onClick={onToggleTheme}
+              aria-label="Toggle theme"
+              className="flex items-center justify-center h-6 w-6 rounded-full transition-all"
+              style={{
+                border: '1px solid rgb(var(--ov) / 0.08)',
+                color: 'rgb(var(--ov) / 0.3)',
+                background: 'rgb(var(--ov) / 0.02)',
+              }}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLButtonElement
+                el.style.color = 'rgba(201,168,76,0.8)'
+                el.style.borderColor = 'rgba(201,168,76,0.25)'
+                el.style.background = 'rgba(201,168,76,0.06)'
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLButtonElement
+                el.style.color = 'rgb(var(--ov) / 0.3)'
+                el.style.borderColor = 'rgb(var(--ov) / 0.08)'
+                el.style.background = 'rgb(var(--ov) / 0.02)'
+              }}
+            >
+              {theme === 'dark' ? (
+                /* Sun icon — click to go light */
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V.75A.75.75 0 0 1 8 0zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 8 13zM16 8a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 16 8zM3 8a.75.75 0 0 1-.75.75H.75a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 3 8zm10.657-5.657a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.06 0zm-9.193 9.193a.75.75 0 0 1 0 1.06l-1.06 1.061a.75.75 0 1 1-1.061-1.06l1.06-1.061a.75.75 0 0 1 1.06 0zm9.193 0a.75.75 0 0 1-1.06 1.06l-1.061-1.06a.75.75 0 0 1 1.06-1.061l1.061 1.06zM4.464 4.465a.75.75 0 0 1-1.06 0L2.343 3.404a.75.75 0 0 1 1.06-1.06l1.061 1.06a.75.75 0 0 1 0 1.06z" />
+                </svg>
+              ) : (
+                /* Moon icon — click to go dark */
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M9.598 1.591a.75.75 0 0 1 .785-.175 7 7 0 1 1-8.967 8.967.75.75 0 0 1 .961-.96 5.5 5.5 0 0 0 7.046-7.046.75.75 0 0 1 .175-.786z" />
+                </svg>
+              )}
+            </button>
+          )}
           {/* Help button */}
           <button
             onClick={() => setShowHelp(true)}
@@ -664,6 +711,7 @@ export default function ChatInterface({
             <button
               onClick={onExportChat}
               title="Export conversation"
+              aria-label="Export conversation"
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-all"
               style={{ border: '1px solid rgb(var(--ov) / 0.06)', color: 'rgb(var(--ov) / 0.28)', background: 'rgb(var(--ov) / 0.02)' }}
               onMouseEnter={(e) => {
@@ -708,7 +756,7 @@ export default function ChatInterface({
                 <h3 className="mb-2 text-[18px] font-semibold tracking-[-0.02em]" style={{ color: 'var(--text)' }}>
                   Add documents to get started
                 </h3>
-                <p className="mb-7 text-[12.5px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.28)', maxWidth: 280 }}>
+                <p className="mb-7 text-[12.5px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.45)', maxWidth: 280 }}>
                   Load PDFs or Word files, then ask any question about your case.
                 </p>
                 <button
@@ -747,9 +795,20 @@ export default function ChatInterface({
           </div>
         ) : (
           <div className="flex flex-col gap-7 max-w-3xl mx-auto w-full px-6 py-8 pb-10">
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} onViewCitation={onViewCitation} />
-            ))}
+            {messages.map((msg, idx) => {
+              const isLastAssistant = msg.role === 'assistant' && !msg.isStreaming &&
+                !messages.slice(idx + 1).some((m) => m.role === 'assistant' && !m.isStreaming)
+              return (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  onViewCitation={onViewCitation}
+                  onDeleteMessage={onDeleteMessage}
+                  onRetryMessage={onRetryMessage}
+                  isLastAssistant={isLastAssistant}
+                />
+              )
+            })}
             {isQuerying && !messages.some((m) => m.isStreaming && m.content.length > 0) && (
               <TypingIndicator phase={queryPhase} />
             )}
@@ -766,6 +825,7 @@ export default function ChatInterface({
         <div className="max-w-3xl mx-auto">
           {loadError && (
             <div
+              role="alert"
               className="flex items-start gap-2.5 rounded-xl px-4 py-3 mb-3"
               style={{
                 background: 'rgba(201,168,76,0.06)',
@@ -806,7 +866,8 @@ export default function ChatInterface({
               <button
                 onClick={handleSend}
                 disabled={isQuerying || !input.trim() || !hasFiles}
-                title={!hasFiles ? 'Add documents first' : undefined}
+                title={!hasFiles ? 'Add documents first' : 'Send message'}
+                aria-label={!hasFiles ? 'Add documents first' : 'Send message'}
                 className="flex shrink-0 h-8 w-8 items-center justify-center rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
                 style={{
                   background: input.trim() && !isQuerying ? 'var(--gold)' : 'rgb(var(--ov) / 0.06)',
@@ -833,7 +894,7 @@ export default function ChatInterface({
               <rect x="1" y="3" width="11" height="4" rx="1.25" fill="rgba(201,168,76,0.25)" transform="rotate(45 6.5 5)" />
               <line x1="10.5" y1="10.5" x2="18.5" y2="18.5" stroke="rgba(201,168,76,0.25)" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
-            <p className="text-[10px] tracking-wide" style={{ color: 'rgb(var(--ov) / 0.15)' }}>
+            <p className="text-[10px] tracking-wide" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
               Justice AI · Enter to send · Answers grounded in your documents
             </p>
           </div>

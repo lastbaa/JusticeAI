@@ -57,7 +57,7 @@ pub fn detect_supported_extension(path: &str) -> Result<String, String> {
     Ok(ext)
 }
 
-pub fn parse_by_extension(path: &str, ext: &str) -> Result<Vec<DocumentPage>, String> {
+pub fn parse_by_extension(path: &str, ext: &str, model_dir: &std::path::Path) -> Result<Vec<DocumentPage>, String> {
     match ext {
         "pdf" => parse_pdf(path),
         "docx" => parse_docx(path),
@@ -69,7 +69,7 @@ pub fn parse_by_extension(path: &str, ext: &str) -> Result<Vec<DocumentPage>, St
         "mhtml" => parse_mhtml(path),
         "xml" => parse_xml(path),
         "xlsx" => parse_xlsx(path),
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" => parse_image_ocr(path),
+        "png" | "jpg" | "jpeg" | "tif" | "tiff" => parse_image_ocr(path, model_dir),
         _ => Err(format!("Unsupported file extension: {ext}")),
     }
 }
@@ -2188,72 +2188,53 @@ fn parse_xlsx(path: &str) -> Result<Vec<DocumentPage>, String> {
     Ok(pages)
 }
 
-fn parse_image_ocr(path: &str) -> Result<Vec<DocumentPage>, String> {
+fn parse_image_ocr(path: &str, model_dir: &std::path::Path) -> Result<Vec<DocumentPage>, String> {
     enforce_file_security(path)?;
 
-    let bin = tesseract_binary().ok_or_else(|| {
-        "OCR unavailable: Tesseract is not installed. The app can auto-install it during setup on supported platforms."
-            .to_string()
-    })?;
+    let ocr_dir = model_dir.join("ocr");
+    let detection_path = ocr_dir.join("text-detection.rten");
+    let recognition_path = ocr_dir.join("text-recognition.rten");
 
-    let output = std::process::Command::new(bin)
-        .arg(path)
-        .arg("stdout")
-        .arg("-l")
-        .arg("eng")
-        .arg("--psm")
-        .arg("6")
-        .output()
-        .map_err(|e| {
-            format!(
-                "OCR unavailable: could not execute 'tesseract' ({e}). Install Tesseract OCR to ingest images."
-            )
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("OCR failed: {}", stderr.trim()));
+    if !detection_path.exists() || !recognition_path.exists() {
+        return Err(
+            "OCR models not found. Please run the initial setup to download them.".to_string(),
+        );
     }
 
-    let text = normalize_text(String::from_utf8_lossy(&output.stdout).into_owned());
+    let detection_model = rten::Model::load_file(&detection_path)
+        .map_err(|e| format!("Failed to load OCR detection model: {e}"))?;
+    let recognition_model = rten::Model::load_file(&recognition_path)
+        .map_err(|e| format!("Failed to load OCR recognition model: {e}"))?;
+
+    let engine = ocrs::OcrEngine::new(ocrs::OcrEngineParams {
+        detection_model: Some(detection_model),
+        recognition_model: Some(recognition_model),
+        ..Default::default()
+    })
+    .map_err(|e| format!("Failed to create OCR engine: {e}"))?;
+
+    let img = image::open(path)
+        .map_err(|e| format!("Failed to open image: {e}"))?;
+    let rgb = img.into_rgb8();
+    let dims = rgb.dimensions();
+
+    let img_source = ocrs::ImageSource::from_bytes(rgb.as_raw(), dims)
+        .map_err(|e| format!("Failed to create OCR input: {e}"))?;
+
+    let ocr_input = engine
+        .prepare_input(img_source)
+        .map_err(|e| format!("Failed to prepare OCR input: {e}"))?;
+
+    let raw_text = engine
+        .get_text(&ocr_input)
+        .map_err(|e| format!("OCR processing failed: {e}"))?;
+
+    let text = normalize_text(raw_text);
     let pages = paginate_text(&text);
     if pages.is_empty() {
         return Err("OCR produced no text".to_string());
     }
     Ok(pages)
-}
-
-pub fn tesseract_binary() -> Option<std::path::PathBuf> {
-    let mut candidates = vec![
-        std::path::PathBuf::from("tesseract"), // PATH lookup (all platforms)
-    ];
-
-    #[cfg(target_os = "macos")]
-    {
-        candidates.push(std::path::PathBuf::from("/opt/homebrew/bin/tesseract"));
-        candidates.push(std::path::PathBuf::from("/usr/local/bin/tesseract"));
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        candidates.push(std::path::PathBuf::from("/usr/bin/tesseract"));
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        candidates.push(std::path::PathBuf::from(r"C:\Program Files\Tesseract-OCR\tesseract.exe"));
-        candidates.push(std::path::PathBuf::from(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"));
-    }
-
-    for candidate in candidates {
-        let output = std::process::Command::new(&candidate)
-            .arg("--version")
-            .output();
-        if output.map(|o| o.status.success()).unwrap_or(false) {
-            return Some(candidate);
-        }
-    }
-    None
 }
 
 #[cfg(test)]

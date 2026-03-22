@@ -29,7 +29,7 @@
   --error: #f85149;
   --success: #3fb950;
 
-  --placeholder: rgb(255 255 255 / 0.2);
+  --placeholder: rgb(255 255 255 / 0.4);
 
   /* Backdrop for modals */
   --backdrop: rgba(0, 0, 0, 0.7);
@@ -64,7 +64,7 @@
   --error: #d1242f;
   --success: #1a7f37;
 
-  --placeholder: rgb(0 0 0 / 0.25);
+  --placeholder: rgb(0 0 0 / 0.4);
 
   --backdrop: rgba(0, 0, 0, 0.3);
   --shadow: rgba(0, 0, 0, 0.1);

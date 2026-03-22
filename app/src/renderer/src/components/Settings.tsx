@@ -51,7 +51,7 @@ function Field({
     <div>
       <label className="block text-[12px] font-medium mb-1" style={{ color: 'var(--text)' }}>{label}</label>
       {description && (
-        <p className="text-[11px] mb-2" style={{ color: 'rgb(var(--ov) / 0.35)' }}>
+        <p className="text-[11px] mb-2" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
           {description}
         </p>
       )}
@@ -63,8 +63,8 @@ function Field({
 function SectionHeader({ children }: { children: React.ReactNode }): JSX.Element {
   return (
     <h3
-      className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-4 pb-2 border-b"
-      style={{ color: 'rgb(var(--ov) / 0.3)', borderColor: 'rgb(var(--ov) / 0.06)' }}
+      className="text-[11px] font-semibold uppercase tracking-[0.12em] mb-4 pb-2 border-b"
+      style={{ color: 'var(--gold)', borderColor: 'rgba(201,168,76,0.15)' }}
     >
       {children}
     </h3>
@@ -148,8 +148,8 @@ function Slider({
         }}
       />
       <div className="flex justify-between mt-1">
-        <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>{min}</span>
-        <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>{max}</span>
+        <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.4)' }}>{min}</span>
+        <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.4)' }}>{max}</span>
       </div>
     </div>
   )
@@ -277,7 +277,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
       style={{ background: 'var(--backdrop)', backdropFilter: 'blur(8px)' }}
     >
       <div
-        className="w-full max-w-lg rounded-2xl overflow-hidden"
+        className="w-full max-w-xl rounded-2xl overflow-hidden"
         style={{
           background: 'var(--modal-bg)',
           border: '1px solid rgb(var(--ov) / 0.08)',
@@ -319,7 +319,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
         {/* Body */}
         <div
           className="overflow-y-auto px-6 py-5 flex flex-col gap-6"
-          style={{ maxHeight: '65vh' }}
+          style={{ maxHeight: '75vh' }}
         >
           {/* ── Appearance ── */}
           <div>
@@ -337,7 +337,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
             <SectionHeader>AI Model</SectionHeader>
             <div
               className="rounded-xl p-4 flex items-center justify-between gap-3"
-              style={{ background: 'var(--surface-dark)', border: '1px solid rgb(var(--ov) / 0.06)' }}
+              style={{ background: 'var(--surface-dark)', border: '1px solid rgba(201,168,76,0.12)' }}
             >
               <div className="flex items-center gap-3">
                 <div
@@ -369,7 +369,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
               <label className="block text-[12px] font-medium mb-2" style={{ color: 'var(--text)' }}>
                 Practice Area
               </label>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="grid grid-cols-3 gap-2">
                 {PRESETS.map((p) => {
                   const isActive = activePreset === p.name
                   return (
@@ -377,7 +377,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
                       key={p.name}
                       onClick={() => applyPreset(p)}
                       aria-label={`Apply ${p.name} preset`}
-                      className="rounded-full px-3 py-1.5 text-[11px] font-medium transition-all"
+                      className="rounded-lg px-3 py-2 text-[11px] text-center font-medium transition-all"
                       style={{
                         background: isActive ? 'rgba(201,168,76,0.12)' : 'var(--surface-dark)',
                         color: isActive ? 'var(--gold)' : 'rgb(var(--ov) / 0.4)',
@@ -497,7 +497,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
               </p>
               <p
                 className="text-[11px] leading-relaxed"
-                style={{ color: 'rgb(var(--ov) / 0.32)' }}
+                style={{ color: 'rgb(var(--ov) / 0.5)' }}
               >
                 Your documents and queries never leave this machine. Parsing, search, and AI inference all run locally — no accounts, no API keys, zero network traffic.
               </p>
@@ -515,7 +515,7 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
               {validationError}
             </p>
           ) : buildInfo ? (
-            <p className="text-[10px] font-mono" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+            <p className="text-[10px] font-mono" style={{ color: 'rgb(var(--ov) / 0.4)' }}>
               Build: {buildInfo}
             </p>
           ) : <span />}

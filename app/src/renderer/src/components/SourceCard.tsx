@@ -100,7 +100,7 @@ export default function SourceCard({ citation, onView, isPrimary = false }: Prop
             <span className="text-[10px]" style={{ color: rel.color, opacity: 0.85 }}>
               {rel.label}
             </span>
-            <span className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.28)' }}>
+            <span className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
               · p.{citation.pageNumber}
             </span>
           </div>
@@ -123,6 +123,7 @@ export default function SourceCard({ citation, onView, isPrimary = false }: Prop
             )}
             <button
               onClick={handleCopyExcerpt}
+              aria-label="Copy excerpt"
               className="flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded transition-all"
               style={{
                 background: copied ? 'rgba(63,185,80,0.1)' : 'rgb(var(--ov) / 0.05)',

@@ -14,26 +14,49 @@ use tauri::Emitter;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OcrRuntimeStatus {
-    pub ready: bool,
-    pub install_attempted: bool,
-    pub message: String,
+// ── Disk space helper ────────────────────────────────────────────────────────
+
+/// Returns available disk space in bytes for the volume containing `path`.
+/// Returns `None` if the check cannot be performed on this platform.
+#[cfg(unix)]
+fn available_disk_space(path: &std::path::Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::mem::MaybeUninit;
+
+    let c_path = CString::new(path.to_str()?).ok()?;
+    let mut stat = MaybeUninit::<libc::statvfs>::uninit();
+    let ret = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+    if ret != 0 {
+        return None;
+    }
+    let stat = unsafe { stat.assume_init() };
+    Some(stat.f_bavail as u64 * stat.f_frsize as u64)
+}
+
+#[cfg(not(unix))]
+fn available_disk_space(_path: &std::path::Path) -> Option<u64> {
+    None // On non-Unix platforms, skip the check gracefully
 }
 
 // ── Model Management ─────────────────────────────────────────────────────────
+
+const OCR_DETECTION_URL: &str =
+    "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten";
+const OCR_RECOGNITION_URL: &str =
+    "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten";
 
 #[tauri::command]
 pub async fn check_models(
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
 ) -> Result<ModelStatus, String> {
-    let gguf_path = {
+    let (gguf_path, model_dir) = {
         let s = state.lock().await;
-        s.model_dir.join("saul.gguf")
+        (s.model_dir.join("saul.gguf"), s.model_dir.clone())
     };
     let size = gguf_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
-    let ocr_ready = super::doc_parser::tesseract_binary().is_some();
+    let ocr_dir = model_dir.join("ocr");
+    let ocr_ready = ocr_dir.join("text-detection.rten").metadata().map(|m| m.len() > 1024).unwrap_or(false)
+        && ocr_dir.join("text-recognition.rten").metadata().map(|m| m.len() > 1024).unwrap_or(false);
     Ok(ModelStatus {
         llm_ready: size > GGUF_MIN_SIZE,
         llm_size_gb: size as f32 / 1e9,
@@ -42,90 +65,9 @@ pub async fn check_models(
         ocr_message: if ocr_ready {
             None
         } else {
-            Some("Image OCR is not ready yet. Setup will attempt to install Tesseract automatically.".to_string())
+            Some("OCR models will be downloaded during setup.".to_string())
         },
     })
-}
-
-#[tauri::command]
-pub async fn ensure_ocr_runtime() -> Result<OcrRuntimeStatus, String> {
-    if super::doc_parser::tesseract_binary().is_some() {
-        return Ok(OcrRuntimeStatus {
-            ready: true,
-            install_attempted: false,
-            message: "OCR runtime is already installed.".to_string(),
-        });
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let brew_exists = tokio::process::Command::new("brew")
-            .arg("--version")
-            .output()
-            .await
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        if !brew_exists {
-            return Ok(OcrRuntimeStatus {
-                ready: false,
-                install_attempted: false,
-                message: "Homebrew is not installed, so OCR could not be auto-installed. Install Homebrew, then run `brew install tesseract`.".to_string(),
-            });
-        }
-
-        let status = tokio::process::Command::new("brew")
-            .args(["install", "tesseract"])
-            .status()
-            .await;
-
-        let ready = super::doc_parser::tesseract_binary().is_some();
-        return Ok(OcrRuntimeStatus {
-            ready,
-            install_attempted: true,
-            message: match status {
-                Ok(s) if s.success() && ready => "OCR runtime installed successfully.".to_string(),
-                Ok(_) if ready => "OCR runtime is available.".to_string(),
-                Ok(_) => "Attempted to install OCR runtime, but Tesseract is still unavailable. Try `brew install tesseract` manually.".to_string(),
-                Err(e) => format!("OCR auto-install attempt failed: {e}. Try `brew install tesseract`."),
-            },
-        });
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let status = tokio::process::Command::new("winget")
-            .args([
-                "install",
-                "--id",
-                "UB-Mannheim.TesseractOCR",
-                "-e",
-                "--accept-source-agreements",
-                "--accept-package-agreements",
-            ])
-            .status()
-            .await;
-        let ready = super::doc_parser::tesseract_binary().is_some();
-        return Ok(OcrRuntimeStatus {
-            ready,
-            install_attempted: true,
-            message: match status {
-                Ok(s) if s.success() && ready => "OCR runtime installed successfully.".to_string(),
-                Ok(_) if ready => "OCR runtime is available.".to_string(),
-                Ok(_) => "Attempted OCR auto-install, but Tesseract is still unavailable. Install Tesseract manually.".to_string(),
-                Err(e) => format!("OCR auto-install attempt failed: {e}. Install Tesseract manually."),
-            },
-        });
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        return Ok(OcrRuntimeStatus {
-            ready: false,
-            install_attempted: false,
-            message: "Automatic OCR install is not enabled on this platform. Install `tesseract-ocr` with your package manager.".to_string(),
-        });
-    }
 }
 
 #[tauri::command]
@@ -141,6 +83,18 @@ pub async fn download_models(
     tokio::fs::create_dir_all(&model_dir)
         .await
         .map_err(|e| e.to_string())?;
+
+    // ── Disk space check ──────────────────────────────────────────────────────
+    // Require ~5 GB free to download models safely.
+    const REQUIRED_BYTES: u64 = 5_000_000_000;
+    if let Some(available) = available_disk_space(&model_dir) {
+        if available < REQUIRED_BYTES {
+            let avail_gb = available as f64 / 1e9;
+            return Err(format!(
+                "Insufficient disk space: {avail_gb:.1} GB available, ~5 GB required. Free up space and try again."
+            ));
+        }
+    }
 
     let gguf_path = model_dir.join("saul.gguf");
     let tmp_path = model_dir.join("saul.gguf.tmp");
@@ -250,6 +204,9 @@ pub async fn download_models(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Download OCR models (~10MB total, fast)
+    download_ocr_models(&model_dir).await?;
+
     window
         .emit(
             "download-progress",
@@ -261,6 +218,42 @@ pub async fn download_models(
             }),
         )
         .ok();
+
+    Ok(())
+}
+
+/// Download OCR detection + recognition ONNX models for the `ocrs` crate.
+async fn download_ocr_models(model_dir: &std::path::Path) -> Result<(), String> {
+    let ocr_dir = model_dir.join("ocr");
+    tokio::fs::create_dir_all(&ocr_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    for (url, filename) in [
+        (OCR_DETECTION_URL, "text-detection.rten"),
+        (OCR_RECOGNITION_URL, "text-recognition.rten"),
+    ] {
+        let dest = ocr_dir.join(filename);
+        // Skip if already downloaded
+        if dest.metadata().map(|m| m.len() > 1024).unwrap_or(false) {
+            continue;
+        }
+        log::info!("Downloading OCR model: {filename}");
+        let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("Failed to download {filename}: HTTP {}", resp.status()));
+        }
+        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+        tokio::fs::write(&dest, &bytes)
+            .await
+            .map_err(|e| e.to_string())?;
+        log::info!("Downloaded OCR model: {filename} ({} bytes)", bytes.len());
+    }
 
     Ok(())
 }
@@ -386,7 +379,7 @@ async fn process_file(
     use super::doc_parser;
 
     let ext = doc_parser::detect_supported_extension(file_path)?;
-    let pages = doc_parser::parse_by_extension(file_path, &ext)?;
+    let pages = doc_parser::parse_by_extension(file_path, &ext, model_dir)?;
 
     let file_name = std::path::Path::new(file_path)
         .file_name()
@@ -560,6 +553,7 @@ pub async fn query(
                 answer: "I could not find information about this in your loaded documents. Please ensure the relevant files are loaded.".to_string(),
                 citations: vec![],
                 not_found: true,
+                assertions: vec![],
             });
         }
 
@@ -703,10 +697,17 @@ pub async fn query(
         })
         .collect();
 
+    // Run answer quality assertions
+    let known_files: Vec<&str> = results.iter().map(|(_, m)| m.file_name.as_str()).collect();
+    let chunk_texts: Vec<&str> = results.iter().map(|(_, m)| m.text.as_str()).collect();
+    let mut assertions = crate::assertions::check_citations(&answer, Some(&known_files));
+    assertions.extend(crate::assertions::check_no_hallucination(&answer, &chunk_texts));
+
     Ok(QueryResult {
         answer,
         citations,
         not_found,
+        assertions,
     })
 }
 

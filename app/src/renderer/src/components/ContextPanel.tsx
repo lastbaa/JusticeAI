@@ -163,6 +163,7 @@ function FileRow({
       {hovered && (
         <button
           onClick={onRemove}
+          aria-label={`Remove ${file.fileName}`}
           className="shrink-0 h-5 w-5 flex items-center justify-center rounded transition-colors"
           style={{ color: 'rgb(var(--ov) / 0.2)' }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
@@ -231,6 +232,7 @@ export default function ContextPanel({
           onClick={onAddFiles}
           disabled={isLoading}
           title="Add documents"
+          aria-label="Add documents"
           className="no-drag flex h-6 w-6 items-center justify-center rounded-md transition-all disabled:opacity-40"
           style={{ color: 'rgb(var(--ov) / 0.3)' }}
           onMouseEnter={(e) => {
@@ -284,6 +286,7 @@ export default function ContextPanel({
                 <button
                   onClick={onExportCitations}
                   title="Export citations as CSV"
+                  aria-label="Export citations as CSV"
                   className="flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-md transition-all"
                   style={{
                     background: 'rgb(var(--ov) / 0.04)',
@@ -354,6 +357,7 @@ export default function ContextPanel({
                   onClick={onClearFiles}
                   disabled={isLoading}
                   title="Clear all documents"
+                  aria-label="Clear all documents"
                   className="flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-md transition-all disabled:opacity-40"
                   style={{
                     background: 'rgb(var(--ov) / 0.04)',

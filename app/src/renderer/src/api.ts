@@ -12,7 +12,6 @@ import type {
   DownloadProgress,
   FileInfo,
   ModelStatus,
-  OcrRuntimeStatus,
   OllamaStatus,
   QueryResult,
 } from '../../../../shared/src/types'
@@ -21,8 +20,6 @@ export const api = {
   checkOllama: (): Promise<OllamaStatus> => invoke('check_ollama'),
 
   checkModels: (): Promise<ModelStatus> => invoke('check_models'),
-  ensureOcrRuntime: (): Promise<OcrRuntimeStatus> => invoke('ensure_ocr_runtime'),
-
   downloadModels: (): Promise<void> => invoke('download_models'),
 
   onDownloadProgress: (cb: (p: DownloadProgress) => void): Promise<() => void> =>

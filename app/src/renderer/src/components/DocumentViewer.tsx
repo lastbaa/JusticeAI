@@ -197,6 +197,7 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
         <button
           onClick={copyExcerpt}
           title="Copy excerpt"
+          aria-label="Copy excerpt"
           className="shrink-0 flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-md transition-all"
           style={{
             background: copied ? 'rgba(63,185,80,0.1)' : 'rgba(201,168,76,0.08)',
@@ -264,6 +265,7 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage <= 1}
+            aria-label="Previous page"
             className="flex items-center justify-center h-6 w-6 rounded text-[11px] transition-all"
             style={{
               background: currentPage <= 1 ? 'transparent' : 'rgba(201,168,76,0.08)',
@@ -274,12 +276,13 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
           >
             ‹
           </button>
-          <span className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.35)' }}>
+          <span className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
             Page {currentPage} of {totalPages}
           </span>
           <button
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage >= totalPages}
+            aria-label="Next page"
             className="flex items-center justify-center h-6 w-6 rounded text-[11px] transition-all"
             style={{
               background: currentPage >= totalPages ? 'transparent' : 'rgba(201,168,76,0.08)',
@@ -422,7 +425,7 @@ export default function DocumentViewer({ citation, onClose }: Props): JSX.Elemen
               </span>
               <span
                 className="shrink-0 text-[11px]"
-                style={{ color: 'rgb(var(--ov) / 0.25)' }}
+                style={{ color: 'rgb(var(--ov) / 0.45)' }}
               >
                 · p.{citation.pageNumber}
               </span>
@@ -431,6 +434,7 @@ export default function DocumentViewer({ citation, onClose }: Props): JSX.Elemen
 
             <button
               onClick={onClose}
+              aria-label="Close document viewer"
               className="no-drag shrink-0 flex h-6 w-6 items-center justify-center rounded-md transition-colors"
               style={{ color: 'rgb(var(--ov) / 0.3)' }}
               onMouseEnter={(e) => {

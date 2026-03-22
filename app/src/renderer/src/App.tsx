@@ -453,6 +453,7 @@ export default function App(): JSX.Element {
         notFound: result.notFound,
         isStreaming: false,
         timestamp: Date.now(),
+        qualityAssertions: result.assertions,
       }
       setMessages((prev) => {
         const hasStreaming = prev.some((m) => m.id === streamingId)
@@ -582,6 +583,7 @@ export default function App(): JSX.Element {
     setLastCitations([])
     setViewerCitation(null)
     setSessionCustomName(null)
+    // Preserve currentCaseId so new chats auto-belong to the current project
     setView('main')
   }
 
@@ -740,6 +742,54 @@ export default function App(): JSX.Element {
     ? files.filter((f) => f.caseId === currentCaseId)
     : files
 
+  function handleToggleTheme(): void {
+    const newTheme = settings.theme === 'dark' ? 'light' : 'dark'
+    const newSettings = { ...settings, theme: newTheme as AppSettings['theme'] }
+    handleSaveSettings(newSettings)
+  }
+
+  function handleDeleteMessage(id: string): void {
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === id)
+      if (idx === -1) return prev
+      const msg = prev[idx]
+      if (msg.role === 'user') {
+        // Delete user message and the following assistant message (pair)
+        const next = prev[idx + 1]
+        if (next && next.role === 'assistant') {
+          return prev.filter((_, i) => i !== idx && i !== idx + 1)
+        }
+        return prev.filter((_, i) => i !== idx)
+      } else {
+        // Delete assistant message and the preceding user message (pair)
+        const prevMsg = prev[idx - 1]
+        if (prevMsg && prevMsg.role === 'user') {
+          return prev.filter((_, i) => i !== idx && i !== idx - 1)
+        }
+        return prev.filter((_, i) => i !== idx)
+      }
+    })
+  }
+
+  function handleRetryMessage(id: string): void {
+    const idx = messages.findIndex((m) => m.id === id)
+    if (idx === -1) return
+    // Find the preceding user message
+    let userMsg: ChatMessage | undefined
+    for (let j = idx - 1; j >= 0; j--) {
+      if (messages[j].role === 'user') {
+        userMsg = messages[j]
+        break
+      }
+    }
+    if (!userMsg) return
+    const question = userMsg.content
+    // Remove the assistant message being retried
+    setMessages((prev) => prev.filter((m) => m.id !== id))
+    // Re-query
+    handleQuery(question)
+  }
+
   async function handleSaveSettings(newSettings: AppSettings): Promise<void> {
     try {
       await window.api.saveSettings(newSettings)
@@ -822,9 +872,13 @@ export default function App(): JSX.Element {
         onDeleteCase={handleDeleteCase}
         onRenameCase={handleRenameCase}
         onMoveSession={handleMoveSessionToCase}
+        onRemoveFile={handleRemoveFile}
+        onMoveFileToCase={handleMoveFileToCase}
+        caseFiles={caseFiles}
+        onLoadPaths={handleLoadPaths}
       />
 
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden">
         <ChatInterface
           messages={messages}
           files={files}
@@ -844,8 +898,12 @@ export default function App(): JSX.Element {
           onExportChat={messages.length > 0 ? handleExportChat : undefined}
           practiceArea={getActivePracticeArea(settings)}
           chunkTexts={pageTexts}
+          theme={settings.theme}
+          onToggleTheme={handleToggleTheme}
+          onDeleteMessage={handleDeleteMessage}
+          onRetryMessage={handleRetryMessage}
         />
-      </div>
+      </main>
 
       <ContextPanel
         files={caseFiles}

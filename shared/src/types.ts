@@ -68,6 +68,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
   timestamp: number;
   notFound?: boolean;
+  qualityAssertions?: AssertionResult[];
 }
 
 // ─── Ollama / Model Types ──────────────────────────────────────────────────────
@@ -113,12 +114,6 @@ export interface ModelStatus {
   downloadRequiredGb: number;
   ocrReady: boolean;
   ocrMessage?: string;
-}
-
-export interface OcrRuntimeStatus {
-  ready: boolean;
-  installAttempted: boolean;
-  message: string;
 }
 
 export interface DownloadProgress {
@@ -170,6 +165,14 @@ export interface ChatSession {
   summary?: string
 };
 
+// ─── Assertion Types ──────────────────────────────────────────────────────────
+
+export interface AssertionResult {
+  passed: boolean
+  assertionType: string
+  message: string
+}
+
 // ─── IPC Payload Types ─────────────────────────────────────────────────────────
 
 export interface LoadFilesPayload {
@@ -185,6 +188,7 @@ export interface QueryResult {
   answer: string;
   citations: Citation[];
   notFound: boolean;
+  assertions?: AssertionResult[];
 }
 
 export interface FileInfo {
