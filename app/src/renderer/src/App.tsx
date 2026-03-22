@@ -23,6 +23,26 @@ import Toast, { ToastMessage } from './components/Toast'
 type View = 'main' | 'settings'
 const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.csv', '.eml', '.html', '.htm', '.mhtml', '.xml', '.xlsx', '.png', '.jpg', '.jpeg', '.tif', '.tiff']
 
+// Practice area presets (mirrors Settings.tsx PRESETS for deriving active area)
+const PRACTICE_AREA_PRESETS = [
+  { name: 'General',               chunkSize: 1000, chunkOverlap: 150, topK: 6 },
+  { name: 'Criminal Law',          chunkSize: 1200, chunkOverlap: 200, topK: 8 },
+  { name: 'Family / Domestic',     chunkSize: 800,  chunkOverlap: 100, topK: 5 },
+  { name: 'Corporate / Contract',  chunkSize: 1500, chunkOverlap: 200, topK: 8 },
+  { name: 'Immigration',           chunkSize: 1000, chunkOverlap: 150, topK: 7 },
+  { name: 'Personal Injury',       chunkSize: 1000, chunkOverlap: 150, topK: 7 },
+  { name: 'Real Estate / Property',chunkSize: 1200, chunkOverlap: 180, topK: 7 },
+  { name: 'Employment / Labor',    chunkSize: 1000, chunkOverlap: 150, topK: 6 },
+  { name: 'Regulatory / Compliance', chunkSize: 1400, chunkOverlap: 200, topK: 8 },
+]
+
+function getActivePracticeArea(s: AppSettings): string | null {
+  const m = PRACTICE_AREA_PRESETS.find(
+    (p) => p.chunkSize === s.chunkSize && p.chunkOverlap === s.chunkOverlap && p.topK === s.topK
+  )
+  return m?.name ?? null
+}
+
 /**
  * Generate a concise chat title from the first user message.
  * Short noun-phrase titles like "Lease Agreement Questions" or "W-9 Form Details".
@@ -98,6 +118,8 @@ export default function App(): JSX.Element {
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   // Tracks manually set session name — null means use auto-name from first message
   const [sessionCustomName, setSessionCustomName] = useState<string | null>(null)
+  // Page texts for key facts extraction (frontend-only)
+  const [pageTexts, setPageTexts] = useState<string[]>([])
   // Case folders
   const [cases, setCases] = useState<Case[]>([])
   const [currentCaseId, setCurrentCaseId] = useState<string | null>(null)
@@ -210,6 +232,28 @@ export default function App(): JSX.Element {
     return () => clearTimeout(timer)
   }, [messages])
 
+  // Fetch page texts for key facts extraction when files change
+  useEffect(() => {
+    if (files.length === 0) { setPageTexts([]); return }
+    let cancelled = false
+    async function fetchTexts(): Promise<void> {
+      const texts: string[] = []
+      for (const f of files) {
+        // Fetch first 5 pages max per file to keep it fast
+        const maxPages = Math.min(f.totalPages, 5)
+        for (let p = 1; p <= maxPages; p++) {
+          try {
+            const text = await window.api.getPageText(f.filePath, p)
+            if (text) texts.push(text)
+          } catch { /* skip */ }
+        }
+      }
+      if (!cancelled) setPageTexts(texts)
+    }
+    fetchTexts()
+    return () => { cancelled = true }
+  }, [files])
+
   // ── File management ───────────────────────────────────────────
   async function handleLoadPaths(paths: string[]): Promise<void> {
     setLoadError(null)
@@ -273,6 +317,7 @@ export default function App(): JSX.Element {
       await Promise.all(files.map((f) => window.api.removeFile(f.id)))
       setFiles([])
       setLastCitations([])
+      setPageTexts([])
       addToast('success', 'All documents removed')
     } catch (err) {
       console.error('Failed to clear files:', err)
@@ -797,6 +842,8 @@ export default function App(): JSX.Element {
           onLoadPaths={handleLoadPaths}
           onViewCitation={setViewerCitation}
           onExportChat={messages.length > 0 ? handleExportChat : undefined}
+          practiceArea={getActivePracticeArea(settings)}
+          chunkTexts={pageTexts}
         />
       </div>
 

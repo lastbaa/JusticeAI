@@ -64,6 +64,24 @@ function CitationRow({
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* Confidence score */}
+          <span
+            className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md"
+            style={{
+              background: citation.score > 0.8
+                ? 'rgba(63,185,80,0.1)' : citation.score >= 0.5
+                ? 'rgba(210,168,50,0.1)' : 'rgba(248,81,73,0.1)',
+              color: citation.score > 0.8
+                ? 'rgba(63,185,80,0.8)' : citation.score >= 0.5
+                ? 'rgba(210,168,50,0.8)' : 'rgba(248,81,73,0.8)',
+              border: `1px solid ${citation.score > 0.8
+                ? 'rgba(63,185,80,0.2)' : citation.score >= 0.5
+                ? 'rgba(210,168,50,0.2)' : 'rgba(248,81,73,0.2)'}`,
+            }}
+            title={`Relevance: ${Math.round(citation.score * 100)}%`}
+          >
+            {Math.round(citation.score * 100)}%
+          </span>
           <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
             p.{citation.pageNumber}
           </span>

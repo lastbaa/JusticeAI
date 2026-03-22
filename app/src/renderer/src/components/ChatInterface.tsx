@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, KeyboardEvent } from 'react'
 import { ChatMessage, Citation, FileInfo } from '../../../../../shared/src/types'
 import MessageBubble from './MessageBubble'
+import QueryTemplates from './QueryTemplates'
+import FactsPanel from './FactsPanel'
 
 interface Props {
   messages: ChatMessage[]
@@ -19,6 +21,8 @@ interface Props {
   onLoadPaths: (paths: string[]) => void
   onViewCitation: (citation: Citation) => void
   onExportChat?: () => void
+  practiceArea?: string | null
+  chunkTexts?: string[]
 }
 
 // ── Thinking animation ────────────────────────────────────────────────────────
@@ -176,6 +180,8 @@ export default function ChatInterface({
   onLoadPaths,
   onViewCitation,
   onExportChat,
+  practiceArea,
+  chunkTexts,
 }: Props): JSX.Element {
   const [input, setInput] = useState('')
   const [isDragging, setIsDragging] = useState(false)
@@ -716,26 +722,26 @@ export default function ChatInterface({
                 </button>
               </>
             ) : (
-              /* Has docs — show example prompts */
+              /* Has docs — show template prompts + key facts */
               <>
                 <p className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.2em]" style={{ color: 'rgba(201,168,76,0.5)' }}>
                   {files.length} {files.length === 1 ? 'document' : 'documents'} ready
                 </p>
-                <h3 className="mb-7 text-[22px] font-semibold tracking-[-0.02em]" style={{ color: 'var(--text)' }}>
+                <h3 className="mb-5 text-[22px] font-semibold tracking-[-0.02em]" style={{ color: 'var(--text)' }}>
                   What would you like to know?
                 </h3>
-                <div className="grid grid-cols-2 gap-2.5 w-full max-w-lg">
-                  {EXAMPLES.map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => { setInput(q); textareaRef.current?.focus() }}
-                      className="btn-surface rounded-xl px-4 py-3.5 text-left text-[12px] leading-relaxed group"
-                      style={{ minHeight: 64 }}
-                    >
-                      <span className="opacity-80 group-hover:opacity-100 transition-opacity">{q}</span>
-                    </button>
-                  ))}
-                </div>
+                {chunkTexts && chunkTexts.length > 0 && (
+                  <div className="w-full max-w-lg mb-5">
+                    <FactsPanel
+                      chunkTexts={chunkTexts}
+                      onClickFact={(q) => { setInput(q); textareaRef.current?.focus() }}
+                    />
+                  </div>
+                )}
+                <QueryTemplates
+                  practiceArea={practiceArea ?? null}
+                  onSelect={(q) => { setInput(q); textareaRef.current?.focus() }}
+                />
               </>
             )}
           </div>
