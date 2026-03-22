@@ -11,6 +11,7 @@ import HowItWorks from './components/HowItWorks'
 import LampCTA from './components/LampCTA'
 import FAQ from './components/FAQ'
 import Download from './components/Download'
+import Rubric from './components/Rubric'
 import Footer from './components/Footer'
 
 export default function Home() {
@@ -31,6 +32,7 @@ export default function Home() {
       <div id="download">
         <Download />
       </div>
+      <Rubric />
       <Footer />
     </main>
   )
