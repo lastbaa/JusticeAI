@@ -1343,7 +1343,7 @@ async fn main() {
         print!("{tok}");
         use std::io::Write;
         std::io::stdout().flush().ok();
-    }).await {
+    }, None).await {
         Ok(answer) => { println!("\n\n--- Final answer ---\n{answer}"); }
         Err(e) => { eprintln!("LLM error: {e}"); }
     }

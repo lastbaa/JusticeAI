@@ -11,6 +11,7 @@ import type {
   ChatSession,
   DownloadProgress,
   FileInfo,
+  Jurisdiction,
   ModelStatus,
   OllamaStatus,
   QueryResult,
@@ -97,6 +98,9 @@ export const api = {
 
   assignSessionToCase: (sessionId: string, caseId: string | null): Promise<void> =>
     invoke('assign_session_to_case', { sessionId, caseId }),
+
+  setCaseJurisdiction: (caseId: string, jurisdiction: Jurisdiction | null): Promise<void> =>
+    invoke('set_case_jurisdiction', { caseId, jurisdiction }),
 
   getCaseSummaries: (caseId: string, excludeSessionId?: string): Promise<{ sessionId: string; summary: string }[]> =>
     invoke('get_case_summaries', { caseId, excludeSessionId: excludeSessionId ?? null }),

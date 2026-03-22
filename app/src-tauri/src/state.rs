@@ -11,6 +11,24 @@ pub struct CloseAllowed(pub AtomicBool);
 
 // ── Shared Types (mirror of shared/src/types.ts) ────────────────────────────
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum JurisdictionLevel {
+    Federal,
+    State,
+    County,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Jurisdiction {
+    pub level: JurisdictionLevel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub county: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Case {
@@ -20,6 +38,8 @@ pub struct Case {
     pub description: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jurisdiction: Option<Jurisdiction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +61,8 @@ pub struct FileInfo {
     pub chunk_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub case_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_jurisdiction: Option<Jurisdiction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +93,8 @@ pub struct AppSettings {
     pub top_k: usize,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jurisdiction: Option<Jurisdiction>,
 }
 
 fn default_theme() -> String {
@@ -84,6 +108,7 @@ impl Default for AppSettings {
             chunk_overlap: 150,
             top_k: 6,
             theme: default_theme(),
+            jurisdiction: None,
         }
     }
 }
@@ -282,6 +307,7 @@ impl RagState {
                 for (id, saved_info) in saved {
                     if let Some(entry) = self.file_registry.get_mut(&id) {
                         entry.case_id = saved_info.case_id;
+                        entry.detected_jurisdiction = saved_info.detected_jurisdiction;
                     }
                 }
             }
@@ -316,6 +342,7 @@ impl RagState {
                             .as_millis() as u64,
                         chunk_count: count,
                         case_id: None,
+                        detected_jurisdiction: None,
                     },
                 );
             }

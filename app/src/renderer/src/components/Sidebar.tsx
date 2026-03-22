@@ -264,8 +264,27 @@ function KnowledgeFileItem({
         <span className="text-[11px] truncate block" style={{ color: 'rgb(var(--ov) / 0.55)' }} title={file.fileName}>
           {file.fileName}
         </span>
-        <span className="text-[9px]" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
+        <span className="text-[9px] flex items-center gap-1.5" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
           {file.totalPages} page{file.totalPages !== 1 ? 's' : ''}
+          {file.detectedJurisdiction && (
+            <span
+              className="inline-block rounded px-1 py-px text-[8px] font-semibold uppercase tracking-wide"
+              style={{
+                background: 'rgba(201,168,76,0.1)',
+                color: 'rgba(201,168,76,0.7)',
+                border: '1px solid rgba(201,168,76,0.15)',
+              }}
+              title={`Detected: ${file.detectedJurisdiction.level === 'federal' ? 'Federal' : file.detectedJurisdiction.state ?? file.detectedJurisdiction.level}`}
+            >
+              {file.detectedJurisdiction.level === 'federal'
+                ? 'FED'
+                : file.detectedJurisdiction.state
+                  ? file.detectedJurisdiction.state.length > 2
+                    ? file.detectedJurisdiction.state.substring(0, 2).toUpperCase()
+                    : file.detectedJurisdiction.state.toUpperCase()
+                  : file.detectedJurisdiction.level.toUpperCase()}
+            </span>
+          )}
         </span>
       </div>
       {hovered && (

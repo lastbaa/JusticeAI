@@ -4,7 +4,7 @@ use crate::pipeline::{
 };
 use crate::state::{
     AppSettings, Case, ChatSession, ChunkMetadata, Citation, EmbeddedChunkEntry, FileInfo,
-    ModelStatus, QueryResult, RagState,
+    Jurisdiction, ModelStatus, QueryResult, RagState,
 };
 use base64::Engine;
 use serde::Serialize;
@@ -398,6 +398,17 @@ async fn process_file(
         .unwrap_or_default()
         .as_millis() as u64;
 
+    // Detect jurisdiction from first few pages (cap at 10,000 chars)
+    let detect_text: String = pages.iter().take(3).map(|p| p.text.as_str()).collect::<Vec<_>>().join("\n");
+    let detect_text = if detect_text.len() > 10_000 { &detect_text[..10_000] } else { &detect_text };
+    let detected_jurisdiction = pipeline::detect_jurisdiction(detect_text).map(|r| {
+        log::info!(
+            "Jurisdiction detected for {}: {:?} (confidence: {:.2}, signal: {})",
+            file_name, r.jurisdiction, r.confidence, r.signal
+        );
+        r.jurisdiction
+    });
+
     let chunks = chunk_document(&pages, settings);
 
     // Embed all chunks first without holding the state lock, then insert atomically.
@@ -467,6 +478,7 @@ async fn process_file(
         loaded_at: now,
         chunk_count: item_ids.len(),
         case_id: None,
+        detected_jurisdiction,
     };
 
     // Single lock acquisition: insert all chunks + registry entries + save.
@@ -498,12 +510,38 @@ pub async fn query(
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
     window: tauri::Window,
 ) -> Result<QueryResult, String> {
-    let (settings, model_dir, model_cache) = {
+    let (settings, model_dir, model_cache, resolved_jurisdiction) = {
         let s = state.lock().await;
+
+        // Resolve jurisdiction: case override > file consensus > global default > None
+        let jurisdiction = if let Some(ref cid) = case_id {
+            // Check case-level override first
+            let case_j = s.cases.iter()
+                .find(|c| c.id == *cid)
+                .and_then(|c| c.jurisdiction.clone());
+            if case_j.is_some() {
+                case_j
+            } else {
+                // Check if all files in the case agree on a detected jurisdiction
+                let file_jurisdictions: Vec<&Jurisdiction> = s.file_registry.values()
+                    .filter(|f| f.case_id.as_deref() == Some(cid.as_str()))
+                    .filter_map(|f| f.detected_jurisdiction.as_ref())
+                    .collect();
+                if !file_jurisdictions.is_empty() && file_jurisdictions.windows(2).all(|w| w[0] == w[1]) {
+                    Some(file_jurisdictions[0].clone())
+                } else {
+                    s.settings.jurisdiction.clone()
+                }
+            }
+        } else {
+            s.settings.jurisdiction.clone()
+        };
+
         (
             s.settings.clone(),
             s.model_dir.clone(),
             Arc::clone(&s.llama_model),
+            jurisdiction,
         )
     };
 
@@ -626,7 +664,8 @@ pub async fn query(
     // Assemble context with per-chunk budget so no chunk is cut mid-sentence.
     // Saul-7B has a 4096-token context. Budget: 4096 − 1024 (generation) − 250 (overhead) = 2822
     // tokens for context. Legal text tokenizes at ~2.5 chars/token → 2822 × 2.5 ≈ 7055 chars max.
-    const MAX_CONTEXT_CHARS: usize = 7_000;
+    // When jurisdiction is active, reduce budget to account for extra prompt tokens.
+    let max_context_chars: usize = if resolved_jurisdiction.is_some() { 6_600 } else { 7_000 };
     let separator = "\n\n---\n\n";
     let mut context = String::new();
 
@@ -634,7 +673,7 @@ pub async fn query(
     if let Some(ref cc) = case_context {
         if !cc.is_empty() {
             let prefix = format!("--- Related conversations in this case ---\n{cc}\n\n");
-            if prefix.len() <= MAX_CONTEXT_CHARS {
+            if prefix.len() <= max_context_chars {
                 context.push_str(&prefix);
             }
         }
@@ -643,7 +682,7 @@ pub async fn query(
     // Add primary context chunks (each stays complete)
     for part in &context_parts {
         let addition = if context.is_empty() { part.len() } else { part.len() + separator.len() };
-        if context.len() + addition > MAX_CONTEXT_CHARS {
+        if context.len() + addition > max_context_chars {
             log::warn!(
                 "Context budget exhausted at {} chars; skipping remaining chunks.",
                 context.len()
@@ -664,7 +703,7 @@ pub async fn query(
         let mut neighbor_buf = String::new();
         for part in &neighbor_context_parts {
             let addition = if neighbor_buf.is_empty() { part.len() } else { part.len() + separator.len() };
-            if context.len() + header_len + neighbor_buf.len() + addition > MAX_CONTEXT_CHARS {
+            if context.len() + header_len + neighbor_buf.len() + addition > max_context_chars {
                 break;
             }
             if !neighbor_buf.is_empty() {
@@ -697,6 +736,7 @@ pub async fn query(
         move |tok| {
             window_clone.emit("query-token", tok.as_str()).ok();
         },
+        resolved_jurisdiction.as_ref(),
     )
     .await?;
 
@@ -932,6 +972,22 @@ pub async fn assign_session_to_case(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn set_case_jurisdiction(
+    case_id: String,
+    jurisdiction: Option<Jurisdiction>,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<(), String> {
+    let mut s = state.lock().await;
+    if let Some(case) = s.cases.iter_mut().find(|c| c.id == case_id) {
+        case.jurisdiction = jurisdiction;
+        s.save_cases().await;
+        Ok(())
+    } else {
+        Err(format!("Case not found: {case_id}"))
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaseSummary {
@@ -986,6 +1042,7 @@ mod tests {
             chunk_overlap: 50,
             top_k: 6,
             theme: "dark".to_string(),
+            jurisdiction: None,
         }
     }
 

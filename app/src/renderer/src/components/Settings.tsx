@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { AppSettings, Theme } from '../../../../../shared/src/types'
+import { AppSettings, Jurisdiction, JurisdictionLevel, Theme } from '../../../../../shared/src/types'
 
 // ── Practice Area Presets ─────────────────────────────────────────────────────
 
@@ -20,6 +20,19 @@ const PRESETS: Preset[] = [
   { name: 'Real Estate / Property',chunkSize: 1200, chunkOverlap: 180, topK: 7 },
   { name: 'Employment / Labor',    chunkSize: 1000, chunkOverlap: 150, topK: 6 },
   { name: 'Regulatory / Compliance', chunkSize: 1400, chunkOverlap: 200, topK: 8 },
+]
+
+const US_STATES = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
+  'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho',
+  'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana',
+  'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota',
+  'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+  'New Hampshire', 'New Jersey', 'New Mexico', 'New York',
+  'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon',
+  'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+  'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington',
+  'West Virginia', 'Wisconsin', 'Wyoming',
 ]
 
 function findActivePreset(s: AppSettings): string | null {
@@ -419,6 +432,98 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
                 max={20}
                 step={1}
               />
+            </div>
+          </div>
+
+          {/* ── Jurisdiction ── */}
+          <div>
+            <SectionHeader>Jurisdiction</SectionHeader>
+            <p className="text-[11px] mb-3" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
+              Set a default jurisdiction so the AI applies the correct legal hierarchy. Leave on "Auto" to detect from documents.
+            </p>
+            <div className="flex flex-col gap-3">
+              <Field label="Level">
+                <select
+                  value={local.jurisdiction?.level ?? 'auto'}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === 'auto') {
+                      setLocal((prev) => ({ ...prev, jurisdiction: undefined }))
+                    } else {
+                      setLocal((prev) => ({
+                        ...prev,
+                        jurisdiction: {
+                          level: val as JurisdictionLevel,
+                          state: val === 'federal' ? undefined : prev.jurisdiction?.state,
+                          county: val === 'county' ? prev.jurisdiction?.county : undefined,
+                        },
+                      }))
+                    }
+                  }}
+                  className="w-full rounded-lg px-3 py-2 text-[12px] outline-none"
+                  style={{
+                    background: 'var(--surface-dark)',
+                    color: 'var(--text)',
+                    border: '1px solid rgb(var(--ov) / 0.08)',
+                  }}
+                >
+                  <option value="auto">Auto (from documents)</option>
+                  <option value="federal">Federal</option>
+                  <option value="state">State</option>
+                  <option value="county">County</option>
+                </select>
+              </Field>
+
+              {(local.jurisdiction?.level === 'state' || local.jurisdiction?.level === 'county') && (
+                <Field label="State">
+                  <select
+                    value={local.jurisdiction?.state ?? ''}
+                    onChange={(e) => {
+                      setLocal((prev) => ({
+                        ...prev,
+                        jurisdiction: prev.jurisdiction
+                          ? { ...prev.jurisdiction, state: e.target.value || undefined }
+                          : { level: 'state', state: e.target.value || undefined },
+                      }))
+                    }}
+                    className="w-full rounded-lg px-3 py-2 text-[12px] outline-none"
+                    style={{
+                      background: 'var(--surface-dark)',
+                      color: 'var(--text)',
+                      border: '1px solid rgb(var(--ov) / 0.08)',
+                    }}
+                  >
+                    <option value="">Select state...</option>
+                    {US_STATES.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              {local.jurisdiction?.level === 'county' && (
+                <Field label="County">
+                  <input
+                    type="text"
+                    value={local.jurisdiction?.county ?? ''}
+                    onChange={(e) => {
+                      setLocal((prev) => ({
+                        ...prev,
+                        jurisdiction: prev.jurisdiction
+                          ? { ...prev.jurisdiction, county: e.target.value || undefined }
+                          : { level: 'county', county: e.target.value || undefined },
+                      }))
+                    }}
+                    placeholder="e.g. Los Angeles County"
+                    className="w-full rounded-lg px-3 py-2 text-[12px] outline-none"
+                    style={{
+                      background: 'var(--surface-dark)',
+                      color: 'var(--text)',
+                      border: '1px solid rgb(var(--ov) / 0.08)',
+                    }}
+                  />
+                </Field>
+              )}
             </div>
           </div>
 

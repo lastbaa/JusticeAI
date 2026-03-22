@@ -4,8 +4,9 @@
 //! embedding, chunking, LLM inference, and retrieval helpers. Tauri command handlers
 //! remain in `commands/rag.rs` and call into this module.
 
-use crate::state::{AppSettings, ChunkMetadata, DocumentPage, RagState};
+use crate::state::{AppSettings, ChunkMetadata, DocumentPage, Jurisdiction, JurisdictionLevel, RagState};
 use llama_cpp_2::llama_backend::LlamaBackend;
+use regex::Regex;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use uuid::Uuid;
@@ -40,6 +41,303 @@ Format:\n\
 - Use ### headers only to separate distinct topics in longer answers.\n\
 - Keep paragraphs to 2-3 sentences.\n\
 - No pleasantries, preambles, or sign-offs.";
+
+// ── Jurisdiction Detection ────────────────────────────────────────────────────
+
+pub struct DetectionResult {
+    pub jurisdiction: Jurisdiction,
+    pub confidence: f32,
+    pub signal: String,
+}
+
+struct JurisdictionPattern {
+    regex: Regex,
+    level: JurisdictionLevel,
+    state: Option<&'static str>,
+    weight: f32,
+    signal: &'static str,
+}
+
+fn jurisdiction_patterns() -> &'static Vec<JurisdictionPattern> {
+    static PATTERNS: OnceLock<Vec<JurisdictionPattern>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        let mut patterns = Vec::new();
+
+        // Federal statute citations (weight 0.4)
+        patterns.push(JurisdictionPattern {
+            regex: Regex::new(r"\d+\s+U\.?S\.?C\.?\s*§").unwrap(),
+            level: JurisdictionLevel::Federal,
+            state: None, weight: 0.4, signal: "Federal statute citation (U.S.C.)",
+        });
+        patterns.push(JurisdictionPattern {
+            regex: Regex::new(r"\d+\s+C\.?F\.?R\.?\s*§").unwrap(),
+            level: JurisdictionLevel::Federal,
+            state: None, weight: 0.35, signal: "Federal regulation citation (C.F.R.)",
+        });
+
+        // Federal court names (weight 0.35)
+        patterns.push(JurisdictionPattern {
+            regex: Regex::new(r"(?i)U\.?S\.?\s+District\s+Court").unwrap(),
+            level: JurisdictionLevel::Federal,
+            state: None, weight: 0.35, signal: "U.S. District Court",
+        });
+        patterns.push(JurisdictionPattern {
+            regex: Regex::new(r"(?i)United\s+States\s+Bankruptcy\s+Court").unwrap(),
+            level: JurisdictionLevel::Federal,
+            state: None, weight: 0.35, signal: "U.S. Bankruptcy Court",
+        });
+        patterns.push(JurisdictionPattern {
+            regex: Regex::new(r"(?i)Supreme\s+Court\s+of\s+the\s+United\s+States").unwrap(),
+            level: JurisdictionLevel::Federal,
+            state: None, weight: 0.4, signal: "Supreme Court of the United States",
+        });
+
+        // Federal agencies (weight 0.1)
+        patterns.push(JurisdictionPattern {
+            regex: Regex::new(r"(?i)\b(EEOC|SEC|FTC|EPA|NLRB|OSHA|IRS|DOJ|FBI|ATF|DEA|HHS|HUD|DOL|CFPB)\b").unwrap(),
+            level: JurisdictionLevel::Federal,
+            state: None, weight: 0.1, signal: "Federal agency reference",
+        });
+
+        // State statute citations (weight 0.4)
+        let state_statutes: Vec<(&str, &str, &str)> = vec![
+            ("Alabama", r"(?i)Ala\.\s+Code\s*§", "Alabama Code citation"),
+            ("Alaska", r"(?i)Alaska\s+Stat\.\s*§", "Alaska Statute citation"),
+            ("Arizona", r"(?i)Ariz\.\s+Rev\.\s+Stat\.\s*§", "Arizona Revised Statute citation"),
+            ("Arkansas", r"(?i)Ark\.\s+Code\s+Ann\.\s*§", "Arkansas Code citation"),
+            ("California", r"(?i)Cal\.\s+\w+\.?\s+Code\s*§", "California Code citation"),
+            ("Colorado", r"(?i)Colo\.\s+Rev\.\s+Stat\.\s*§", "Colorado Revised Statute citation"),
+            ("Connecticut", r"(?i)Conn\.\s+Gen\.\s+Stat\.\s*§", "Connecticut General Statute citation"),
+            ("Delaware", r"(?i)Del\.\s+Code\s+(Ann\.\s+)?tit\.", "Delaware Code citation"),
+            ("Florida", r"(?i)Fla\.\s+Stat\.\s*§", "Florida Statute citation"),
+            ("Georgia", r"(?i)Ga\.\s+Code\s+Ann\.\s*§", "Georgia Code citation"),
+            ("Hawaii", r"(?i)Haw\.\s+Rev\.\s+Stat\.\s*§", "Hawaii Revised Statute citation"),
+            ("Idaho", r"(?i)Idaho\s+Code\s*§", "Idaho Code citation"),
+            ("Illinois", r"(?i)\d+\s+ILCS\s+\d+", "Illinois Compiled Statute citation"),
+            ("Indiana", r"(?i)Ind\.\s+Code\s*§", "Indiana Code citation"),
+            ("Iowa", r"(?i)Iowa\s+Code\s*§", "Iowa Code citation"),
+            ("Kansas", r"(?i)Kan\.\s+Stat\.\s+Ann\.\s*§", "Kansas Statute citation"),
+            ("Kentucky", r"(?i)Ky\.\s+Rev\.\s+Stat\.\s+Ann\.\s*§", "Kentucky Revised Statute citation"),
+            ("Louisiana", r"(?i)La\.\s+(Rev\.\s+Stat\.|Civ\.\s+Code)\s*(Ann\.\s*)?§?", "Louisiana statute citation"),
+            ("Maine", r"(?i)Me\.\s+Rev\.\s+Stat\.\s+(Ann\.\s+)?tit\.", "Maine Revised Statute citation"),
+            ("Maryland", r"(?i)Md\.\s+Code\s+Ann\.", "Maryland Code citation"),
+            ("Massachusetts", r"(?i)Mass\.\s+Gen\.\s+Laws\s+ch\.", "Massachusetts General Laws citation"),
+            ("Michigan", r"(?i)Mich\.\s+Comp\.\s+Laws\s*§", "Michigan Compiled Laws citation"),
+            ("Minnesota", r"(?i)Minn\.\s+Stat\.\s*§", "Minnesota Statute citation"),
+            ("Mississippi", r"(?i)Miss\.\s+Code\s+Ann\.\s*§", "Mississippi Code citation"),
+            ("Missouri", r"(?i)Mo\.\s+(Ann\.\s+)?Stat\.\s*§", "Missouri Statute citation"),
+            ("Montana", r"(?i)Mont\.\s+Code\s+Ann\.\s*§", "Montana Code citation"),
+            ("Nebraska", r"(?i)Neb\.\s+Rev\.\s+Stat\.\s*§", "Nebraska Revised Statute citation"),
+            ("Nevada", r"(?i)Nev\.\s+Rev\.\s+Stat\.\s*§", "Nevada Revised Statute citation"),
+            ("New Hampshire", r"(?i)N\.H\.\s+Rev\.\s+Stat\.\s+Ann\.\s*§", "New Hampshire Revised Statute citation"),
+            ("New Jersey", r"(?i)N\.J\.\s+Stat\.\s+Ann\.\s*§", "New Jersey Statute citation"),
+            ("New Mexico", r"(?i)N\.M\.\s+Stat\.\s+Ann\.\s*§", "New Mexico Statute citation"),
+            ("New York", r"(?i)N\.Y\.\s+[\w.]+(\s+[\w.&]+)*\s+Law\s*§", "New York Law citation"),
+            ("North Carolina", r"(?i)N\.C\.\s+Gen\.\s+Stat\.\s*§", "North Carolina General Statute citation"),
+            ("North Dakota", r"(?i)N\.D\.\s+Cent\.\s+Code\s*§", "North Dakota Century Code citation"),
+            ("Ohio", r"(?i)Ohio\s+Rev\.\s+Code\s+(Ann\.\s*)?§", "Ohio Revised Code citation"),
+            ("Oklahoma", r"(?i)Okla\.\s+Stat\.\s+tit\.", "Oklahoma Statute citation"),
+            ("Oregon", r"(?i)Or\.\s+Rev\.\s+Stat\.\s*§", "Oregon Revised Statute citation"),
+            ("Pennsylvania", r"(?i)\d+\s+Pa\.\s+Cons\.\s+Stat\.\s*§", "Pennsylvania Consolidated Statute citation"),
+            ("Rhode Island", r"(?i)R\.I\.\s+Gen\.\s+Laws\s*§", "Rhode Island General Laws citation"),
+            ("South Carolina", r"(?i)S\.C\.\s+Code\s+Ann\.\s*§", "South Carolina Code citation"),
+            ("South Dakota", r"(?i)S\.D\.\s+Codified\s+Laws\s*§", "South Dakota Codified Laws citation"),
+            ("Tennessee", r"(?i)Tenn\.\s+Code\s+Ann\.\s*§", "Tennessee Code citation"),
+            ("Texas", r"(?i)Tex\.\s+\w+\.?\s+(&\s+\w+\.\s+)?Code\s*(Ann\.\s*)?§", "Texas Code citation"),
+            ("Utah", r"(?i)Utah\s+Code\s+Ann\.\s*§", "Utah Code citation"),
+            ("Vermont", r"(?i)Vt\.\s+Stat\.\s+Ann\.\s+tit\.", "Vermont Statute citation"),
+            ("Virginia", r"(?i)Va\.\s+Code\s+Ann\.\s*§", "Virginia Code citation"),
+            ("Washington", r"(?i)Wash\.\s+Rev\.\s+Code\s*§", "Washington Revised Code citation"),
+            ("West Virginia", r"(?i)W\.\s*Va\.\s+Code\s*§", "West Virginia Code citation"),
+            ("Wisconsin", r"(?i)Wis\.\s+Stat\.\s*§", "Wisconsin Statute citation"),
+            ("Wyoming", r"(?i)Wyo\.\s+Stat\.\s+Ann\.\s*§", "Wyoming Statute citation"),
+        ];
+        for (state, re, signal) in state_statutes {
+            if let Ok(regex) = Regex::new(re) {
+                patterns.push(JurisdictionPattern {
+                    regex, level: JurisdictionLevel::State,
+                    state: Some(state), weight: 0.4, signal,
+                });
+            }
+        }
+
+        // State court names (weight 0.35)
+        let state_courts: Vec<(&str, &str, &str)> = vec![
+            ("California", r"(?i)Superior\s+Court\s+of\s+(the\s+State\s+of\s+)?California", "California Superior Court"),
+            ("California", r"(?i)Court\s+of\s+Appeal.*California", "California Court of Appeal"),
+            ("New York", r"(?i)Supreme\s+Court\s+of\s+the\s+State\s+of\s+New\s+York", "New York Supreme Court"),
+            ("New York", r"(?i)New\s+York\s+Supreme\s+Court", "New York Supreme Court"),
+            ("Texas", r"(?i)District\s+Court\s+of\s+.*Texas", "Texas District Court"),
+            ("Texas", r"(?i)Texas\s+Court\s+of\s+(Criminal\s+)?Appeals", "Texas Court of Appeals"),
+            ("Florida", r"(?i)Circuit\s+Court.*Florida", "Florida Circuit Court"),
+            ("Illinois", r"(?i)Circuit\s+Court\s+of\s+.*Illinois", "Illinois Circuit Court"),
+            ("Pennsylvania", r"(?i)Court\s+of\s+Common\s+Pleas.*Pennsylvania", "Pennsylvania Court of Common Pleas"),
+            ("Ohio", r"(?i)Court\s+of\s+Common\s+Pleas.*Ohio", "Ohio Court of Common Pleas"),
+            ("Georgia", r"(?i)Superior\s+Court\s+of\s+.*Georgia", "Georgia Superior Court"),
+            ("Michigan", r"(?i)Circuit\s+Court.*Michigan", "Michigan Circuit Court"),
+            ("New Jersey", r"(?i)Superior\s+Court\s+of\s+New\s+Jersey", "New Jersey Superior Court"),
+            ("Virginia", r"(?i)Circuit\s+Court\s+of\s+.*Virginia", "Virginia Circuit Court"),
+            ("Massachusetts", r"(?i)(Superior|District)\s+Court.*Massachusetts", "Massachusetts Court"),
+            ("Washington", r"(?i)Superior\s+Court\s+of\s+.*Washington", "Washington Superior Court"),
+            ("Colorado", r"(?i)District\s+Court.*Colorado", "Colorado District Court"),
+            ("Arizona", r"(?i)Superior\s+Court\s+of\s+.*Arizona", "Arizona Superior Court"),
+            ("Maryland", r"(?i)Circuit\s+Court\s+.*Maryland", "Maryland Circuit Court"),
+            ("North Carolina", r"(?i)Superior\s+Court\s+of\s+.*North\s+Carolina", "North Carolina Superior Court"),
+        ];
+        for (state, re, signal) in state_courts {
+            if let Ok(regex) = Regex::new(re) {
+                patterns.push(JurisdictionPattern {
+                    regex, level: JurisdictionLevel::State,
+                    state: Some(state), weight: 0.35, signal,
+                });
+            }
+        }
+
+        // State in headers (weight 0.15) — matches "State of [X]" in first part of text
+        let states_list = [
+            "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+            "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+            "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
+            "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+            "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
+            "New Hampshire", "New Jersey", "New Mexico", "New York",
+            "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
+            "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
+            "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
+            "West Virginia", "Wisconsin", "Wyoming",
+        ];
+        for state_name in &states_list {
+            let re = format!(r"(?i)State\s+of\s+{}", regex::escape(state_name));
+            if let Ok(regex) = Regex::new(&re) {
+                patterns.push(JurisdictionPattern {
+                    regex, level: JurisdictionLevel::State,
+                    state: Some(state_name), weight: 0.15,
+                    signal: "State name in document header",
+                });
+            }
+        }
+
+        patterns
+    })
+}
+
+/// County extraction regex — matches "[Name] County" patterns.
+fn county_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+County").unwrap())
+}
+
+/// Detect jurisdiction from document text. Scans for legal citations, court names,
+/// and state references. Returns the highest-confidence match or None.
+pub fn detect_jurisdiction(text: &str) -> Option<DetectionResult> {
+    // Only scan the first 10,000 chars for performance
+    let scan_text = if text.len() > 10_000 { &text[..10_000] } else { text };
+
+    let patterns = jurisdiction_patterns();
+
+    // Score each match
+    let mut best: Option<DetectionResult> = None;
+
+    for pat in patterns.iter() {
+        if pat.regex.is_match(scan_text) {
+            let confidence = pat.weight;
+            if confidence >= 0.3 || best.is_none() {
+                let is_better = match &best {
+                    Some(b) => confidence > b.confidence,
+                    None => true,
+                };
+                if is_better {
+                    // Try to extract county if state-level
+                    let county = if pat.level == JurisdictionLevel::State {
+                        county_regex()
+                            .captures(scan_text)
+                            .map(|c| format!("{} County", &c[1]))
+                    } else {
+                        None
+                    };
+
+                    let level = if county.is_some() {
+                        JurisdictionLevel::County
+                    } else {
+                        pat.level.clone()
+                    };
+
+                    best = Some(DetectionResult {
+                        jurisdiction: Jurisdiction {
+                            level,
+                            state: pat.state.map(String::from),
+                            county,
+                        },
+                        confidence,
+                        signal: pat.signal.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Only return if confidence threshold met
+    best.filter(|r| r.confidence >= 0.3)
+}
+
+/// Generate a prompt fragment with jurisdiction-specific rules for the LLM.
+pub fn jurisdiction_prompt_fragment(j: &Jurisdiction) -> String {
+    match j.level {
+        JurisdictionLevel::Federal => {
+            "Jurisdiction: Federal law applies.\n\
+             - Federal courts apply federal procedural law. In diversity cases, apply state substantive law (Erie doctrine).\n\
+             - Cite federal statutes as [Title] U.S.C. § [Section] and regulations as [Title] C.F.R. § [Section].\n\
+             - If documents reference both federal and state law, explain which applies and why.".to_string()
+        }
+        JurisdictionLevel::State => {
+            let state_name = j.state.as_deref().unwrap_or("the relevant state");
+            let state_specific = match state_name {
+                "California" => "\n- California can be MORE restrictive than federal in: minimum wage, environmental rules, consumer protection, data privacy (CCPA/CPRA), tenant rights.\n\
+                                 - Cite California statutes as Cal. [Code Name] Code § [Section].",
+                "New York" => "\n- New York can be MORE restrictive than federal in: consumer protection, employment law, rent stabilization, financial regulation.\n\
+                               - Cite New York statutes as N.Y. [Law Name] Law § [Section].",
+                "Texas" => "\n- Texas follows federal minimum standards in most areas. Notable exceptions: strong property rights, community property rules, specific oil & gas law.\n\
+                            - Cite Texas statutes as Tex. [Code Name] Code § [Section].",
+                "Florida" => "\n- Florida has no state income tax. Notably stronger homestead protections than most states.\n\
+                              - Cite Florida statutes as Fla. Stat. § [Section].",
+                "Illinois" => "\n- Illinois can be MORE restrictive than federal in: biometric privacy (BIPA), consumer fraud, employment law.\n\
+                               - Cite Illinois statutes as [Chapter] ILCS [Act]/[Section].",
+                "Pennsylvania" => "\n- Cite Pennsylvania statutes as [Title] Pa. Cons. Stat. § [Section].",
+                "Ohio" => "\n- Cite Ohio statutes as Ohio Rev. Code § [Section].",
+                "Georgia" => "\n- Cite Georgia statutes as Ga. Code Ann. § [Section].",
+                "New Jersey" => "\n- New Jersey has strong consumer protection and employment laws (LAD, CEPA).\n\
+                                 - Cite New Jersey statutes as N.J. Stat. Ann. § [Section].",
+                "Virginia" => "\n- Cite Virginia statutes as Va. Code Ann. § [Section].",
+                "Massachusetts" => "\n- Massachusetts can be MORE restrictive in: employment law, consumer protection (Chapter 93A), healthcare.\n\
+                                    - Cite Massachusetts statutes as Mass. Gen. Laws ch. [Chapter], § [Section].",
+                "Washington" => "\n- Washington has no state income tax. Strong employee protections and consumer privacy laws.\n\
+                                 - Cite Washington statutes as Wash. Rev. Code § [Section].",
+                "Colorado" => "\n- Cite Colorado statutes as Colo. Rev. Stat. § [Section].",
+                "Michigan" => "\n- Cite Michigan statutes as Mich. Comp. Laws § [Section].",
+                "Arizona" => "\n- Cite Arizona statutes as Ariz. Rev. Stat. § [Section].",
+                "Maryland" => "\n- Cite Maryland statutes as Md. Code Ann., [Article] § [Section].",
+                "North Carolina" => "\n- Cite North Carolina statutes as N.C. Gen. Stat. § [Section].",
+                _ => "",
+            };
+            format!(
+                "Jurisdiction: {state_name} state law applies.\n\
+                 - Federal law overrides conflicting {state_name} law (Supremacy Clause).\n\
+                 - {state_name} can add requirements beyond federal minimums unless federally preempted.\n\
+                 - If both federal and {state_name} law apply, state which governs and why.{state_specific}"
+            )
+        }
+        JurisdictionLevel::County => {
+            let county = j.county.as_deref().unwrap_or("the local county");
+            let state_name = j.state.as_deref().unwrap_or("the state");
+            format!(
+                "Jurisdiction: {county}, {state_name} local law applies.\n\
+                 - Federal law > state law > county ordinances in case of conflict.\n\
+                 - {county} can add requirements beyond {state_name} state minimums unless the state has expressly preempted the area.\n\
+                 - Cite local ordinances by name and number when available."
+            )
+        }
+    }
+}
 
 // ── Singletons ─────────────────────────────────────────────────────────────────
 
@@ -155,6 +453,7 @@ pub async fn ask_saul(
     model_dir: &Path,
     model_cache: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>>,
     on_token: impl Fn(String) + Send + 'static,
+    jurisdiction: Option<&Jurisdiction>,
 ) -> Result<String, String> {
     use llama_cpp_2::{
         context::params::LlamaContextParams,
@@ -197,8 +496,16 @@ Answer the current question using ONLY these excerpts.\n\n\
         )
     };
 
+    // Inject jurisdiction-specific rules into the system prompt when available.
+    let j_fragment = jurisdiction.map(jurisdiction_prompt_fragment).unwrap_or_default();
+    let sys_prompt = if j_fragment.is_empty() {
+        RULES_PROMPT.to_string()
+    } else {
+        format!("{RULES_PROMPT}\n\n{j_fragment}")
+    };
+
     // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
-    let prompt = format!("[INST] <<SYS>>\n{RULES_PROMPT}\n<</SYS>>\n\n{user_content} [/INST]");
+    let prompt = format!("[INST] <<SYS>>\n{sys_prompt}\n<</SYS>>\n\n{user_content} [/INST]");
 
     tokio::task::spawn_blocking(move || {
         // Get (or lazily initialize) the global llama.cpp backend.
@@ -1340,6 +1647,7 @@ mod tests {
             chunk_overlap: 50,
             top_k: 6,
             theme: "dark".to_string(),
+            jurisdiction: None,
         }
     }
 
@@ -1651,5 +1959,664 @@ mod tests {
         assert!(!result.contains("user3"), "Turn 3 should be excluded");
         assert!(result.contains("user4"), "Turn 4 should be included");
         assert!(result.contains("user7"), "Turn 7 should be included");
+    }
+
+    // ── Jurisdiction Detection ────────────────────────────────────────────
+
+    #[test]
+    fn detect_federal_usc_citation() {
+        let text = "Pursuant to 42 U.S.C. § 1983, the plaintiff alleges deprivation of civil rights.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect federal jurisdiction from U.S.C. citation");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.level, JurisdictionLevel::Federal);
+        assert!(r.confidence >= 0.3);
+    }
+
+    #[test]
+    fn detect_federal_cfr_citation() {
+        let text = "The regulation at 29 C.F.R. § 1910.134 requires employers to provide respiratory protection.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect federal jurisdiction from C.F.R. citation");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.level, JurisdictionLevel::Federal);
+    }
+
+    #[test]
+    fn detect_federal_district_court() {
+        let text = "IN THE U.S. DISTRICT COURT FOR THE NORTHERN DISTRICT OF CALIFORNIA\nCase No. 3:24-cv-01234";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect federal jurisdiction from U.S. District Court");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.level, JurisdictionLevel::Federal);
+    }
+
+    #[test]
+    fn detect_california_statute() {
+        let text = "Under Cal. Civ. Code § 1942.5, a landlord may not retaliate against a tenant.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect California jurisdiction from statute citation");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("California"));
+    }
+
+    #[test]
+    fn detect_new_york_statute() {
+        let text = "N.Y. Gen. Bus. Law § 349 prohibits deceptive business practices.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect New York jurisdiction from statute citation");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("New York"));
+    }
+
+    #[test]
+    fn detect_texas_statute() {
+        let text = "Tex. Bus. & Com. Code § 17.46 defines deceptive trade practices.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect Texas jurisdiction from statute citation");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Texas"));
+    }
+
+    #[test]
+    fn detect_florida_statute() {
+        let text = "Fla. Stat. § 768.81 governs the allocation of damages in negligence cases.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect Florida jurisdiction from statute citation");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Florida"));
+    }
+
+    #[test]
+    fn detect_illinois_statute() {
+        let text = "Violations of 815 ILCS 505 may result in civil penalties under the Consumer Fraud Act.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect Illinois jurisdiction from ILCS citation");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Illinois"));
+    }
+
+    #[test]
+    fn detect_pennsylvania_statute() {
+        let text = "18 Pa. Cons. Stat. § 3921 defines theft by unlawful taking.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect Pennsylvania jurisdiction");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Pennsylvania"));
+    }
+
+    #[test]
+    fn detect_georgia_code() {
+        let text = "Ga. Code Ann. § 51-12-5.1 governs punitive damages in Georgia.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect Georgia jurisdiction");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Georgia"));
+    }
+
+    #[test]
+    fn detect_ohio_code() {
+        let text = "Ohio Rev. Code § 2307.71 defines products liability.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect Ohio jurisdiction");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Ohio"));
+    }
+
+    #[test]
+    fn detect_california_superior_court() {
+        let text = "FILED IN THE SUPERIOR COURT OF CALIFORNIA\nCOUNTY OF LOS ANGELES\nCase No. BC-123456";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect California jurisdiction from court name");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("California"));
+    }
+
+    #[test]
+    fn detect_new_york_supreme_court() {
+        let text = "SUPREME COURT OF THE STATE OF NEW YORK\nCOUNTY OF KINGS\nIndex No. 500001/2024";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect New York jurisdiction from court name");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("New York"));
+    }
+
+    #[test]
+    fn detect_state_of_header() {
+        // "State of" header alone has weight 0.15 (below 0.3 threshold).
+        // Combine with a statute citation to pass threshold.
+        let text = "STATE OF MICHIGAN\nIN THE CIRCUIT COURT FOR THE COUNTY OF WAYNE\nMich. Comp. Laws § 600.2911";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should detect Michigan from statute + header");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Michigan"));
+    }
+
+    #[test]
+    fn detect_county_extraction() {
+        let text = "FILED IN THE SUPERIOR COURT OF CALIFORNIA\nCOUNTY OF LOS ANGELES\nCase No. BC-123456\nPursuant to Cal. Civ. Code § 1942.5";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        let r = result.unwrap();
+        // Should detect county because both state statute and county name present
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("California"));
+        assert!(r.jurisdiction.county.is_some(), "Should extract county name");
+    }
+
+    #[test]
+    fn detect_no_jurisdiction_in_generic_text() {
+        let text = "This is a general document about business operations. \
+                     The company provides consulting services to clients in various locations.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_none(), "Should not detect jurisdiction from generic text");
+    }
+
+    #[test]
+    fn detect_no_jurisdiction_in_non_legal_text() {
+        let text = "Today's weather forecast calls for sunny skies. \
+                     The temperature will reach 75 degrees Fahrenheit by mid-afternoon.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_none(), "Should not detect jurisdiction from non-legal text");
+    }
+
+    #[test]
+    fn detect_federal_over_agency_alone() {
+        // Federal agency alone has low weight (0.1), should NOT pass threshold
+        let text = "The EEOC investigates claims of workplace discrimination.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_none(), "Agency alone (weight 0.1) should not pass 0.3 threshold");
+    }
+
+    #[test]
+    fn detect_federal_agency_with_statute() {
+        // Federal agency + U.S.C. citation should detect federal
+        let text = "The EEOC enforces Title VII under 42 U.S.C. § 2000e.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.level, JurisdictionLevel::Federal);
+    }
+
+    #[test]
+    fn detect_prefers_higher_weight_statute_over_header() {
+        // Both a state header (0.15) and a statute (0.4) — statute should win
+        let text = "State of California\n\nPursuant to Cal. Civ. Code § 1942.5, the tenant has rights.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("California"));
+        assert!(r.confidence >= 0.4, "Statute weight should be the winning confidence");
+    }
+
+    #[test]
+    fn detect_colorado_statute() {
+        let text = "Colo. Rev. Stat. § 38-12-104 governs security deposit returns.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Colorado"));
+    }
+
+    #[test]
+    fn detect_new_jersey_statute() {
+        let text = "N.J. Stat. Ann. § 2A:15-97 addresses comparative negligence.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("New Jersey"));
+    }
+
+    #[test]
+    fn detect_virginia_code() {
+        let text = "Va. Code Ann. § 8.01-581.15 covers medical malpractice claims.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Virginia"));
+    }
+
+    #[test]
+    fn detect_washington_code() {
+        let text = "Wash. Rev. Code § 59.18.230 requires landlords to return deposits.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Washington"));
+    }
+
+    #[test]
+    fn detect_massachusetts_statute() {
+        let text = "Under Mass. Gen. Laws ch. 93A, the consumer protection act applies.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Massachusetts"));
+    }
+
+    #[test]
+    fn detect_michigan_compiled_laws() {
+        let text = "Mich. Comp. Laws § 600.2911 allows recovery for defamation.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Michigan"));
+    }
+
+    #[test]
+    fn detect_minnesota_statute() {
+        let text = "Minn. Stat. § 504B.178 governs tenant rights to withhold rent.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Minnesota"));
+    }
+
+    #[test]
+    fn detect_oregon_statute() {
+        let text = "Or. Rev. Stat. § 90.100 defines terms for residential landlord-tenant law.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Oregon"));
+    }
+
+    #[test]
+    fn detect_maryland_code() {
+        let text = "Md. Code Ann., Real Property § 8-203 covers security deposits.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Maryland"));
+    }
+
+    #[test]
+    fn detect_north_carolina_statute() {
+        let text = "N.C. Gen. Stat. § 42-25.9 regulates security deposit handling.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("North Carolina"));
+    }
+
+    #[test]
+    fn detect_wisconsin_statute() {
+        let text = "Wis. Stat. § 704.28 addresses tenant deposit refunds.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Wisconsin"));
+    }
+
+    #[test]
+    fn detect_arizona_statute() {
+        let text = "Ariz. Rev. Stat. § 33-1321 sets rules for residential leases.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Arizona"));
+    }
+
+    #[test]
+    fn detect_indiana_code() {
+        let text = "Ind. Code § 32-31-3-12 requires return of security deposits within 45 days.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Indiana"));
+    }
+
+    #[test]
+    fn detect_tennessee_code() {
+        let text = "Tenn. Code Ann. § 66-28-301 governs landlord obligations.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.state.as_deref(), Some("Tennessee"));
+    }
+
+    #[test]
+    fn detect_us_supreme_court() {
+        let text = "The Supreme Court of the United States held in Brown v. Board of Education.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.level, JurisdictionLevel::Federal);
+    }
+
+    #[test]
+    fn detect_bankruptcy_court() {
+        let text = "UNITED STATES BANKRUPTCY COURT\nSOUTHERN DISTRICT OF NEW YORK\nIn re: Debtor Corp.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().jurisdiction.level, JurisdictionLevel::Federal);
+    }
+
+    // ── Jurisdiction Prompt Fragment ──────────────────────────────────────
+
+    #[test]
+    fn prompt_fragment_federal() {
+        let j = Jurisdiction { level: JurisdictionLevel::Federal, state: None, county: None };
+        let frag = jurisdiction_prompt_fragment(&j);
+        assert!(frag.contains("Federal law applies"), "Federal fragment should declare federal law");
+        assert!(frag.contains("Erie doctrine"), "Federal fragment should mention Erie");
+        assert!(frag.contains("U.S.C."), "Federal fragment should mention U.S.C. citation format");
+        assert!(frag.contains("C.F.R."), "Federal fragment should mention C.F.R. citation format");
+    }
+
+    #[test]
+    fn prompt_fragment_california() {
+        let j = Jurisdiction {
+            level: JurisdictionLevel::State,
+            state: Some("California".to_string()),
+            county: None,
+        };
+        let frag = jurisdiction_prompt_fragment(&j);
+        assert!(frag.contains("California state law applies"), "Should declare California");
+        assert!(frag.contains("Supremacy Clause"), "Should mention Supremacy Clause");
+        assert!(frag.contains("CCPA"), "California fragment should mention CCPA");
+        assert!(frag.contains("Cal."), "Should include California citation format");
+    }
+
+    #[test]
+    fn prompt_fragment_new_york() {
+        let j = Jurisdiction {
+            level: JurisdictionLevel::State,
+            state: Some("New York".to_string()),
+            county: None,
+        };
+        let frag = jurisdiction_prompt_fragment(&j);
+        assert!(frag.contains("New York state law applies"));
+        assert!(frag.contains("N.Y."), "Should include NY citation format");
+        assert!(frag.contains("rent stabilization"), "Should mention NY-specific areas");
+    }
+
+    #[test]
+    fn prompt_fragment_texas() {
+        let j = Jurisdiction {
+            level: JurisdictionLevel::State,
+            state: Some("Texas".to_string()),
+            county: None,
+        };
+        let frag = jurisdiction_prompt_fragment(&j);
+        assert!(frag.contains("Texas state law applies"));
+        assert!(frag.contains("Tex."), "Should include Texas citation format");
+        assert!(frag.contains("community property"), "Should mention TX-specific areas");
+    }
+
+    #[test]
+    fn prompt_fragment_illinois() {
+        let j = Jurisdiction {
+            level: JurisdictionLevel::State,
+            state: Some("Illinois".to_string()),
+            county: None,
+        };
+        let frag = jurisdiction_prompt_fragment(&j);
+        assert!(frag.contains("Illinois state law applies"));
+        assert!(frag.contains("BIPA"), "Should mention IL biometric privacy");
+        assert!(frag.contains("ILCS"), "Should include Illinois citation format");
+    }
+
+    #[test]
+    fn prompt_fragment_generic_state() {
+        let j = Jurisdiction {
+            level: JurisdictionLevel::State,
+            state: Some("Wyoming".to_string()),
+            county: None,
+        };
+        let frag = jurisdiction_prompt_fragment(&j);
+        assert!(frag.contains("Wyoming state law applies"));
+        assert!(frag.contains("Supremacy Clause"));
+        // No Wyoming-specific notes, so fragment should still have the generic rules
+        assert!(frag.contains("which governs and why"));
+    }
+
+    #[test]
+    fn prompt_fragment_county() {
+        let j = Jurisdiction {
+            level: JurisdictionLevel::County,
+            state: Some("California".to_string()),
+            county: Some("Los Angeles County".to_string()),
+        };
+        let frag = jurisdiction_prompt_fragment(&j);
+        assert!(frag.contains("Los Angeles County, California"));
+        assert!(frag.contains("Federal law > state law > county ordinances"));
+        assert!(frag.contains("preempted"));
+    }
+
+    #[test]
+    fn prompt_fragment_county_no_details() {
+        let j = Jurisdiction {
+            level: JurisdictionLevel::County,
+            state: None,
+            county: None,
+        };
+        let frag = jurisdiction_prompt_fragment(&j);
+        assert!(frag.contains("the local county"));
+        assert!(frag.contains("the state"));
+    }
+
+    // ── A/B: Detection correctness on realistic document excerpts ─────────
+
+    #[test]
+    fn ab_california_lease_excerpt() {
+        let text = r#"RESIDENTIAL LEASE AGREEMENT
+
+This Lease Agreement is entered into as of January 15, 2024, by and between
+John Smith ("Landlord") and Jane Doe ("Tenant").
+
+PROPERTY: 123 Main Street, Apt 4B, Los Angeles, CA 90001
+
+GOVERNING LAW: This agreement shall be governed by Cal. Civ. Code § 1940 et seq.
+and the laws of the State of California.
+
+SECURITY DEPOSIT: Pursuant to Cal. Civ. Code § 1950.5, the security deposit
+shall not exceed two months' rent for an unfurnished unit."#;
+
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "California lease should be detected");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("California"));
+        assert!(r.confidence >= 0.4, "Statute citation should give high confidence");
+    }
+
+    #[test]
+    fn ab_federal_complaint_excerpt() {
+        let text = r#"IN THE UNITED STATES DISTRICT COURT
+FOR THE SOUTHERN DISTRICT OF NEW YORK
+
+Civil Action No. 1:24-cv-00567
+
+COMPLAINT
+
+Plaintiff brings this action pursuant to 42 U.S.C. § 1983 and 28 U.S.C. § 1331
+for deprivation of rights under color of state law.
+
+JURISDICTION AND VENUE
+This Court has subject matter jurisdiction under 28 U.S.C. § 1331."#;
+
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Federal complaint should be detected");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.level, JurisdictionLevel::Federal);
+        assert!(r.confidence >= 0.35);
+    }
+
+    #[test]
+    fn ab_new_york_contract_excerpt() {
+        let text = r#"EMPLOYMENT AGREEMENT
+
+This Agreement is governed by and construed in accordance with the laws of
+the State of New York, without regard to conflict of law principles.
+
+The parties agree to submit to the exclusive jurisdiction of the
+Supreme Court of the State of New York, County of New York.
+
+N.Y. Lab. Law § 198-c requires timely payment of wages."#;
+
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "NY contract should be detected");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("New York"));
+    }
+
+    #[test]
+    fn ab_texas_oil_gas_lease_excerpt() {
+        let text = r#"OIL AND GAS LEASE
+
+This Lease is made and entered into in the State of Texas.
+
+LESSEE shall comply with all applicable provisions of Tex. Nat. Res. Code § 91.
+Disputes shall be resolved in the District Court of Harris County, Texas."#;
+
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Texas lease should be detected");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Texas"));
+    }
+
+    #[test]
+    fn ab_georgia_statement_of_claim() {
+        let text = r#"IN THE SUPERIOR COURT OF FULTON COUNTY
+STATE OF GEORGIA
+
+CIVIL ACTION FILE NO. 2024-CV-12345
+
+COMPLAINT
+
+Plaintiff files this Complaint pursuant to Ga. Code Ann. § 9-11-8."#;
+
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Georgia statement should be detected");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Georgia"));
+    }
+
+    #[test]
+    fn ab_nda_no_jurisdiction() {
+        let text = r#"MUTUAL NON-DISCLOSURE AGREEMENT
+
+This Agreement is made between Company A and Company B.
+Both parties agree to keep all shared information confidential.
+Neither party shall disclose any proprietary information to third parties.
+This agreement shall remain in effect for a period of two years."#;
+
+        let result = detect_jurisdiction(text);
+        assert!(result.is_none(), "Generic NDA with no legal citations should return None");
+    }
+
+    #[test]
+    fn ab_irs_w9_form() {
+        let text = r#"Form W-9 (Rev. October 2018)
+Department of the Treasury
+Internal Revenue Service
+
+Request for Taxpayer Identification Number and Certification
+
+Name: John Smith
+Business name: Smith Consulting LLC
+Federal tax classification: Limited liability company
+Address: 456 Oak Ave, Suite 200, Denver, CO 80202"#;
+
+        let result = detect_jurisdiction(text);
+        // IRS is a federal agency (weight 0.1) — should NOT pass threshold alone
+        assert!(result.is_none(), "IRS form alone (no statute) should not pass 0.3 threshold");
+    }
+
+    #[test]
+    fn ab_florida_personal_injury() {
+        let text = r#"IN THE CIRCUIT COURT OF THE ELEVENTH JUDICIAL CIRCUIT
+IN AND FOR MIAMI-DADE COUNTY, FLORIDA
+
+CASE NO. 2024-CA-001234
+
+COMPLAINT FOR DAMAGES
+
+Plaintiff brings this action under Fla. Stat. § 768.81 for comparative negligence."#;
+
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Florida PI complaint should be detected");
+        let r = result.unwrap();
+        assert_eq!(r.jurisdiction.state.as_deref(), Some("Florida"));
+    }
+
+    #[test]
+    fn ab_mixed_federal_and_state_prefers_stronger_signal() {
+        // Federal USC citation (0.4) should beat a State-of header (0.15)
+        let text = r#"State of California
+Department of Insurance
+
+Pursuant to 15 U.S.C. § 1011 (McCarran-Ferguson Act), the federal government
+defers to state insurance regulation."#;
+
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some());
+        let r = result.unwrap();
+        // The U.S.C. citation has weight 0.4 vs "State of California" at 0.15
+        assert_eq!(r.jurisdiction.level, JurisdictionLevel::Federal);
+    }
+
+    // ── Determinism: same input always produces same output ────────────────
+
+    #[test]
+    fn detection_is_deterministic() {
+        let texts = [
+            "Cal. Civ. Code § 1942.5 protects tenant rights.",
+            "42 U.S.C. § 1983 provides for civil rights claims.",
+            "N.Y. Gen. Bus. Law § 349 prohibits deceptive practices.",
+            "Nothing legal here, just a recipe for chocolate cake.",
+        ];
+        // Run each 5 times and verify identical results
+        for text in &texts {
+            let first = detect_jurisdiction(text);
+            for _ in 0..5 {
+                let again = detect_jurisdiction(text);
+                match (&first, &again) {
+                    (None, None) => {}
+                    (Some(a), Some(b)) => {
+                        assert_eq!(a.jurisdiction.level, b.jurisdiction.level);
+                        assert_eq!(a.jurisdiction.state, b.jurisdiction.state);
+                        assert_eq!(a.confidence, b.confidence);
+                    }
+                    _ => panic!("Detection should be deterministic for: {text}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn prompt_fragment_is_deterministic() {
+        let jurisdictions = [
+            Jurisdiction { level: JurisdictionLevel::Federal, state: None, county: None },
+            Jurisdiction { level: JurisdictionLevel::State, state: Some("California".to_string()), county: None },
+            Jurisdiction { level: JurisdictionLevel::County, state: Some("Texas".to_string()), county: Some("Harris County".to_string()) },
+        ];
+        for j in &jurisdictions {
+            let first = jurisdiction_prompt_fragment(j);
+            for _ in 0..5 {
+                assert_eq!(first, jurisdiction_prompt_fragment(j), "Prompt fragment should be deterministic");
+            }
+        }
+    }
+
+    // ── Edge cases ────────────────────────────────────────────────────────
+
+    #[test]
+    fn detect_empty_text() {
+        assert!(detect_jurisdiction("").is_none());
+    }
+
+    #[test]
+    fn detect_very_short_text() {
+        assert!(detect_jurisdiction("Hi").is_none());
+    }
+
+    #[test]
+    fn detect_handles_unicode() {
+        let text = "§ 1983 — Deprivation of rights under 42 U.S.C. § 1983.";
+        let result = detect_jurisdiction(text);
+        assert!(result.is_some(), "Should handle section symbols in text");
+    }
+
+    #[test]
+    fn detect_long_text_only_scans_first_10k() {
+        // Put citation at position > 10,000 — should NOT be detected
+        let padding = "A ".repeat(6000); // 12,000 chars
+        let text = format!("{padding}Cal. Civ. Code § 1942.5");
+        let result = detect_jurisdiction(&text);
+        assert!(result.is_none(), "Should not scan beyond first 10,000 chars");
+    }
+
+    #[test]
+    fn detect_citation_within_10k() {
+        // Put citation at position < 10,000 — should be detected
+        let padding = "A ".repeat(2000); // 4,000 chars
+        let text = format!("{padding}Cal. Civ. Code § 1942.5");
+        let result = detect_jurisdiction(&text);
+        assert!(result.is_some(), "Should detect citation within first 10,000 chars");
     }
 }

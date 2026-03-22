@@ -210,6 +210,7 @@ pub fn run() {
             commands::rag::delete_case,
             commands::rag::assign_file_to_case,
             commands::rag::assign_session_to_case,
+            commands::rag::set_case_jurisdiction,
             commands::rag::get_case_summaries,
         ])
         .run(tauri::generate_context!())

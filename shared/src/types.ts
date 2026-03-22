@@ -1,3 +1,13 @@
+// ─── Jurisdiction Types ────────────────────────────────────────────────────────
+
+export type JurisdictionLevel = 'federal' | 'state' | 'county'
+
+export interface Jurisdiction {
+  level: JurisdictionLevel
+  state?: string
+  county?: string
+}
+
 // ─── Case Types ───────────────────────────────────────────────────────────────
 
 export interface Case {
@@ -6,6 +16,7 @@ export interface Case {
   description?: string
   createdAt: number
   updatedAt: number
+  jurisdiction?: Jurisdiction
 }
 
 // ─── Document Types ────────────────────────────────────────────────────────────
@@ -97,6 +108,7 @@ export interface AppSettings {
   chunkOverlap: number;
   topK: number;
   theme: Theme;
+  jurisdiction?: Jurisdiction;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -150,6 +162,7 @@ export const IPC = {
   DELETE_CASE: 'delete-case',
   ASSIGN_SESSION_TO_CASE: 'assign-session-to-case',
   ASSIGN_FILE_TO_CASE: 'assign-file-to-case',
+  SET_CASE_JURISDICTION: 'set-case-jurisdiction',
   GET_CASE_SUMMARIES: 'get-case-summaries',
 } as const
 
@@ -200,4 +213,5 @@ export interface FileInfo {
   loadedAt: number;
   chunkCount: number;
   caseId?: string;
+  detectedJurisdiction?: Jurisdiction;
 }
