@@ -308,6 +308,33 @@ pub fn set_can_close(state: tauri::State<'_, crate::state::CloseAllowed>) {
 /// Called from the export-chat and export-citations features.
 #[tauri::command]
 pub fn save_file(file_path: String, content: String) -> Result<(), String> {
+    // Validate the filename portion for Windows-reserved names and invalid characters.
+    // The Tauri save dialog normally returns safe paths, but we guard against edge cases
+    // so the user gets a clear error instead of a cryptic OS message.
+    #[cfg(windows)]
+    {
+        let path = std::path::Path::new(&file_path);
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            let upper = stem.to_uppercase();
+            const RESERVED: &[&str] = &[
+                "CON", "PRN", "AUX", "NUL",
+                "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+            ];
+            if RESERVED.contains(&upper.as_str()) {
+                return Err(format!("'{stem}' is a reserved filename on Windows. Please choose a different name."));
+            }
+        }
+    }
+
+    // Create parent directories if they don't exist (e.g. user typed a new folder in the dialog)
+    if let Some(parent) = std::path::Path::new(&file_path).parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {e}"))?;
+        }
+    }
+
     std::fs::write(&file_path, content.as_bytes()).map_err(|e| format!("Failed to write file: {e}"))
 }
 
@@ -354,18 +381,31 @@ pub async fn load_files(
         (s.settings.clone(), s.model_dir.clone())
     };
 
-    // Expand directories to individual files
+    // Expand directories to individual files.
+    // Use Path::extension() instead of string manipulation so we handle
+    // Windows paths with backslashes and non-UTF-8 filenames correctly.
     let mut expanded: Vec<String> = Vec::new();
     for fp in &file_paths {
-        if let Ok(entries) = std::fs::read_dir(fp) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let lower = path.to_string_lossy().to_lowercase();
-                if super::doc_parser::SUPPORTED_EXTENSIONS
-                    .iter()
-                    .any(|ext| lower.ends_with(&format!(".{ext}")))
-                {
-                    expanded.push(path.to_string_lossy().to_string());
+        let p = std::path::Path::new(fp);
+        if p.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(p) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let ext_match = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_lowercase())
+                        .map(|e| {
+                            super::doc_parser::SUPPORTED_EXTENSIONS
+                                .iter()
+                                .any(|sup| *sup == e)
+                        })
+                        .unwrap_or(false);
+                    if ext_match {
+                        // to_string_lossy is fine here — if the OS returned the
+                        // path, it's valid for the current platform's filesystem.
+                        expanded.push(path.to_string_lossy().to_string());
+                    }
                 }
             }
         } else {
