@@ -221,12 +221,12 @@ pub async fn download_models(
     // Rename tmp → final. On Windows, antivirus or indexing services may hold
     // the file briefly after close, so retry a few times before giving up.
     let mut rename_err = None;
-    for attempt in 0..5 {
+    for attempt in 0..10 {
         match tokio::fs::rename(&tmp_path, &gguf_path).await {
             Ok(()) => { rename_err = None; break; }
             Err(e) => {
                 rename_err = Some(e);
-                if attempt < 4 {
+                if attempt < 9 {
                     log::warn!("Rename attempt {} failed, retrying in 500ms…", attempt + 1);
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }

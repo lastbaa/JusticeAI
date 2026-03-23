@@ -6,7 +6,9 @@
 //!        harness --eval <eval.json> --diff baseline.json [--report out.json]
 //!
 //! Defaults:
-//!   --data-dir: ~/Library/Application Support/com.justiceai.app
+//!   --data-dir: macOS: ~/Library/Application Support/com.justiceai.app
+//!               Linux: $XDG_DATA_HOME/com.justiceai.app (~/.local/share/com.justiceai.app)
+//!               Windows: %APPDATA%/com.justiceai.app
 //!   --skip-llm: false (run LLM if model exists)
 //!   --backend:  hybrid-bm25-cosine
 //!
