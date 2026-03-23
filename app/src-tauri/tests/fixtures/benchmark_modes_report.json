@@ -230,16 +230,14 @@
         "difficulty": "hard",
         "label": "divorce_decree: What is the child's school nam",
         "missed": [],
-        "mrr": 0.0,
-        "must_not_violations": [
-          "school"
-        ],
-        "partial_score": 0.0,
-        "passed": false,
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/divorce_decree.pdf",
-        "precision_at_1": false,
+        "precision_at_1": true,
         "query": "What is the child's school name?",
-        "recall": 0.0,
+        "recall": 1.0,
         "tags": [
           "family-law",
           "adversarial",
@@ -247,21 +245,19 @@
         ]
       },
       {
-        "answer_rank": null,
+        "answer_rank": 1,
         "case_type": "standard",
         "difficulty": "easy",
         "label": "corporate_merger: What is the purchase price?",
-        "missed": [
-          "47.5 million"
-        ],
-        "mrr": 0.0,
+        "missed": [],
+        "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.0,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/corporate_merger.pdf",
-        "precision_at_1": false,
+        "precision_at_1": true,
         "query": "What is the purchase price?",
-        "recall": 0.0,
+        "recall": 1.0,
         "tags": [
           "corporate-law",
           "purchase-price"
@@ -333,17 +329,15 @@
         "case_type": "multi-fact",
         "difficulty": "hard",
         "label": "corporate_merger: What percentage of the purchas",
-        "missed": [
-          "4.75"
-        ],
+        "missed": [],
         "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.5,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/corporate_merger.pdf",
         "precision_at_1": true,
         "query": "What percentage of the purchase price is held in escrow?",
-        "recall": 0.5,
+        "recall": 1.0,
         "tags": [
           "corporate-law",
           "multi-fact",
@@ -726,21 +720,19 @@
         ]
       },
       {
-        "answer_rank": null,
+        "answer_rank": 1,
         "case_type": "standard",
         "difficulty": "easy",
         "label": "employment_agreement: What is the employee's positio",
-        "missed": [
-          "VP of Engineering"
-        ],
-        "mrr": 0.0,
+        "missed": [],
+        "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.0,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/employment_agreement.pdf",
-        "precision_at_1": false,
+        "precision_at_1": true,
         "query": "What is the employee's position?",
-        "recall": 0.0,
+        "recall": 1.0,
         "tags": [
           "employment-law",
           "position"
@@ -963,14 +955,14 @@
       }
     ],
     "summary": {
-      "avg_partial_score": 0.8229166865348816,
-      "avg_recall": 0.8229166865348816,
-      "mrr": 0.7750000357627869,
-      "p_at_1": 0.7291666865348816,
-      "passed": 37,
+      "avg_partial_score": 0.8958333134651184,
+      "avg_recall": 0.8958333134651184,
+      "mrr": 0.8375000357627869,
+      "p_at_1": 0.7916666865348816,
+      "passed": 41,
       "total": 48
     },
-    "timestamp": "1774296975"
+    "timestamp": "1774297374"
   },
   "extended": {
     "backend": "hybrid-bm25-cosine-extended",
@@ -1195,16 +1187,14 @@
         "difficulty": "hard",
         "label": "divorce_decree: What is the child's school nam",
         "missed": [],
-        "mrr": 0.0,
-        "must_not_violations": [
-          "school"
-        ],
-        "partial_score": 0.0,
-        "passed": false,
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/divorce_decree.pdf",
-        "precision_at_1": false,
+        "precision_at_1": true,
         "query": "What is the child's school name?",
-        "recall": 0.0,
+        "recall": 1.0,
         "tags": [
           "family-law",
           "adversarial",
@@ -1212,21 +1202,19 @@
         ]
       },
       {
-        "answer_rank": null,
+        "answer_rank": 1,
         "case_type": "standard",
         "difficulty": "easy",
         "label": "corporate_merger: What is the purchase price?",
-        "missed": [
-          "47.5 million"
-        ],
-        "mrr": 0.0,
+        "missed": [],
+        "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.0,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/corporate_merger.pdf",
-        "precision_at_1": false,
+        "precision_at_1": true,
         "query": "What is the purchase price?",
-        "recall": 0.0,
+        "recall": 1.0,
         "tags": [
           "corporate-law",
           "purchase-price"
@@ -1295,17 +1283,15 @@
         "case_type": "multi-fact",
         "difficulty": "hard",
         "label": "corporate_merger: What percentage of the purchas",
-        "missed": [
-          "4.75"
-        ],
+        "missed": [],
         "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.5,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/corporate_merger.pdf",
         "precision_at_1": true,
         "query": "What percentage of the purchase price is held in escrow?",
-        "recall": 0.5,
+        "recall": 1.0,
         "tags": [
           "corporate-law",
           "multi-fact",
@@ -1686,21 +1672,19 @@
         ]
       },
       {
-        "answer_rank": null,
+        "answer_rank": 1,
         "case_type": "standard",
         "difficulty": "easy",
         "label": "employment_agreement: What is the employee's positio",
-        "missed": [
-          "VP of Engineering"
-        ],
-        "mrr": 0.0,
+        "missed": [],
+        "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.0,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/employment_agreement.pdf",
-        "precision_at_1": false,
+        "precision_at_1": true,
         "query": "What is the employee's position?",
-        "recall": 0.0,
+        "recall": 1.0,
         "tags": [
           "employment-law",
           "position"
@@ -1923,14 +1907,14 @@
       }
     ],
     "summary": {
-      "avg_partial_score": 0.90625,
-      "avg_recall": 0.90625,
-      "mrr": 0.7802910804748535,
-      "p_at_1": 0.7291666865348816,
-      "passed": 43,
+      "avg_partial_score": 0.9791666865348816,
+      "avg_recall": 0.9791666865348816,
+      "mrr": 0.8427910208702087,
+      "p_at_1": 0.7916666865348816,
+      "passed": 47,
       "total": 48
     },
-    "timestamp": "1774296975"
+    "timestamp": "1774297374"
   },
   "quick": {
     "backend": "hybrid-bm25-cosine-quick",
@@ -2178,21 +2162,19 @@
         ]
       },
       {
-        "answer_rank": null,
+        "answer_rank": 1,
         "case_type": "standard",
         "difficulty": "easy",
         "label": "corporate_merger: What is the purchase price?",
-        "missed": [
-          "47.5 million"
-        ],
-        "mrr": 0.0,
+        "missed": [],
+        "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.0,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/corporate_merger.pdf",
-        "precision_at_1": false,
+        "precision_at_1": true,
         "query": "What is the purchase price?",
-        "recall": 0.0,
+        "recall": 1.0,
         "tags": [
           "corporate-law",
           "purchase-price"
@@ -2266,17 +2248,15 @@
         "case_type": "multi-fact",
         "difficulty": "hard",
         "label": "corporate_merger: What percentage of the purchas",
-        "missed": [
-          "4.75"
-        ],
+        "missed": [],
         "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.5,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/corporate_merger.pdf",
         "precision_at_1": true,
         "query": "What percentage of the purchase price is held in escrow?",
-        "recall": 0.5,
+        "recall": 1.0,
         "tags": [
           "corporate-law",
           "multi-fact",
@@ -2665,21 +2645,19 @@
         ]
       },
       {
-        "answer_rank": null,
+        "answer_rank": 1,
         "case_type": "standard",
         "difficulty": "easy",
         "label": "employment_agreement: What is the employee's positio",
-        "missed": [
-          "VP of Engineering"
-        ],
-        "mrr": 0.0,
+        "missed": [],
+        "mrr": 1.0,
         "must_not_violations": [],
-        "partial_score": 0.0,
-        "passed": false,
+        "partial_score": 1.0,
+        "passed": true,
         "pdf": "tests/fixtures/employment_agreement.pdf",
-        "precision_at_1": false,
+        "precision_at_1": true,
         "query": "What is the employee's position?",
-        "recall": 0.0,
+        "recall": 1.0,
         "tags": [
           "employment-law",
           "position"
@@ -2902,13 +2880,13 @@
       }
     ],
     "summary": {
-      "avg_partial_score": 0.7604166865348816,
-      "avg_recall": 0.7604166865348816,
-      "mrr": 0.7777778506278992,
-      "p_at_1": 0.75,
-      "passed": 34,
+      "avg_partial_score": 0.8125,
+      "avg_recall": 0.8125,
+      "mrr": 0.819444477558136,
+      "p_at_1": 0.7916666865348816,
+      "passed": 37,
       "total": 48
     },
-    "timestamp": "1774296975"
+    "timestamp": "1774297374"
   }
 }

@@ -1339,6 +1339,27 @@ pub fn expand_keywords(keywords: &std::collections::HashSet<String>) -> std::col
         ("arbitration",     &["dispute resolution", "mediation", "adr", "tribunal", "hearing"]),
         ("force majeure",   &["act of god", "unforeseeable", "impossibility", "beyond control"]),
         ("assignment",      &["transfer", "delegate", "convey", "assign", "succession"]),
+        // Legal party synonyms
+        ("plaintiff",       &["complainant", "petitioner", "claimant", "injured party", "aggrieved"]),
+        ("defendant",       &["respondent", "accused", "defending party"]),
+        ("petitioner",      &["plaintiff", "applicant", "movant", "complainant", "filer"]),
+        ("respondent",      &["defendant", "opposing party"]),
+        ("landlord",        &["lessor", "owner", "property owner"]),
+        ("tenant",          &["lessee", "renter", "occupant"]),
+        ("lessor",          &["landlord", "owner", "property owner"]),
+        ("lessee",          &["tenant", "renter", "occupant"]),
+        ("beneficiary",     &["alien", "applicant", "immigrant", "recipient"]),
+        ("alimony",         &["spousal maintenance", "spousal support"]),
+        ("custody",         &["guardianship", "parental rights", "conservatorship"]),
+        ("acquirer",        &["acquiring company", "buyer", "purchaser"]),
+        ("tortfeasor",      &["wrongdoer", "defendant", "negligent party"]),
+        // Real estate / property
+        ("rent",            &["lease payment", "rental", "monthly payment"]),
+        ("deposit",         &["security deposit", "escrow", "bond"]),
+        ("lease",           &["rental agreement", "tenancy", "lease agreement"]),
+        // Employment
+        ("severance",       &["separation pay", "termination pay", "exit package"]),
+        ("bonus",           &["incentive", "signing bonus", "performance pay"]),
     ];
 
     let mut expanded = keywords.clone();

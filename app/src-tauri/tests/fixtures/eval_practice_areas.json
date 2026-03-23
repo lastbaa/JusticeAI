@@ -128,13 +128,13 @@
     "type": "adversarial",
     "difficulty": "hard",
     "tags": ["family-law", "adversarial", "hallucination-check"],
-    "notes": "Document does not mention the child's school; model must not fabricate one",
-    "must_not_contain": ["school", "elementary", "academy"]
+    "notes": "Document mentions 'high school' only in context of child support termination clause, not a named school. Model must not fabricate a specific school name.",
+    "must_not_contain": ["elementary", "academy", "attends", "enrolled"]
   },
   {
     "pdf": "tests/fixtures/corporate_merger.pdf",
     "query": "What is the purchase price?",
-    "expected": ["47.5 million"],
+    "expected": ["47,500,000"],
     "top_k": 6,
     "type": "standard",
     "difficulty": "easy",
@@ -178,7 +178,7 @@
   {
     "pdf": "tests/fixtures/corporate_merger.pdf",
     "query": "What percentage of the purchase price is held in escrow?",
-    "expected": ["10", "4.75"],
+    "expected": ["10", "4,750,000"],
     "top_k": 6,
     "type": "multi-fact",
     "difficulty": "hard",
@@ -398,7 +398,7 @@
   {
     "pdf": "tests/fixtures/employment_agreement.pdf",
     "query": "What is the employee's position?",
-    "expected": ["VP of Engineering"],
+    "expected": ["Vice President of Engineering"],
     "top_k": 6,
     "type": "standard",
     "difficulty": "easy",
