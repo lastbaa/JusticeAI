@@ -18,7 +18,9 @@ import ChatInterface from './components/ChatInterface'
 import Settings from './components/Settings'
 import DocumentViewer from './components/DocumentViewer'
 import ModelSetup from './components/ModelSetup'
+import PanelErrorBoundary from './components/PanelErrorBoundary'
 import Toast, { ToastMessage } from './components/Toast'
+import { makeSessionName, makeSessionSummary } from './utils/sessionName'
 
 type View = 'main' | 'settings'
 const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.csv', '.eml', '.html', '.htm', '.mhtml', '.xml', '.xlsx', '.png', '.jpg', '.jpeg', '.tif', '.tiff']
@@ -41,62 +43,6 @@ function getActivePracticeArea(s: AppSettings): string | null {
     (p) => p.chunkSize === s.chunkSize && p.chunkOverlap === s.chunkOverlap && p.topK === s.topK
   )
   return m?.name ?? null
-}
-
-/**
- * Generate a concise chat title from the first user message.
- * Short noun-phrase titles like "Lease Agreement Questions" or "W-9 Form Details".
- */
-function makeSessionName(messages: ChatMessage[]): string {
-  const first = messages.find((m) => m.role === 'user')
-  if (!first) return 'New Chat'
-
-  let text = first.content.trim()
-  if (!text) return 'New Chat'
-
-  // Strip file paths, URLs, code blocks
-  text = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '')
-  text = text.replace(/https?:\/\/\S+/g, '').replace(/\/[\w./\\-]+/g, '')
-  text = text.trim()
-
-  // Use the first line only (don't split on dots — legal text has "v.", "Mr.", "3.2", "U.S." etc.)
-  const firstLine = text.split('\n').filter(Boolean)[0]?.trim() ?? text
-  let phrase = firstLine
-
-  // Strip leading filler — loop so "Can you please explain" cascades correctly.
-  const GREETINGS = /^(hey|hi|hello|ok|okay|so|well|um|uh|basically|actually),?\s*/i
-  const FILLER = /^(can you|could you|would you|will you|please|i want to|i need to|i'd like to|help me|i want you to|let's|let me|go ahead and|tell me about|what is|what are|explain|summarize|understand|know about|describe|review|analyze|look at|check)\s+/i
-  const ARTICLES = /^(the|a|an)\s+/i
-  let prev = ''
-  while (phrase !== prev) {
-    prev = phrase
-    phrase = phrase.replace(GREETINGS, '')
-    phrase = phrase.replace(FILLER, '')
-  }
-
-  // Strip leading articles (after all filler is gone)
-  phrase = phrase.replace(ARTICLES, '')
-
-  // Remove trailing question mark for cleaner titles
-  phrase = phrase.replace(/\?+$/, '').trim()
-
-  // Capitalize first letter
-  if (phrase.length > 0) {
-    phrase = phrase.charAt(0).toUpperCase() + phrase.slice(1)
-  }
-
-  // Truncate at a word boundary around 40 chars (fits 240px sidebar at 12px)
-  if (phrase.length > 43) {
-    const cut = phrase.lastIndexOf(' ', 40)
-    phrase = phrase.slice(0, cut > 20 ? cut : 40) + '\u2026'
-  }
-
-  return phrase || 'New Chat'
-}
-
-function makeSessionSummary(messages: ChatMessage[]): string {
-  const userMsgs = messages.filter((m) => m.role === 'user').slice(0, 3)
-  return userMsgs.map((m) => m.content.trim().slice(0, 80)).join('; ')
 }
 
 export default function App(): JSX.Element {
@@ -191,23 +137,33 @@ export default function App(): JSX.Element {
       try {
         const savedSettings = await window.api.getSettings()
         setSettings(savedSettings)
-      } catch { }
+      } catch {
+        addToast('error', 'Failed to load settings — using defaults')
+      }
       try {
         const existingFiles = await window.api.getFiles()
         setFiles(existingFiles)
-      } catch { }
+      } catch {
+        addToast('error', 'Failed to load saved documents')
+      }
       try {
         const saved = await window.api.getSessions()
         setSessions(saved)
-      } catch { }
+      } catch {
+        addToast('error', 'Failed to load chat history')
+      }
       try {
         const savedCases = await window.api.getCases()
         setCases(savedCases)
-      } catch { }
+      } catch {
+        addToast('error', 'Failed to load cases')
+      }
       try {
         const modelStatus = await window.api.checkModels()
         if (!modelStatus.llmReady) setShowModelSetup(true)
-      } catch { }
+      } catch {
+        addToast('error', 'Failed to check model status')
+      }
     }
     init()
   }, [])
@@ -913,37 +869,43 @@ export default function App(): JSX.Element {
         />
       </main>
 
-      <ContextPanel
-        files={caseFiles}
-        citations={lastCitations}
-        isQuerying={isQuerying}
-        isLoading={isLoading}
-        collapsed={false}
-        onAddFiles={handleAddFiles}
-        onRemoveFile={handleRemoveFile}
-        onClearFiles={handleClearFiles}
-        onViewCitation={setViewerCitation}
-        activeCitation={viewerCitation}
-        onExportCitations={lastCitations.length > 0 ? handleExportCitations : undefined}
-        caseName={currentCaseId ? cases.find((c) => c.id === currentCaseId)?.name : undefined}
-      />
+      <PanelErrorBoundary name="Context Panel">
+        <ContextPanel
+          files={caseFiles}
+          citations={lastCitations}
+          isQuerying={isQuerying}
+          isLoading={isLoading}
+          collapsed={false}
+          onAddFiles={handleAddFiles}
+          onRemoveFile={handleRemoveFile}
+          onClearFiles={handleClearFiles}
+          onViewCitation={setViewerCitation}
+          activeCitation={viewerCitation}
+          onExportCitations={lastCitations.length > 0 ? handleExportCitations : undefined}
+          caseName={currentCaseId ? cases.find((c) => c.id === currentCaseId)?.name : undefined}
+        />
+      </PanelErrorBoundary>
 
-      <DocumentViewer
-        citation={viewerCitation}
-        onClose={() => setViewerCitation(null)}
-      />
+      <PanelErrorBoundary name="Document Viewer">
+        <DocumentViewer
+          citation={viewerCitation}
+          onClose={() => setViewerCitation(null)}
+        />
+      </PanelErrorBoundary>
 
       {showModelSetup && (
         <ModelSetup onComplete={() => setShowModelSetup(false)} />
       )}
 
       {view === 'settings' && (
-        <Settings
-          settings={settings}
-          onSave={handleSaveSettings}
-          onClose={() => setView('main')}
-          onReindex={handleReindex}
-        />
+        <PanelErrorBoundary name="Settings">
+          <Settings
+            settings={settings}
+            onSave={handleSaveSettings}
+            onClose={() => setView('main')}
+            onReindex={handleReindex}
+          />
+        </PanelErrorBoundary>
       )}
 
       <Toast toasts={toasts} onDismiss={removeToast} />
@@ -953,15 +915,21 @@ export default function App(): JSX.Element {
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center"
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-case-title"
+          aria-describedby="delete-case-desc"
+          tabIndex={-1}
           onClick={() => setDeleteCaseTarget(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setDeleteCaseTarget(null) }}
         >
           <div
             className="rounded-xl p-6 shadow-2xl"
             style={{ background: 'var(--modal-bg)', color: 'var(--fg)', maxWidth: 420, width: '90%' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold mb-2">Delete Case</h3>
-            <p className="text-sm mb-4" style={{ color: 'var(--fg-muted)' }}>
+            <h3 id="delete-case-title" className="text-lg font-semibold mb-2">Delete Case</h3>
+            <p id="delete-case-desc" className="text-sm mb-4" style={{ color: 'var(--fg-muted)' }}>
               Delete &ldquo;{deleteCaseTarget.name}&rdquo;? Choose what happens to its files and sessions.
             </p>
             <div className="flex flex-col gap-2">
@@ -980,6 +948,7 @@ export default function App(): JSX.Element {
                 Delete Everything
               </button>
               <button
+                autoFocus
                 className="w-full rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
                 style={{ background: 'var(--hover-bg)', color: 'var(--fg)' }}
                 onClick={() => setDeleteCaseTarget(null)}

@@ -52,10 +52,17 @@ Cases let you organize documents and chat sessions by matter.
 - **Create a case** from the sidebar to group related documents together
 - **Sessions** within a case keep separate lines of inquiry organized
 - Retrieval is scoped to the active case's documents, keeping results focused
+- **Delete a case** by right-clicking it in the sidebar. You'll be prompted to either keep the associated files and sessions (moved to the general workspace) or delete everything permanently.
+- **Rename a case** by double-clicking its name in the sidebar.
 
 ## Document Viewer
 
 Click a citation in a chat response to open the **Document Viewer** panel on the right side. This shows the source passage highlighted in context, so you can quickly verify the AI's answer against the original document.
+
+## Exporting
+
+- **Export chat**: Click the export icon in the chat header to save the conversation as a text file
+- **Export citations**: Click "Export" in the context panel to save retrieved source passages
 
 ## Settings
 
@@ -67,6 +74,7 @@ Access settings via the gear icon. Available options:
 | Chunk Overlap | Overlap between consecutive chunks | 50 |
 | Top-K | Number of retrieved passages per query | 5 |
 | Practice Area | Presets that tune retrieval for specific legal domains | General |
+| Jurisdiction | Auto-detected from documents or manually selectable — tailors prompts to jurisdiction-specific legal terminology | Auto |
 | Theme | Light or dark appearance | System |
 
 ## Keyboard Shortcuts

@@ -382,6 +382,8 @@ pub fn validate_gguf(path: &std::path::Path) -> Result<(), String> {
 
 // ── Embedding ─────────────────────────────────────────────────────────────────
 
+/// Embed a text string using the fastembed BGE-small-en-v1.5 model.
+/// When `is_query` is true, a retrieval prefix is prepended for asymmetric search.
 pub async fn embed_text(text: &str, is_query: bool, model_dir: &Path) -> Result<Vec<f32>, String> {
     use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
@@ -446,6 +448,7 @@ pub fn format_history(history: &[(String, String)]) -> String {
     s
 }
 
+/// Run LLM inference on Saul-7B-Instruct with the given question, retrieved context, and chat history.
 pub async fn ask_saul(
     user_question: &str,
     context: &str,
@@ -768,6 +771,8 @@ pub fn split_at_char_boundaries(text: &str, max_bytes: usize) -> Vec<&str> {
     parts
 }
 
+/// Split parsed document pages into overlapping text chunks suitable for embedding.
+/// Respects `settings.chunkSize` and `settings.chunkOverlap` for window sizing.
 pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChunk> {
     let mut chunks = Vec::new();
     let mut global_idx = 0usize;
@@ -911,6 +916,7 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
     chunks
 }
 
+/// Heuristic check whether a line looks like a section header (e.g. numbered headings, ALL-CAPS titles).
 pub fn is_section_header(line: &str) -> bool {
     let t = line.trim();
     if t.is_empty() || t.len() >= 80 { return false; }
@@ -952,6 +958,7 @@ pub fn is_section_header(line: &str) -> bool {
     false
 }
 
+/// Split text into sentence-level fragments for fine-grained chunking.
 pub fn split_sentences(text: &str) -> Vec<SentenceFrag<'_>> {
     let mut frags = Vec::new();
     let mut start = 0;
@@ -1408,6 +1415,7 @@ impl Default for HybridBm25Cosine {
     }
 }
 
+/// Return the default retrieval backend (`HybridBm25Cosine` with standard parameters).
 pub fn default_backend() -> HybridBm25Cosine {
     HybridBm25Cosine::default()
 }

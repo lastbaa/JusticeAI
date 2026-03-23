@@ -132,91 +132,154 @@ pub async fn download_models(
         return Ok(());
     }
 
-    // Resume partial download if tmp file exists
-    let already_downloaded = tmp_path.metadata().map(|m| m.len()).unwrap_or(0);
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(7200))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let mut request = client.get(SAUL_GGUF_URL);
-    if already_downloaded > 0 {
-        request = request.header("Range", format!("bytes={}-", already_downloaded));
-    }
-
-    let mut response = request.send().await.map_err(|e| e.to_string())?;
-
-    let status = response.status();
-    if !status.is_success() && status.as_u16() != 206 {
-        return Err(format!("Download failed: HTTP {status}"));
-    }
-
-    let total_bytes: u64 = if already_downloaded > 0 && status.as_u16() == 206 {
-        response
-            .headers()
-            .get("content-range")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.split('/').last())
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(0)
-    } else {
-        response.content_length().unwrap_or(0)
-    };
-
     use tokio::io::AsyncWriteExt;
 
-    // Open the tmp file for writing.
-    // Only append to an existing partial download when the server actually honoured
-    // the Range request (HTTP 206). If it returned 200, the server is sending the
-    // full file from byte 0 — appending would corrupt it, so we truncate instead.
-    let resuming = already_downloaded > 0 && status.as_u16() == 206;
-    let mut file = if resuming {
-        tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(&tmp_path)
-            .await
-            .map_err(|e| e.to_string())?
-    } else {
-        tokio::fs::File::create(&tmp_path)
-            .await
-            .map_err(|e| e.to_string())?
-    };
+    const MAX_RETRIES: u32 = 3;
+    let mut attempt: u32 = 0;
+    let mut downloaded: u64;
+    let mut total_bytes: u64;
 
-    // Byte counter starts at whatever was already on disk (0 if not resuming).
-    let mut downloaded: u64 = if resuming { already_downloaded } else { 0 };
-    let mut last_emit = std::time::Instant::now();
+    loop {
+        // Resume partial download if tmp file exists
+        let already_downloaded = tmp_path.metadata().map(|m| m.len()).unwrap_or(0);
 
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        downloaded += chunk.len() as u64;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(7200))
+            .build()
+            .map_err(|e| e.to_string())?;
 
-        // Throttle progress events to ~5 per second to prevent UI jitter
-        let now = std::time::Instant::now();
-        if now.duration_since(last_emit).as_millis() >= 200 {
-            last_emit = now;
-            let percent: u8 = if total_bytes > 0 {
-                (downloaded * 100 / total_bytes).min(99) as u8
-            } else {
-                0
-            };
-
-            window
-                .emit(
-                    "download-progress",
-                    serde_json::json!({
-                        "percent": percent,
-                        "downloadedBytes": downloaded,
-                        "totalBytes": total_bytes,
-                        "done": false
-                    }),
-                )
-                .ok();
+        let mut request = client.get(SAUL_GGUF_URL);
+        if already_downloaded > 0 {
+            request = request.header("Range", format!("bytes={}-", already_downloaded));
         }
-    }
 
-    file.flush().await.map_err(|e| e.to_string())?;
-    drop(file);
+        let response_result = request.send().await;
+        let mut response = match response_result {
+            Ok(r) => r,
+            Err(e) => {
+                attempt += 1;
+                if attempt >= MAX_RETRIES {
+                    return Err(format!("Download failed after {MAX_RETRIES} attempts: {e}"));
+                }
+                let delay = std::time::Duration::from_secs(2u64.pow(attempt));
+                log::warn!("Download attempt {attempt} failed: {e}. Retrying in {delay:?}…");
+                window.emit("download-progress", serde_json::json!({
+                    "percent": 0, "downloadedBytes": 0, "totalBytes": 0,
+                    "done": false, "retrying": true, "attempt": attempt
+                })).ok();
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+        };
+
+        let status = response.status();
+        if !status.is_success() && status.as_u16() != 206 {
+            attempt += 1;
+            if attempt >= MAX_RETRIES {
+                return Err(format!("Download failed after {MAX_RETRIES} attempts: HTTP {status}"));
+            }
+            let delay = std::time::Duration::from_secs(2u64.pow(attempt));
+            log::warn!("Download attempt {attempt} got HTTP {status}. Retrying in {delay:?}…");
+            window.emit("download-progress", serde_json::json!({
+                "percent": 0, "downloadedBytes": 0, "totalBytes": 0,
+                "done": false, "retrying": true, "attempt": attempt
+            })).ok();
+            tokio::time::sleep(delay).await;
+            continue;
+        }
+
+        total_bytes = if already_downloaded > 0 && status.as_u16() == 206 {
+            response
+                .headers()
+                .get("content-range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split('/').last())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0)
+        } else {
+            response.content_length().unwrap_or(0)
+        };
+
+        // Open the tmp file for writing.
+        // Only append to an existing partial download when the server actually honoured
+        // the Range request (HTTP 206). If it returned 200, the server is sending the
+        // full file from byte 0 — appending would corrupt it, so we truncate instead.
+        let resuming = already_downloaded > 0 && status.as_u16() == 206;
+        let mut file = if resuming {
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&tmp_path)
+                .await
+                .map_err(|e| e.to_string())?
+        } else {
+            tokio::fs::File::create(&tmp_path)
+                .await
+                .map_err(|e| e.to_string())?
+        };
+
+        // Byte counter starts at whatever was already on disk (0 if not resuming).
+        downloaded = if resuming { already_downloaded } else { 0 };
+        let mut last_emit = std::time::Instant::now();
+        let mut stream_failed = false;
+
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+                    downloaded += chunk.len() as u64;
+
+                    // Throttle progress events to ~5 per second to prevent UI jitter
+                    let now = std::time::Instant::now();
+                    if now.duration_since(last_emit).as_millis() >= 200 {
+                        last_emit = now;
+                        let percent: u8 = if total_bytes > 0 {
+                            (downloaded * 100 / total_bytes).min(99) as u8
+                        } else {
+                            0
+                        };
+
+                        window
+                            .emit(
+                                "download-progress",
+                                serde_json::json!({
+                                    "percent": percent,
+                                    "downloadedBytes": downloaded,
+                                    "totalBytes": total_bytes,
+                                    "done": false
+                                }),
+                            )
+                            .ok();
+                    }
+                }
+                Ok(None) => break, // Stream complete
+                Err(e) => {
+                    log::warn!("Stream error during download: {e}");
+                    stream_failed = true;
+                    break;
+                }
+            }
+        }
+
+        file.flush().await.map_err(|e| e.to_string())?;
+        drop(file);
+
+        if stream_failed {
+            attempt += 1;
+            if attempt >= MAX_RETRIES {
+                return Err(format!("Download failed after {MAX_RETRIES} attempts: stream error"));
+            }
+            let delay = std::time::Duration::from_secs(2u64.pow(attempt));
+            log::warn!("Download stream failed on attempt {attempt}. Retrying in {delay:?}…");
+            window.emit("download-progress", serde_json::json!({
+                "percent": 0, "downloadedBytes": downloaded, "totalBytes": total_bytes,
+                "done": false, "retrying": true, "attempt": attempt
+            })).ok();
+            tokio::time::sleep(delay).await;
+            continue;
+        }
+
+        break; // Download completed successfully
+    }
 
     // Rename tmp → final. On Windows, antivirus or indexing services may hold
     // the file briefly after close, so retry a few times before giving up.

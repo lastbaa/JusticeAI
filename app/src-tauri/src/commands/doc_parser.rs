@@ -57,6 +57,8 @@ pub fn detect_supported_extension(path: &str) -> Result<String, String> {
     Ok(ext)
 }
 
+/// Route document parsing to the appropriate handler based on file extension.
+/// Supports pdf, docx, txt, csv, html, eml, xlsx, and image formats (via OCR).
 pub fn parse_by_extension(path: &str, ext: &str, model_dir: &std::path::Path) -> Result<Vec<DocumentPage>, String> {
     match ext {
         "pdf" => parse_pdf(path),
