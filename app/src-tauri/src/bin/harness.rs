@@ -4,6 +4,8 @@
 //!        harness --eval <eval.json> [--data-dir <path>] [--backend <name>] [--report out.json] [--json-out <path>]
 //!        harness --eval <eval.json> --compare backend1,backend2
 //!        harness --eval <eval.json> --diff baseline.json [--report out.json]
+//!        harness --eval <eval.json> --benchmark-modes [--report out.json]
+//!        harness --eval <eval.json> --mode quick|balanced|extended
 //!
 //! Defaults:
 //!   --data-dir: macOS: ~/Library/Application Support/com.justiceai.app
@@ -389,8 +391,10 @@ async fn run_eval_cases(
     model_dir: &Path,
     backend: &dyn RetrievalBackend,
     verbose: bool,
+    mode: &InferenceMode,
 ) -> Vec<EvalResult> {
     let settings = AppSettings::default();
+    let retrieval_params = pipeline::RetrievalModeParams::from_mode(mode);
     let mut eval_results: Vec<EvalResult> = Vec::new();
 
     // -- Per-PDF deduplication: parse + embed each PDF only once ---------------
@@ -508,8 +512,8 @@ async fn run_eval_cases(
         };
 
         let config = RetrievalConfig {
-            top_k: case.top_k,
-            candidate_pool_k: 0,
+            top_k: retrieval_params.top_k,
+            candidate_pool_k: retrieval_params.candidate_pool_k,
             score_threshold: 0.0,
             expand_keywords: true,
             ..Default::default()
@@ -644,13 +648,14 @@ async fn run_eval(
     backend: &dyn RetrievalBackend,
     report_path: Option<&str>,
     json_out: Option<&str>,
+    mode: &InferenceMode,
 ) {
     let content = std::fs::read_to_string(eval_path)
         .unwrap_or_else(|e| { eprintln!("Cannot read eval file: {e}"); std::process::exit(1); });
     let cases: Vec<EvalCase> = serde_json::from_str(&content)
         .unwrap_or_else(|e| { eprintln!("Invalid eval JSON: {e}"); std::process::exit(1); });
 
-    let results = run_eval_cases(&cases, model_dir, backend, true).await;
+    let results = run_eval_cases(&cases, model_dir, backend, true, mode).await;
 
     // -- Scorecard ------------------------------------------------------------
     print_scorecard(&results, backend.name());
@@ -853,10 +858,10 @@ async fn run_compare(eval_path: &str, model_dir: &Path, backend_names: &[&str]) 
     println!();
 
     println!("-- Running backend A: {} --", backend_a.name());
-    let results_a = run_eval_cases(&cases, model_dir, backend_a.as_ref(), true).await;
+    let results_a = run_eval_cases(&cases, model_dir, backend_a.as_ref(), true, &InferenceMode::Balanced).await;
 
     println!("\n-- Running backend B: {} --", backend_b.name());
-    let results_b = run_eval_cases(&cases, model_dir, backend_b.as_ref(), true).await;
+    let results_b = run_eval_cases(&cases, model_dir, backend_b.as_ref(), true, &InferenceMode::Balanced).await;
 
     let summary_a = compute_summary(&results_a);
     let summary_b = compute_summary(&results_b);
@@ -996,7 +1001,7 @@ async fn run_diff(
     println!("Current:  {} (backend: {})", eval_path, backend.name());
     println!();
 
-    let results = run_eval_cases(&cases, model_dir, backend, true).await;
+    let results = run_eval_cases(&cases, model_dir, backend, true, &InferenceMode::Balanced).await;
     let current_summary = compute_summary(&results);
 
     let baseline_map: HashMap<String, &CaseReport> = baseline.cases.iter()
@@ -1144,6 +1149,260 @@ fn format_rank_opt(rank: Option<usize>) -> String {
     }
 }
 
+// == Benchmark modes: --benchmark-modes ========================================
+
+fn mode_label(mode: &InferenceMode) -> &'static str {
+    match mode {
+        InferenceMode::Quick => "Quick",
+        InferenceMode::Balanced => "Balanced",
+        InferenceMode::Extended => "Extended",
+    }
+}
+
+async fn run_benchmark_modes(
+    eval_path: &str,
+    model_dir: &Path,
+    backend: &dyn RetrievalBackend,
+    report_path: Option<&str>,
+) {
+    let content = std::fs::read_to_string(eval_path)
+        .unwrap_or_else(|e| { eprintln!("Cannot read eval file: {e}"); std::process::exit(1); });
+    let cases: Vec<EvalCase> = serde_json::from_str(&content)
+        .unwrap_or_else(|e| { eprintln!("Invalid eval JSON: {e}"); std::process::exit(1); });
+
+    let modes = [InferenceMode::Quick, InferenceMode::Balanced, InferenceMode::Extended];
+    let mut all_results: Vec<(&'static str, Vec<EvalResult>, SummaryReport)> = Vec::new();
+
+    for mode in &modes {
+        let label = mode_label(mode);
+        let retrieval_params = pipeline::RetrievalModeParams::from_mode(mode);
+        println!("\n{}", "━".repeat(70));
+        println!(" RUNNING MODE: {} (top_k={}, candidate_pool={})",
+            label, retrieval_params.top_k, retrieval_params.candidate_pool_k);
+        println!("{}", "━".repeat(70));
+
+        let results = run_eval_cases(&cases, model_dir, backend, false, mode).await;
+        let summary = compute_summary(&results);
+        all_results.push((label, results, summary));
+    }
+
+    // ── Summary comparison table ──────────────────────────────────────────────
+    println!("\n\n{}", "═".repeat(78));
+    println!(" INFERENCE MODE BENCHMARK RESULTS");
+    println!(" Backend: {} | Cases: {} | Date: {}",
+        backend.name(), cases.len(),
+        chrono_timestamp());
+    println!("{}", "═".repeat(78));
+
+    // Header
+    println!("\n{:<22} {:>10} {:>10} {:>10}", "", "Quick", "Balanced", "Extended");
+    println!("{}", "─".repeat(56));
+
+    let q = &all_results[0].2;
+    let b = &all_results[1].2;
+    let e = &all_results[2].2;
+
+    println!("{:<22} {:>9}% {:>9}% {:>9}%",
+        "Pass Rate",
+        format!("{:.1}", if q.total > 0 { q.passed as f32 / q.total as f32 * 100.0 } else { 0.0 }),
+        format!("{:.1}", if b.total > 0 { b.passed as f32 / b.total as f32 * 100.0 } else { 0.0 }),
+        format!("{:.1}", if e.total > 0 { e.passed as f32 / e.total as f32 * 100.0 } else { 0.0 }));
+
+    println!("{:<22} {:>10} {:>10} {:>10}",
+        "MRR",
+        format!("{:.3}", q.mrr),
+        format!("{:.3}", b.mrr),
+        format!("{:.3}", e.mrr));
+
+    println!("{:<22} {:>9}% {:>9}% {:>9}%",
+        "Precision@1",
+        format!("{:.1}", q.p_at_1 * 100.0),
+        format!("{:.1}", b.p_at_1 * 100.0),
+        format!("{:.1}", e.p_at_1 * 100.0));
+
+    println!("{:<22} {:>9}% {:>9}% {:>9}%",
+        "Avg Recall",
+        format!("{:.1}", q.avg_recall * 100.0),
+        format!("{:.1}", b.avg_recall * 100.0),
+        format!("{:.1}", e.avg_recall * 100.0));
+
+    println!("{:<22} {:>9}% {:>9}% {:>9}%",
+        "Avg Partial Score",
+        format!("{:.1}", q.avg_partial_score * 100.0),
+        format!("{:.1}", b.avg_partial_score * 100.0),
+        format!("{:.1}", e.avg_partial_score * 100.0));
+
+    println!("{:<22} {:>10} {:>10} {:>10}",
+        "Passed / Total",
+        format!("{}/{}", q.passed, q.total),
+        format!("{}/{}", b.passed, b.total),
+        format!("{}/{}", e.passed, e.total));
+
+    // ── By difficulty breakdown ───────────────────────────────────────────────
+    println!("\n{}", "─".repeat(78));
+    println!(" BY DIFFICULTY");
+    println!("{}", "─".repeat(78));
+    println!("{:<22} {:>10} {:>10} {:>10}", "", "Quick", "Balanced", "Extended");
+    println!("{}", "─".repeat(56));
+
+    for diff in &["easy", "medium", "hard"] {
+        let metrics: Vec<AggregateMetrics> = all_results.iter().map(|(_, results, _)| {
+            let subset: Vec<EvalResult> = results.iter()
+                .filter(|r| r.difficulty == *diff)
+                .cloned()
+                .collect();
+            compute_aggregate(&subset)
+        }).collect();
+
+        if metrics.iter().all(|m| m.count == 0) { continue; }
+
+        println!("{:<22} {:>10} {:>10} {:>10}",
+            format!("{} (pass rate)", diff),
+            format!("{}/{}", metrics[0].passed, metrics[0].count),
+            format!("{}/{}", metrics[1].passed, metrics[1].count),
+            format!("{}/{}", metrics[2].passed, metrics[2].count));
+
+        println!("{:<22} {:>10} {:>10} {:>10}",
+            format!("{} (MRR)", diff),
+            format!("{:.3}", metrics[0].avg_mrr),
+            format!("{:.3}", metrics[1].avg_mrr),
+            format!("{:.3}", metrics[2].avg_mrr));
+    }
+
+    // ── By case type breakdown ────────────────────────────────────────────────
+    println!("\n{}", "─".repeat(78));
+    println!(" BY CASE TYPE");
+    println!("{}", "─".repeat(78));
+    println!("{:<22} {:>10} {:>10} {:>10}", "", "Quick", "Balanced", "Extended");
+    println!("{}", "─".repeat(56));
+
+    let mut all_types: Vec<String> = all_results[0].1.iter()
+        .map(|r| r.case_type.clone()).collect();
+    all_types.sort();
+    all_types.dedup();
+
+    for t in &all_types {
+        let metrics: Vec<AggregateMetrics> = all_results.iter().map(|(_, results, _)| {
+            let subset: Vec<EvalResult> = results.iter()
+                .filter(|r| r.case_type == *t)
+                .cloned()
+                .collect();
+            compute_aggregate(&subset)
+        }).collect();
+
+        println!("{:<22} {:>10} {:>10} {:>10}",
+            t,
+            format!("{}/{}", metrics[0].passed, metrics[0].count),
+            format!("{}/{}", metrics[1].passed, metrics[1].count),
+            format!("{}/{}", metrics[2].passed, metrics[2].count));
+    }
+
+    // ── By practice area (PDF) breakdown ──────────────────────────────────────
+    println!("\n{}", "─".repeat(78));
+    println!(" BY PRACTICE AREA");
+    println!("{}", "─".repeat(78));
+    println!("{:<22} {:>10} {:>10} {:>10}", "", "Quick", "Balanced", "Extended");
+    println!("{}", "─".repeat(56));
+
+    let mut pdf_order: Vec<String> = Vec::new();
+    for r in &all_results[0].1 {
+        let short = std::path::Path::new(&r.pdf)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| r.pdf.clone());
+        if !pdf_order.contains(&short) {
+            pdf_order.push(short);
+        }
+    }
+
+    for pdf_stem in &pdf_order {
+        let metrics: Vec<AggregateMetrics> = all_results.iter().map(|(_, results, _)| {
+            let subset: Vec<EvalResult> = results.iter()
+                .filter(|r| {
+                    let stem = std::path::Path::new(&r.pdf)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    stem == *pdf_stem
+                })
+                .cloned()
+                .collect();
+            compute_aggregate(&subset)
+        }).collect();
+
+        println!("{:<22} {:>10} {:>10} {:>10}",
+            pdf_stem,
+            format!("{}/{} {:.0}%", metrics[0].passed, metrics[0].count, metrics[0].avg_mrr * 100.0),
+            format!("{}/{} {:.0}%", metrics[1].passed, metrics[1].count, metrics[1].avg_mrr * 100.0),
+            format!("{}/{} {:.0}%", metrics[2].passed, metrics[2].count, metrics[2].avg_mrr * 100.0));
+    }
+
+    // ── Per-case detail (cases that differ across modes) ──────────────────────
+    println!("\n{}", "─".repeat(78));
+    println!(" CASES WITH MODE-DEPENDENT RESULTS");
+    println!("{}", "─".repeat(78));
+
+    let mut any_diff = false;
+    for i in 0..all_results[0].1.len() {
+        let rq = &all_results[0].1[i];
+        let rb = &all_results[1].1[i];
+        let re = &all_results[2].1[i];
+
+        if rq.passed != rb.passed || rb.passed != re.passed
+            || rq.answer_rank != rb.answer_rank || rb.answer_rank != re.answer_rank
+        {
+            any_diff = true;
+            let q_cell = format_rank_cell(rq);
+            let b_cell = format_rank_cell(rb);
+            let e_cell = format_rank_cell(re);
+            println!("  {:<40} Q:{:<6} B:{:<6} E:{:<6}",
+                &rq.label[..rq.label.len().min(40)], q_cell, b_cell, e_cell);
+        }
+    }
+    if !any_diff {
+        println!("  (all cases produced identical results across modes)");
+    }
+
+    // ── Save report if requested ──────────────────────────────────────────────
+    if let Some(path) = report_path {
+        // Save extended report with all three modes
+        let mut report_data = serde_json::Map::new();
+        for (label, results, summary) in &all_results {
+            let mode_report = build_report(&format!("{}-{}", backend.name(), label.to_lowercase()), results);
+            report_data.insert(label.to_lowercase().to_string(),
+                serde_json::to_value(&mode_report).unwrap_or_default());
+        }
+        let json = serde_json::to_string_pretty(&report_data)
+            .unwrap_or_else(|e| { eprintln!("Serialize error: {e}"); "{}".to_string() });
+        std::fs::write(path, json)
+            .unwrap_or_else(|e| { eprintln!("Write error: {e}"); });
+        println!("\nBenchmark report saved to {path}");
+    }
+
+    println!("\n{}", "═".repeat(78));
+}
+
+fn chrono_timestamp() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = d.as_secs();
+    // Simple date: just show epoch for now
+    format!("{}", secs)
+}
+
+fn parse_mode(s: &str) -> InferenceMode {
+    match s.to_lowercase().as_str() {
+        "quick" => InferenceMode::Quick,
+        "balanced" => InferenceMode::Balanced,
+        "extended" => InferenceMode::Extended,
+        other => {
+            eprintln!("Unknown mode: '{}'. Available: quick, balanced, extended", other);
+            std::process::exit(1);
+        }
+    }
+}
+
 // == Interactive mode ==========================================================
 
 #[tokio::main]
@@ -1159,6 +1418,8 @@ async fn main() {
     let mut diff_path: Option<String> = None;
     let mut report_path: Option<String> = None;
     let mut json_out: Option<String> = None;
+    let mut mode_arg: Option<String> = None;
+    let mut benchmark_modes = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -1173,6 +1434,8 @@ async fn main() {
             "--diff" => { i += 1; diff_path = Some(args[i].clone()); }
             "--report" => { i += 1; report_path = Some(args[i].clone()); }
             "--json-out" => { i += 1; json_out = Some(args[i].clone()); }
+            "--mode" => { i += 1; mode_arg = Some(args[i].clone()); }
+            "--benchmark-modes" => { benchmark_modes = true; }
             _ => { eprintln!("Unknown argument: {}", args[i]); }
         }
         i += 1;
@@ -1201,6 +1464,19 @@ async fn main() {
         }
     });
     let model_dir = data_dir.join("models");
+
+    let mode = mode_arg.as_deref().map(parse_mode).unwrap_or(InferenceMode::Balanced);
+
+    // -- Benchmark modes: run all three modes and compare ---------------------
+    if benchmark_modes {
+        let eval_file = eval_path.unwrap_or_else(|| {
+            eprintln!("--benchmark-modes requires --eval <eval.json>");
+            std::process::exit(1);
+        });
+        let backend = select_backend(&backend_name, &model_dir);
+        run_benchmark_modes(&eval_file, &model_dir, backend.as_ref(), report_path.as_deref()).await;
+        return;
+    }
 
     // -- Compare mode ---------------------------------------------------------
     if let Some(ref compare) = compare_arg {
@@ -1231,7 +1507,7 @@ async fn main() {
     // -- Eval mode ------------------------------------------------------------
     if let Some(eval_file) = eval_path {
         let backend = select_backend(&backend_name, &model_dir);
-        run_eval(&eval_file, &model_dir, backend.as_ref(), report_path.as_deref(), json_out.as_deref()).await;
+        run_eval(&eval_file, &model_dir, backend.as_ref(), report_path.as_deref(), json_out.as_deref(), &mode).await;
         return;
     }
 

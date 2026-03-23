@@ -1,0 +1,2914 @@
+{
+  "balanced": {
+    "backend": "hybrid-bm25-cosine-balanced",
+    "cases": [
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "criminal_charge: Who is the defendant?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "Who is the defendant?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "defendant-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "criminal_charge: What is the bond amount?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the bond amount?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "bond"
+        ]
+      },
+      {
+        "answer_rank": 2,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "criminal_charge: What statute was violated?",
+        "missed": [],
+        "mrr": 0.5,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": false,
+        "query": "What statute was violated?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "statute"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "criminal_charge: What is the accused's date of ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the accused's date of birth?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "criminal_charge: What is the defendant's prior ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the defendant's prior criminal record?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "criminal_charge: How many days between the inci",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "How many days between the incident and the arraignment?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "multi-fact",
+          "date-math"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "divorce_decree: Who is the petitioner?",
+        "missed": [
+          "Amanda"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "Who is the petitioner?",
+        "recall": 0.5,
+        "tags": [
+          "family-law",
+          "party-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "divorce_decree: How much is the child support?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "How much is the child support?",
+        "recall": 1.0,
+        "tags": [
+          "family-law",
+          "child-support"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "divorce_decree: Who gets the marital home?",
+        "missed": [
+          "Amanda"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "Who gets the marital home?",
+        "recall": 0.5,
+        "tags": [
+          "family-law",
+          "property-division"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "divorce_decree: What is the spousal maintenanc",
+        "missed": [
+          "2,200"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": false,
+        "query": "What is the spousal maintenance amount?",
+        "recall": 0.0,
+        "tags": [
+          "family-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 2,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "divorce_decree: What is the total monthly obli",
+        "missed": [
+          "2,200"
+        ],
+        "mrr": 0.5,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": false,
+        "query": "What is the total monthly obligation from respondent to petitioner?",
+        "recall": 0.5,
+        "tags": [
+          "family-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "divorce_decree: What is the child's school nam",
+        "missed": [],
+        "mrr": 0.0,
+        "must_not_violations": [
+          "school"
+        ],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": false,
+        "query": "What is the child's school name?",
+        "recall": 0.0,
+        "tags": [
+          "family-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "corporate_merger: What is the purchase price?",
+        "missed": [
+          "47.5 million"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "What is the purchase price?",
+        "recall": 0.0,
+        "tags": [
+          "corporate-law",
+          "purchase-price"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "corporate_merger: What is the closing date?",
+        "missed": [
+          "April 30",
+          "2025"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "What is the closing date?",
+        "recall": 0.0,
+        "tags": [
+          "corporate-law",
+          "closing-date"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "corporate_merger: How long is the non-compete pe",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "How long is the non-compete period?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "non-compete"
+        ]
+      },
+      {
+        "answer_rank": 4,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "corporate_merger: Who is the acquirer?",
+        "missed": [],
+        "mrr": 0.25,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "Who is the acquirer?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "corporate_merger: What percentage of the purchas",
+        "missed": [
+          "4.75"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "What percentage of the purchase price is held in escrow?",
+        "recall": 0.5,
+        "tags": [
+          "corporate-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "corporate_merger: What is the intellectual prope",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "What is the intellectual property licensing fee?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 5,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "immigration_petition: Who is the beneficiary?",
+        "missed": [],
+        "mrr": 0.20000000298023224,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": false,
+        "query": "Who is the beneficiary?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "beneficiary-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "immigration_petition: What is the offered salary?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the offered salary?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "salary"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "immigration_petition: What is the immigration classi",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the immigration classification?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "visa-classification"
+        ]
+      },
+      {
+        "answer_rank": 6,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "immigration_petition: Where did the alien obtain the",
+        "missed": [],
+        "mrr": 0.1666666716337204,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": false,
+        "query": "Where did the alien obtain their doctorate?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "immigration_petition: How much above the prevailing ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "How much above the prevailing wage is the offered salary?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "immigration_petition: What is the beneficiary's visa",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the beneficiary's visa expiration date?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "personal_injury_complaint: Who is the plaintiff?",
+        "missed": [
+          "Michael Torres"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": false,
+        "query": "Who is the plaintiff?",
+        "recall": 0.0,
+        "tags": [
+          "personal-injury",
+          "plaintiff-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "personal_injury_complaint: What is the total amount of da",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the total amount of damages sought?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "damages"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "personal_injury_complaint: What injuries did the plaintif",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What injuries did the plaintiff sustain?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "injuries"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "personal_injury_complaint: Who is the tortfeasor's employ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "Who is the tortfeasor's employer?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "personal_injury_complaint: What is the plaintiff's weekly",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the plaintiff's weekly salary?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "personal_injury_complaint: What is the plaintiff's health",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the plaintiff's health insurance provider?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 4,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "commercial_lease: Who is the tenant?",
+        "missed": [],
+        "mrr": 0.25,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": false,
+        "query": "Who is the tenant?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "tenant-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "commercial_lease: What is the monthly rent?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the monthly rent?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "rent"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "commercial_lease: What is the security deposit?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the security deposit?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "deposit"
+        ]
+      },
+      {
+        "answer_rank": 3,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "commercial_lease: Who is the lessee?",
+        "missed": [],
+        "mrr": 0.3333333432674408,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": false,
+        "query": "Who is the lessee?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "commercial_lease: What is the total monthly occu",
+        "missed": [
+          "850"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the total monthly occupancy cost in Year 1?",
+        "recall": 0.5,
+        "tags": [
+          "real-estate",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "commercial_lease: What is the property tax amoun",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the property tax amount?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "employment_agreement: What is the employee's positio",
+        "missed": [
+          "VP of Engineering"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": false,
+        "query": "What is the employee's position?",
+        "recall": 0.0,
+        "tags": [
+          "employment-law",
+          "position"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "employment_agreement: What is the base salary?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the base salary?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "salary"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "employment_agreement: How many RSUs are granted?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "How many RSUs are granted?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "equity"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "employment_agreement: Who does the new hire report t",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "Who does the new hire report to?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "employment_agreement: What is the total first-year c",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the total first-year compensation if bonus target is met?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "employment_agreement: What is the employee's equity ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the employee's equity vesting schedule after termination?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "compliance_report: Who conducted the audit?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "Who conducted the audit?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "auditor-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "compliance_report: What is the remediation deadli",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What is the remediation deadline?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "deadline"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "compliance_report: How many critical findings wer",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "How many critical findings were there?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "findings"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "compliance_report: What regulation was examined?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What regulation was examined?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "cross-reference",
+          "regulation"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "compliance_report: How many total compliance viol",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "How many total compliance violations were found?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "multi-fact",
+          "counting"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "compliance_report: What criminal charges resulted",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What criminal charges resulted from the audit?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "adversarial",
+          "hallucination-check"
+        ]
+      }
+    ],
+    "summary": {
+      "avg_partial_score": 0.8229166865348816,
+      "avg_recall": 0.8229166865348816,
+      "mrr": 0.7750000357627869,
+      "p_at_1": 0.7291666865348816,
+      "passed": 37,
+      "total": 48
+    },
+    "timestamp": "1774296975"
+  },
+  "extended": {
+    "backend": "hybrid-bm25-cosine-extended",
+    "cases": [
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "criminal_charge: Who is the defendant?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "Who is the defendant?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "defendant-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "criminal_charge: What is the bond amount?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the bond amount?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "bond"
+        ]
+      },
+      {
+        "answer_rank": 2,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "criminal_charge: What statute was violated?",
+        "missed": [],
+        "mrr": 0.5,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": false,
+        "query": "What statute was violated?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "statute"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "criminal_charge: What is the accused's date of ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the accused's date of birth?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "criminal_charge: What is the defendant's prior ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the defendant's prior criminal record?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "criminal_charge: How many days between the inci",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "How many days between the incident and the arraignment?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "multi-fact",
+          "date-math"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "divorce_decree: Who is the petitioner?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "Who is the petitioner?",
+        "recall": 1.0,
+        "tags": [
+          "family-law",
+          "party-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "divorce_decree: How much is the child support?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "How much is the child support?",
+        "recall": 1.0,
+        "tags": [
+          "family-law",
+          "child-support"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "divorce_decree: Who gets the marital home?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "Who gets the marital home?",
+        "recall": 1.0,
+        "tags": [
+          "family-law",
+          "property-division"
+        ]
+      },
+      {
+        "answer_rank": 9,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "divorce_decree: What is the spousal maintenanc",
+        "missed": [],
+        "mrr": 0.1111111119389534,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": false,
+        "query": "What is the spousal maintenance amount?",
+        "recall": 1.0,
+        "tags": [
+          "family-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 2,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "divorce_decree: What is the total monthly obli",
+        "missed": [],
+        "mrr": 0.5,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": false,
+        "query": "What is the total monthly obligation from respondent to petitioner?",
+        "recall": 1.0,
+        "tags": [
+          "family-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "divorce_decree: What is the child's school nam",
+        "missed": [],
+        "mrr": 0.0,
+        "must_not_violations": [
+          "school"
+        ],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": false,
+        "query": "What is the child's school name?",
+        "recall": 0.0,
+        "tags": [
+          "family-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "corporate_merger: What is the purchase price?",
+        "missed": [
+          "47.5 million"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "What is the purchase price?",
+        "recall": 0.0,
+        "tags": [
+          "corporate-law",
+          "purchase-price"
+        ]
+      },
+      {
+        "answer_rank": 7,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "corporate_merger: What is the closing date?",
+        "missed": [],
+        "mrr": 0.1428571492433548,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "What is the closing date?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "closing-date"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "corporate_merger: How long is the non-compete pe",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "How long is the non-compete period?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "non-compete"
+        ]
+      },
+      {
+        "answer_rank": 4,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "corporate_merger: Who is the acquirer?",
+        "missed": [],
+        "mrr": 0.25,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "Who is the acquirer?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "corporate_merger: What percentage of the purchas",
+        "missed": [
+          "4.75"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "What percentage of the purchase price is held in escrow?",
+        "recall": 0.5,
+        "tags": [
+          "corporate-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "corporate_merger: What is the intellectual prope",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "What is the intellectual property licensing fee?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 5,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "immigration_petition: Who is the beneficiary?",
+        "missed": [],
+        "mrr": 0.20000000298023224,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": false,
+        "query": "Who is the beneficiary?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "beneficiary-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "immigration_petition: What is the offered salary?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the offered salary?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "salary"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "immigration_petition: What is the immigration classi",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the immigration classification?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "visa-classification"
+        ]
+      },
+      {
+        "answer_rank": 6,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "immigration_petition: Where did the alien obtain the",
+        "missed": [],
+        "mrr": 0.1666666716337204,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": false,
+        "query": "Where did the alien obtain their doctorate?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "immigration_petition: How much above the prevailing ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "How much above the prevailing wage is the offered salary?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "immigration_petition: What is the beneficiary's visa",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the beneficiary's visa expiration date?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "personal_injury_complaint: Who is the plaintiff?",
+        "missed": [
+          "Michael Torres"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": false,
+        "query": "Who is the plaintiff?",
+        "recall": 0.0,
+        "tags": [
+          "personal-injury",
+          "plaintiff-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "personal_injury_complaint: What is the total amount of da",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the total amount of damages sought?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "damages"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "personal_injury_complaint: What injuries did the plaintif",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What injuries did the plaintiff sustain?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "injuries"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "personal_injury_complaint: Who is the tortfeasor's employ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "Who is the tortfeasor's employer?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "personal_injury_complaint: What is the plaintiff's weekly",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the plaintiff's weekly salary?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "personal_injury_complaint: What is the plaintiff's health",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the plaintiff's health insurance provider?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 4,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "commercial_lease: Who is the tenant?",
+        "missed": [],
+        "mrr": 0.25,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": false,
+        "query": "Who is the tenant?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "tenant-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "commercial_lease: What is the monthly rent?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the monthly rent?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "rent"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "commercial_lease: What is the security deposit?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the security deposit?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "deposit"
+        ]
+      },
+      {
+        "answer_rank": 3,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "commercial_lease: Who is the lessee?",
+        "missed": [],
+        "mrr": 0.3333333432674408,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": false,
+        "query": "Who is the lessee?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "commercial_lease: What is the total monthly occu",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the total monthly occupancy cost in Year 1?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "commercial_lease: What is the property tax amoun",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the property tax amount?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "employment_agreement: What is the employee's positio",
+        "missed": [
+          "VP of Engineering"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": false,
+        "query": "What is the employee's position?",
+        "recall": 0.0,
+        "tags": [
+          "employment-law",
+          "position"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "employment_agreement: What is the base salary?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the base salary?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "salary"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "employment_agreement: How many RSUs are granted?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "How many RSUs are granted?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "equity"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "employment_agreement: Who does the new hire report t",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "Who does the new hire report to?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "employment_agreement: What is the total first-year c",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the total first-year compensation if bonus target is met?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "employment_agreement: What is the employee's equity ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the employee's equity vesting schedule after termination?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "compliance_report: Who conducted the audit?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "Who conducted the audit?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "auditor-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "compliance_report: What is the remediation deadli",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What is the remediation deadline?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "deadline"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "compliance_report: How many critical findings wer",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "How many critical findings were there?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "findings"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "compliance_report: What regulation was examined?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What regulation was examined?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "cross-reference",
+          "regulation"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "compliance_report: How many total compliance viol",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "How many total compliance violations were found?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "multi-fact",
+          "counting"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "compliance_report: What criminal charges resulted",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What criminal charges resulted from the audit?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "adversarial",
+          "hallucination-check"
+        ]
+      }
+    ],
+    "summary": {
+      "avg_partial_score": 0.90625,
+      "avg_recall": 0.90625,
+      "mrr": 0.7802910804748535,
+      "p_at_1": 0.7291666865348816,
+      "passed": 43,
+      "total": 48
+    },
+    "timestamp": "1774296975"
+  },
+  "quick": {
+    "backend": "hybrid-bm25-cosine-quick",
+    "cases": [
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "criminal_charge: Who is the defendant?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "Who is the defendant?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "defendant-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "criminal_charge: What is the bond amount?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the bond amount?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "bond"
+        ]
+      },
+      {
+        "answer_rank": 2,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "criminal_charge: What statute was violated?",
+        "missed": [],
+        "mrr": 0.5,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": false,
+        "query": "What statute was violated?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "statute"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "criminal_charge: What is the accused's date of ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the accused's date of birth?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "criminal_charge: What is the defendant's prior ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "What is the defendant's prior criminal record?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "criminal_charge: How many days between the inci",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/criminal_charge.pdf",
+        "precision_at_1": true,
+        "query": "How many days between the incident and the arraignment?",
+        "recall": 1.0,
+        "tags": [
+          "criminal-law",
+          "multi-fact",
+          "date-math"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "divorce_decree: Who is the petitioner?",
+        "missed": [
+          "Amanda"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "Who is the petitioner?",
+        "recall": 0.5,
+        "tags": [
+          "family-law",
+          "party-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "divorce_decree: How much is the child support?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "How much is the child support?",
+        "recall": 1.0,
+        "tags": [
+          "family-law",
+          "child-support"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "divorce_decree: Who gets the marital home?",
+        "missed": [
+          "Amanda"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "Who gets the marital home?",
+        "recall": 0.5,
+        "tags": [
+          "family-law",
+          "property-division"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "divorce_decree: What is the spousal maintenanc",
+        "missed": [
+          "2,200"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": false,
+        "query": "What is the spousal maintenance amount?",
+        "recall": 0.0,
+        "tags": [
+          "family-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 2,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "divorce_decree: What is the total monthly obli",
+        "missed": [
+          "2,200"
+        ],
+        "mrr": 0.5,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": false,
+        "query": "What is the total monthly obligation from respondent to petitioner?",
+        "recall": 0.5,
+        "tags": [
+          "family-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "divorce_decree: What is the child's school nam",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/divorce_decree.pdf",
+        "precision_at_1": true,
+        "query": "What is the child's school name?",
+        "recall": 1.0,
+        "tags": [
+          "family-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "corporate_merger: What is the purchase price?",
+        "missed": [
+          "47.5 million"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "What is the purchase price?",
+        "recall": 0.0,
+        "tags": [
+          "corporate-law",
+          "purchase-price"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "corporate_merger: What is the closing date?",
+        "missed": [
+          "April 30",
+          "2025"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "What is the closing date?",
+        "recall": 0.0,
+        "tags": [
+          "corporate-law",
+          "closing-date"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "corporate_merger: How long is the non-compete pe",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "How long is the non-compete period?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "non-compete"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "corporate_merger: Who is the acquirer?",
+        "missed": [
+          "Nexus Technologies"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": false,
+        "query": "Who is the acquirer?",
+        "recall": 0.0,
+        "tags": [
+          "corporate-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "corporate_merger: What percentage of the purchas",
+        "missed": [
+          "4.75"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "What percentage of the purchase price is held in escrow?",
+        "recall": 0.5,
+        "tags": [
+          "corporate-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "corporate_merger: What is the intellectual prope",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/corporate_merger.pdf",
+        "precision_at_1": true,
+        "query": "What is the intellectual property licensing fee?",
+        "recall": 1.0,
+        "tags": [
+          "corporate-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "immigration_petition: Who is the beneficiary?",
+        "missed": [
+          "Anika Sharma"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": false,
+        "query": "Who is the beneficiary?",
+        "recall": 0.0,
+        "tags": [
+          "immigration-law",
+          "beneficiary-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "immigration_petition: What is the offered salary?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the offered salary?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "salary"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "immigration_petition: What is the immigration classi",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the immigration classification?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "visa-classification"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "immigration_petition: Where did the alien obtain the",
+        "missed": [
+          "MIT"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": false,
+        "query": "Where did the alien obtain their doctorate?",
+        "recall": 0.0,
+        "tags": [
+          "immigration-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "immigration_petition: How much above the prevailing ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "How much above the prevailing wage is the offered salary?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "immigration_petition: What is the beneficiary's visa",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/immigration_petition.pdf",
+        "precision_at_1": true,
+        "query": "What is the beneficiary's visa expiration date?",
+        "recall": 1.0,
+        "tags": [
+          "immigration-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "personal_injury_complaint: Who is the plaintiff?",
+        "missed": [
+          "Michael Torres"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": false,
+        "query": "Who is the plaintiff?",
+        "recall": 0.0,
+        "tags": [
+          "personal-injury",
+          "plaintiff-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "personal_injury_complaint: What is the total amount of da",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the total amount of damages sought?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "damages"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "personal_injury_complaint: What injuries did the plaintif",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What injuries did the plaintiff sustain?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "injuries"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "personal_injury_complaint: Who is the tortfeasor's employ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "Who is the tortfeasor's employer?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "personal_injury_complaint: What is the plaintiff's weekly",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the plaintiff's weekly salary?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "personal_injury_complaint: What is the plaintiff's health",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/personal_injury_complaint.pdf",
+        "precision_at_1": true,
+        "query": "What is the plaintiff's health insurance provider?",
+        "recall": 1.0,
+        "tags": [
+          "personal-injury",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "commercial_lease: Who is the tenant?",
+        "missed": [
+          "Sunrise Bakery"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": false,
+        "query": "Who is the tenant?",
+        "recall": 0.0,
+        "tags": [
+          "real-estate",
+          "tenant-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "commercial_lease: What is the monthly rent?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the monthly rent?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "rent"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "commercial_lease: What is the security deposit?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the security deposit?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "deposit"
+        ]
+      },
+      {
+        "answer_rank": 3,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "commercial_lease: Who is the lessee?",
+        "missed": [],
+        "mrr": 0.3333333432674408,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": false,
+        "query": "Who is the lessee?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "commercial_lease: What is the total monthly occu",
+        "missed": [
+          "850"
+        ],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 0.5,
+        "passed": false,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the total monthly occupancy cost in Year 1?",
+        "recall": 0.5,
+        "tags": [
+          "real-estate",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "commercial_lease: What is the property tax amoun",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/commercial_lease.pdf",
+        "precision_at_1": true,
+        "query": "What is the property tax amount?",
+        "recall": 1.0,
+        "tags": [
+          "real-estate",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "employment_agreement: What is the employee's positio",
+        "missed": [
+          "VP of Engineering"
+        ],
+        "mrr": 0.0,
+        "must_not_violations": [],
+        "partial_score": 0.0,
+        "passed": false,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": false,
+        "query": "What is the employee's position?",
+        "recall": 0.0,
+        "tags": [
+          "employment-law",
+          "position"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "employment_agreement: What is the base salary?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the base salary?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "salary"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "employment_agreement: How many RSUs are granted?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "How many RSUs are granted?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "equity"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "employment_agreement: Who does the new hire report t",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "Who does the new hire report to?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "cross-reference",
+          "synonym"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "employment_agreement: What is the total first-year c",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the total first-year compensation if bonus target is met?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "multi-fact",
+          "arithmetic"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "employment_agreement: What is the employee's equity ",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/employment_agreement.pdf",
+        "precision_at_1": true,
+        "query": "What is the employee's equity vesting schedule after termination?",
+        "recall": 1.0,
+        "tags": [
+          "employment-law",
+          "adversarial",
+          "hallucination-check"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "compliance_report: Who conducted the audit?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "Who conducted the audit?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "auditor-id"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "easy",
+        "label": "compliance_report: What is the remediation deadli",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What is the remediation deadline?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "deadline"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "standard",
+        "difficulty": "medium",
+        "label": "compliance_report: How many critical findings wer",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "How many critical findings were there?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "findings"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "cross-reference",
+        "difficulty": "medium",
+        "label": "compliance_report: What regulation was examined?",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What regulation was examined?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "cross-reference",
+          "regulation"
+        ]
+      },
+      {
+        "answer_rank": 1,
+        "case_type": "multi-fact",
+        "difficulty": "hard",
+        "label": "compliance_report: How many total compliance viol",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "How many total compliance violations were found?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "multi-fact",
+          "counting"
+        ]
+      },
+      {
+        "answer_rank": null,
+        "case_type": "adversarial",
+        "difficulty": "hard",
+        "label": "compliance_report: What criminal charges resulted",
+        "missed": [],
+        "mrr": 1.0,
+        "must_not_violations": [],
+        "partial_score": 1.0,
+        "passed": true,
+        "pdf": "tests/fixtures/compliance_report.pdf",
+        "precision_at_1": true,
+        "query": "What criminal charges resulted from the audit?",
+        "recall": 1.0,
+        "tags": [
+          "regulatory",
+          "adversarial",
+          "hallucination-check"
+        ]
+      }
+    ],
+    "summary": {
+      "avg_partial_score": 0.7604166865348816,
+      "avg_recall": 0.7604166865348816,
+      "mrr": 0.7777778506278992,
+      "p_at_1": 0.75,
+      "passed": 34,
+      "total": 48
+    },
+    "timestamp": "1774296975"
+  }
+}
