@@ -154,7 +154,16 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|e| {
-                    log::warn!("Could not resolve app data dir ({e}); falling back to temp dir");
+                    log::warn!("Could not resolve app data dir ({e}); using fallback");
+                    // Prefer XDG_DATA_HOME on Linux over ephemeral /tmp
+                    #[cfg(all(unix, not(target_os = "macos")))]
+                    {
+                        if let Ok(home) = std::env::var("HOME") {
+                            let xdg = std::env::var("XDG_DATA_HOME")
+                                .unwrap_or_else(|_| format!("{home}/.local/share"));
+                            return std::path::PathBuf::from(xdg).join("justice-ai");
+                        }
+                    }
                     std::env::temp_dir().join("justice-ai")
                 });
             std::fs::create_dir_all(&data_dir).ok();

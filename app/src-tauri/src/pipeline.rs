@@ -521,10 +521,21 @@ Answer the current question using ONLY these excerpts.\n\n\
 
         if model_guard.is_none() {
             log::info!("Loading Saul model from disk (first query)…");
-            // Offload all layers to Metal GPU on Apple Silicon
-            let model_params = LlamaModelParams::default().with_n_gpu_layers(100);
-            let model = LlamaModel::load_from_file(backend, &gguf_path, &model_params)
-                .map_err(|e| format!("Failed to load Saul model: {e}"))?;
+            // Try GPU-accelerated first (Metal on macOS, Vulkan on Linux/Windows).
+            // If GPU loading fails (e.g. no Vulkan driver), fall back to CPU-only.
+            let model_params_gpu = LlamaModelParams::default().with_n_gpu_layers(100);
+            let model = match LlamaModel::load_from_file(backend, &gguf_path, &model_params_gpu) {
+                Ok(m) => {
+                    log::info!("Saul model loaded with GPU acceleration.");
+                    m
+                }
+                Err(gpu_err) => {
+                    log::warn!("GPU model load failed ({gpu_err}), retrying with CPU-only…");
+                    let model_params_cpu = LlamaModelParams::default().with_n_gpu_layers(0);
+                    LlamaModel::load_from_file(backend, &gguf_path, &model_params_cpu)
+                        .map_err(|e| format!("Failed to load Saul model (CPU fallback): {e}"))?
+                }
+            };
             *model_guard = Some(model);
             log::info!("Saul model loaded and cached.");
         }
