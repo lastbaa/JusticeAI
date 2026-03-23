@@ -123,6 +123,8 @@ export default function App(): JSX.Element {
   // Case folders
   const [cases, setCases] = useState<Case[]>([])
   const [currentCaseId, setCurrentCaseId] = useState<string | null>(null)
+  // Delete-case confirmation modal
+  const [deleteCaseTarget, setDeleteCaseTarget] = useState<Case | null>(null)
 
   const messagesRef = useRef(messages)
   const sessionIdRef = useRef(currentSessionId)
@@ -684,25 +686,31 @@ export default function App(): JSX.Element {
     }
   }
 
-  async function handleDeleteCase(id: string): Promise<void> {
+  function handleDeleteCase(id: string): void {
     const c = cases.find((c) => c.id === id)
-    const ok = await confirm(
-      `Delete case "${c?.name ?? 'this case'}"? Sessions and files will become uncategorized.`,
-      { title: 'Delete Case', kind: 'warning' }
-    )
-    if (!ok) return
+    if (c) setDeleteCaseTarget(c)
+  }
+
+  async function confirmDeleteCase(deleteContents: boolean): Promise<void> {
+    const c = deleteCaseTarget
+    if (!c) return
+    setDeleteCaseTarget(null)
     try {
-      await window.api.deleteCase(id)
-      setCases((prev) => prev.filter((c) => c.id !== id))
-      // Update local state: orphan sessions/files
-      setSessions((prev) =>
-        prev.map((s) => (s.caseId === id ? { ...s, caseId: undefined } : s))
-      )
-      setFiles((prev) =>
-        prev.map((f) => (f.caseId === id ? { ...f, caseId: undefined } : f))
-      )
-      if (currentCaseId === id) setCurrentCaseId(null)
-      addToast('success', `Case "${c?.name}" deleted`)
+      await window.api.deleteCase(c.id, deleteContents)
+      setCases((prev) => prev.filter((x) => x.id !== c.id))
+      if (deleteContents) {
+        setSessions((prev) => prev.filter((s) => s.caseId !== c.id))
+        setFiles((prev) => prev.filter((f) => f.caseId !== c.id))
+      } else {
+        setSessions((prev) =>
+          prev.map((s) => (s.caseId === c.id ? { ...s, caseId: undefined } : s))
+        )
+        setFiles((prev) =>
+          prev.map((f) => (f.caseId === c.id ? { ...f, caseId: undefined } : f))
+        )
+      }
+      if (currentCaseId === c.id) setCurrentCaseId(null)
+      addToast('success', `Case "${c.name}" deleted`)
     } catch (err) {
       console.error('Failed to delete case:', err)
       addToast('error', 'Failed to delete case')
@@ -939,6 +947,49 @@ export default function App(): JSX.Element {
       )}
 
       <Toast toasts={toasts} onDismiss={removeToast} />
+
+      {/* Delete case confirmation modal */}
+      {deleteCaseTarget && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setDeleteCaseTarget(null)}
+        >
+          <div
+            className="rounded-xl p-6 shadow-2xl"
+            style={{ background: 'var(--modal-bg)', color: 'var(--fg)', maxWidth: 420, width: '90%' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold mb-2">Delete Case</h3>
+            <p className="text-sm mb-4" style={{ color: 'var(--fg-muted)' }}>
+              Delete &ldquo;{deleteCaseTarget.name}&rdquo;? Choose what happens to its files and sessions.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                className="w-full rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
+                style={{ background: 'var(--accent)', color: '#000' }}
+                onClick={() => confirmDeleteCase(false)}
+              >
+                Keep Files &amp; Sessions
+              </button>
+              <button
+                className="w-full rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
+                style={{ background: '#dc2626', color: '#fff' }}
+                onClick={() => confirmDeleteCase(true)}
+              >
+                Delete Everything
+              </button>
+              <button
+                className="w-full rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
+                style={{ background: 'var(--hover-bg)', color: 'var(--fg)' }}
+                onClick={() => setDeleteCaseTarget(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

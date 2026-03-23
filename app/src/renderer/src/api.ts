@@ -91,7 +91,8 @@ export const api = {
 
   saveCase: (c: Case): Promise<void> => invoke('save_case', { case: c }),
 
-  deleteCase: (caseId: string): Promise<void> => invoke('delete_case', { caseId }),
+  deleteCase: (caseId: string, deleteContents: boolean): Promise<void> =>
+    invoke('delete_case', { caseId, deleteContents }),
 
   assignFileToCase: (fileId: string, caseId: string | null): Promise<void> =>
     invoke('assign_file_to_case', { fileId, caseId }),

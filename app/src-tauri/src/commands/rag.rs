@@ -1001,21 +1001,45 @@ pub async fn save_case(
 #[tauri::command]
 pub async fn delete_case(
     case_id: String,
+    delete_contents: bool,
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
 ) -> Result<(), String> {
     let mut s = state.lock().await;
     s.cases.retain(|c| c.id != case_id);
-    // Orphan sessions and files belonging to this case
-    for session in &mut s.sessions {
-        if session.case_id.as_deref() == Some(&case_id) {
-            session.case_id = None;
+
+    if delete_contents {
+        // Remove all sessions belonging to this case
+        s.sessions.retain(|session| session.case_id.as_deref() != Some(&case_id));
+
+        // Remove all files belonging to this case (and their chunks)
+        let file_ids: Vec<String> = s.file_registry.iter()
+            .filter(|(_, f)| f.case_id.as_deref() == Some(&case_id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for file_id in &file_ids {
+            let item_ids: Vec<String> = s.doc_chunk_ids.get(file_id).cloned().unwrap_or_default();
+            for id in &item_ids {
+                s.chunk_registry.remove(id);
+            }
+            s.embedded_chunks.retain(|e| !item_ids.contains(&e.id));
+            s.doc_chunk_ids.remove(file_id);
+            s.file_registry.remove(file_id);
+        }
+        s.save_chunks().await;
+    } else {
+        // Orphan sessions and files belonging to this case
+        for session in &mut s.sessions {
+            if session.case_id.as_deref() == Some(&case_id) {
+                session.case_id = None;
+            }
+        }
+        for file in s.file_registry.values_mut() {
+            if file.case_id.as_deref() == Some(&case_id) {
+                file.case_id = None;
+            }
         }
     }
-    for file in s.file_registry.values_mut() {
-        if file.case_id.as_deref() == Some(&case_id) {
-            file.case_id = None;
-        }
-    }
+
     s.save_cases().await;
     s.save_sessions().await;
     s.save_file_registry().await;
