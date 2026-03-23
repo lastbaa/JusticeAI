@@ -11,6 +11,15 @@ pub struct CloseAllowed(pub AtomicBool);
 
 // ── Shared Types (mirror of shared/src/types.ts) ────────────────────────────
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InferenceMode {
+    Quick,
+    #[default]
+    Balanced,
+    Extended,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum JurisdictionLevel {
@@ -72,6 +81,8 @@ pub struct Citation {
     pub file_path: String,
     pub page_number: u32,
     pub excerpt: String,
+    #[serde(default)]
+    pub summary: String,
     pub score: f32,
 }
 
@@ -95,6 +106,8 @@ pub struct AppSettings {
     pub theme: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jurisdiction: Option<Jurisdiction>,
+    #[serde(default)]
+    pub inference_mode: InferenceMode,
 }
 
 fn default_theme() -> String {
@@ -109,6 +122,7 @@ impl Default for AppSettings {
             top_k: 6,
             theme: default_theme(),
             jurisdiction: None,
+            inference_mode: InferenceMode::default(),
         }
     }
 }
@@ -438,7 +452,139 @@ impl RagState {
         result
     }
 
-    /// Extract best excerpt sentence from chunk text relevant to the query.
+    /// Generate a short summary describing what a chunk covers.
+    /// Layer 1: extract heading from the first few lines.
+    /// Layer 2: keyword extraction fallback.
+    pub fn summarize_chunk(text: &str) -> String {
+        let lines: Vec<&str> = text.lines().take(3).collect();
+
+        // Layer 1 — heading extraction
+        for line in &lines {
+            let trimmed = line.trim();
+            if trimmed.len() < 3 || trimmed.len() > 60 {
+                continue;
+            }
+            // ALL-CAPS heading (no trailing period)
+            if trimmed.len() >= 3
+                && !trimmed.ends_with('.')
+                && trimmed.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_uppercase())
+                && trimmed.chars().any(|c| c.is_alphabetic())
+            {
+                // Titlecase it
+                let title: String = trimmed
+                    .split_whitespace()
+                    .map(|w| {
+                        let mut chars = w.chars();
+                        match chars.next() {
+                            Some(c) => {
+                                let upper: String = c.to_uppercase().collect();
+                                let lower: String = chars.flat_map(|ch| ch.to_lowercase()).collect();
+                                format!("{}{}", upper, lower)
+                            }
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Self::truncate_summary(&title, 80);
+            }
+            // Section/Article/Clause/Part + number
+            if trimmed.starts_with("Section ")
+                || trimmed.starts_with("Article ")
+                || trimmed.starts_with("Clause ")
+                || trimmed.starts_with("Part ")
+                || trimmed.starts_with("SECTION ")
+                || trimmed.starts_with("ARTICLE ")
+                || trimmed.starts_with("CLAUSE ")
+                || trimmed.starts_with("PART ")
+            {
+                return Self::truncate_summary(trimmed, 80);
+            }
+            // Numbered heading like "5. Termination" or "12.1 Indemnification"
+            let bytes = trimmed.as_bytes();
+            if !bytes.is_empty()
+                && bytes[0].is_ascii_digit()
+                && (trimmed.contains(". ") || trimmed.contains(' '))
+            {
+                // Make sure there's a text part after the number
+                if let Some(pos) = trimmed.find(|c: char| c.is_alphabetic()) {
+                    if pos < trimmed.len() && trimmed.len() <= 60 {
+                        return Self::truncate_summary(trimmed, 80);
+                    }
+                }
+            }
+        }
+
+        // Layer 2 — keyword extraction fallback
+        let full_text = text.trim();
+        if full_text.len() < 150 {
+            // Very short chunk: use first sentence truncated
+            let end = full_text.find(|c: char| c == '.' || c == '!' || c == '?');
+            if let Some(pos) = end {
+                return Self::truncate_summary(&full_text[..=pos], 80);
+            }
+            return Self::truncate_summary(full_text, 80);
+        }
+
+        // Stopwords: English + legal boilerplate
+        const STOPWORDS: &[&str] = &[
+            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+            "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
+            "being", "have", "has", "had", "do", "does", "did", "will", "would",
+            "could", "should", "may", "might", "can", "this", "that", "these",
+            "those", "it", "its", "not", "no", "nor", "if", "then", "than",
+            "so", "as", "any", "all", "each", "every", "such", "other", "into",
+            "upon", "under", "over", "between", "through", "after", "before",
+            // Legal boilerplate
+            "shall", "hereby", "thereof", "herein", "pursuant", "notwithstanding",
+            "hereinafter", "therein", "thereto", "whereas", "hereunder", "hereof",
+            "aforesaid", "foregoing", "witnesseth", "provided",
+        ];
+        let stopset: std::collections::HashSet<&str> = STOPWORDS.iter().copied().collect();
+
+        let mut freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for word in full_text
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 2)
+        {
+            let lower = word.to_lowercase();
+            if !stopset.contains(lower.as_str()) {
+                *freq.entry(lower).or_insert(0) += 1;
+            }
+        }
+
+        let mut terms: Vec<(String, usize)> = freq.into_iter().collect();
+        terms.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let top: Vec<&str> = terms.iter().take(4).map(|(t, _)| t.as_str()).collect();
+        if top.is_empty() {
+            return Self::truncate_summary(full_text, 80);
+        }
+
+        if top.len() <= 2 {
+            format!("Covers: {}", top.join(", "))
+        } else {
+            let last = top.last().unwrap();
+            let rest = &top[..top.len() - 1];
+            format!("Covers: {}, and {}", rest.join(", "), last)
+        }
+    }
+
+    fn truncate_summary(s: &str, max_chars: usize) -> String {
+        if s.chars().count() <= max_chars {
+            s.to_string()
+        } else {
+            let end = s
+                .char_indices()
+                .nth(max_chars)
+                .map(|(i, _)| i)
+                .unwrap_or(s.len());
+            format!("{}…", &s[..end])
+        }
+    }
+
+    /// Extract the best excerpt from chunk text relevant to the query.
+    /// Returns 2–3 sentences around the most relevant sentence for richer context.
     /// Strips private-use-area codepoints and control chars so the UI never
     /// displays "encrypted"-looking characters from badly-encoded PDFs.
     pub fn best_excerpt(text: &str, query: &str) -> String {
@@ -455,16 +601,12 @@ impl RagState {
             })
             .collect();
 
-        let sentences: Vec<&str> = sanitized
-            .split(|c: char| c == '.' || c == '!' || c == '?')
-            .map(|s| s.trim())
-            .filter(|s| s.len() > 20)
-            .collect();
+        let sentences = Self::split_sentences(&sanitized);
 
         if sentences.is_empty() {
             let end = sanitized
                 .char_indices()
-                .nth(280)
+                .nth(450)
                 .map(|(i, _)| i)
                 .unwrap_or(sanitized.len());
             return sanitized[..end].to_string();
@@ -473,15 +615,21 @@ impl RagState {
         let query_words: std::collections::HashSet<String> = query
             .to_lowercase()
             .split(|c: char| !c.is_alphabetic())
-            .filter(|w| w.len() > 3)
+            .filter(|w| w.len() > 2)
             .map(|w| w.to_string())
             .collect();
 
-        let mut best = sentences[0];
-        let mut best_score = 0.0f32;
+        let mut best_idx = 0;
+        let mut best_score = -1.0f32;
 
-        for sentence in &sentences {
-            let words: Vec<&str> = sentence.split(|c: char| !c.is_alphabetic()).collect();
+        for (i, sentence) in sentences.iter().enumerate() {
+            let words: Vec<&str> = sentence
+                .split(|c: char| !c.is_alphabetic())
+                .filter(|w| !w.is_empty())
+                .collect();
+            if words.is_empty() {
+                continue;
+            }
             let hits = words
                 .iter()
                 .filter(|w| query_words.contains(&w.to_lowercase()))
@@ -489,19 +637,163 @@ impl RagState {
             let score = hits as f32 / (words.len() as f32).sqrt();
             if score > best_score {
                 best_score = score;
-                best = sentence;
+                best_idx = i;
             }
         }
 
-        let end = best
+        // Gather best sentence + 1 before and 1 after for richer context
+        let start = if best_idx > 0 { best_idx - 1 } else { 0 };
+        let end = (best_idx + 2).min(sentences.len());
+        let excerpt = sentences[start..end].join(". ");
+
+        // Truncate to 500 chars
+        let char_end = excerpt
             .char_indices()
-            .nth(320)
+            .nth(500)
             .map(|(i, _)| i)
-            .unwrap_or(best.len());
-        if best.len() > 320 {
-            format!("{}…", &best[..end])
+            .unwrap_or(excerpt.len());
+        if excerpt.len() > char_end {
+            format!("{}…", &excerpt[..char_end])
         } else {
-            best.to_string()
+            excerpt
         }
+    }
+
+    /// Split text into sentences, handling common legal abbreviations
+    /// (U.S., Inc., No., Art., Sec., etc.) that would otherwise cause
+    /// false sentence breaks.
+    fn split_sentences(text: &str) -> Vec<&str> {
+        // Abbreviations where a period does NOT end a sentence
+        const ABBREVS: &[&str] = &[
+            "U.S", "u.s", "Inc", "Corp", "Ltd", "Co", "Jr", "Sr", "Dr",
+            "Mr", "Mrs", "Ms", "Prof", "Rev", "Gen", "Gov", "Sgt",
+            "No", "Nos", "Art", "Sec", "Dept", "Div", "Ch", "Vol",
+            "Fig", "App", "Exh", "Cl", "Par", "Sub", "Amdt",
+            "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep",
+            "Oct", "Nov", "Dec", "St", "Ave", "Blvd", "Ct", "Rd",
+            "v", "vs", "et", "al", "e.g", "i.e", "cf",
+        ];
+
+        let mut result = Vec::new();
+        let mut start = 0;
+        let bytes = text.as_bytes();
+        let len = bytes.len();
+
+        let mut i = 0;
+        while i < len {
+            let b = bytes[i];
+            if b == b'.' || b == b'!' || b == b'?' {
+                // Check if this period is part of an abbreviation
+                if b == b'.' {
+                    // Look back for the word before this period
+                    let word_start = text[..i]
+                        .rfind(|c: char| c.is_whitespace() || c == '(' || c == '"')
+                        .map(|p| p + 1)
+                        .unwrap_or(0);
+                    let word = &text[word_start..i];
+                    // Skip if it's a known abbreviation or a single capital letter (initials)
+                    if ABBREVS.iter().any(|a| word.ends_with(a))
+                        || (word.len() == 1 && word.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
+                        // Skip decimal numbers like "3.5"
+                        || (i + 1 < len && bytes[i + 1].is_ascii_digit())
+                    {
+                        i += 1;
+                        continue;
+                    }
+                }
+                // This is a real sentence boundary
+                let sentence = text[start..=i].trim();
+                if sentence.len() > 15 {
+                    result.push(sentence);
+                }
+                start = i + 1;
+            }
+            i += 1;
+        }
+        // Trailing text without terminal punctuation
+        let tail = text[start..].trim();
+        if tail.len() > 15 {
+            result.push(tail);
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summarize_all_caps_heading() {
+        let text = "TERMINATION AND DEFAULT\nThe landlord may terminate this agreement upon 30 days written notice to the tenant if the tenant fails to pay rent.";
+        let summary = RagState::summarize_chunk(text);
+        assert_eq!(summary, "Termination And Default");
+    }
+
+    #[test]
+    fn summarize_section_heading() {
+        let text = "Section 5. Indemnification\nEach party shall indemnify the other against all losses arising from breach.";
+        let summary = RagState::summarize_chunk(text);
+        assert_eq!(summary, "Section 5. Indemnification");
+    }
+
+    #[test]
+    fn summarize_article_heading() {
+        let text = "ARTICLE III\nThe company shall maintain adequate insurance coverage at all times during the term of this agreement.";
+        let summary = RagState::summarize_chunk(text);
+        assert_eq!(summary, "Article Iii");
+    }
+
+    #[test]
+    fn summarize_numbered_heading() {
+        let text = "12.1 Governing Law\nThis agreement shall be governed by the laws of the State of California.";
+        let summary = RagState::summarize_chunk(text);
+        assert_eq!(summary, "12.1 Governing Law");
+    }
+
+    #[test]
+    fn summarize_keyword_fallback() {
+        // Long chunk with no heading — should produce keyword summary
+        let text = "The tenant agrees to pay monthly rent of $2,500 on the first day of each calendar month. Late payment fees of $100 will be assessed for any payment received after the fifth day. The landlord reserves the right to increase rent upon 60 days written notice.";
+        let summary = RagState::summarize_chunk(text);
+        assert!(summary.starts_with("Covers: "), "got: {}", summary);
+    }
+
+    #[test]
+    fn summarize_short_chunk_uses_first_sentence() {
+        let text = "Rent is due on the first of each month.";
+        let summary = RagState::summarize_chunk(text);
+        assert_eq!(summary, "Rent is due on the first of each month.");
+    }
+
+    #[test]
+    fn summarize_empty_input() {
+        let summary = RagState::summarize_chunk("");
+        assert_eq!(summary, "");
+    }
+
+    #[test]
+    fn summarize_caps_with_trailing_period_not_matched() {
+        // ALL-CAPS with trailing period should NOT be treated as heading
+        let text = "AGREEMENT TERMINATED.\nThis is the rest of the document content that explains the termination in detail with enough words to exceed the minimum threshold.";
+        let summary = RagState::summarize_chunk(text);
+        // Should fall through to keyword or short-text fallback, not titlecase heading
+        assert!(!summary.contains("Agreement Terminated"), "got: {}", summary);
+    }
+
+    #[test]
+    fn summarize_long_caps_line_skipped() {
+        // Line > 60 chars should not be treated as heading
+        let text = "THIS IS A VERY LONG LINE THAT EXCEEDS SIXTY CHARACTERS AND SHOULD NOT BE A HEADING\nActual content follows here with enough words to be meaningful.";
+        let summary = RagState::summarize_chunk(text);
+        assert!(!summary.starts_with("This Is A Very"), "got: {}", summary);
+    }
+
+    #[test]
+    fn truncate_summary_respects_limit() {
+        let long = "A".repeat(100);
+        let result = RagState::truncate_summary(&long, 80);
+        assert!(result.chars().count() <= 81); // 80 + ellipsis
+        assert!(result.ends_with('…'));
     }
 }

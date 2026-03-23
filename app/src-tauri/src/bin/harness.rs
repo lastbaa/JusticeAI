@@ -30,7 +30,7 @@
 
 use app_lib::commands::doc_parser;
 use app_lib::pipeline::{self, RetrievalBackend, RetrievalConfig, RetrievalCorpus};
-use app_lib::state::{AppSettings, ChunkMetadata, DocumentPage};
+use app_lib::state::{AppSettings, ChunkMetadata, DocumentPage, InferenceMode};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1341,11 +1341,12 @@ async fn main() {
         Arc::new(Mutex::new(None));
     let history: Vec<(String, String)> = Vec::new();
 
+    let inference_params = pipeline::InferenceParams::from_mode(&InferenceMode::Balanced);
     match pipeline::ask_saul(&query, &context, &history, &model_dir, model_cache, |tok| {
         print!("{tok}");
         use std::io::Write;
         std::io::stdout().flush().ok();
-    }, None).await {
+    }, None, inference_params).await {
         Ok(answer) => { println!("\n\n--- Final answer ---\n{answer}"); }
         Err(e) => { eprintln!("LLM error: {e}"); }
     }

@@ -691,7 +691,9 @@ pub async fn query(
         .ok();
     let query_vec = embed_text(&question, true, &model_dir).await?;
 
-    let candidate_k = (settings.top_k * 6).min(60);
+    let retrieval_params = pipeline::RetrievalModeParams::from_mode(&settings.inference_mode);
+    let inference_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
+    let candidate_k = retrieval_params.candidate_pool_k;
     let results = {
         let s = state.lock().await;
 
@@ -743,7 +745,7 @@ pub async fn query(
             vectors: filtered_chunks.iter().map(|e| e.vector.as_slice()).collect(),
         };
         let config = pipeline::RetrievalConfig {
-            top_k: settings.top_k,
+            top_k: retrieval_params.top_k,
             candidate_pool_k: candidate_k,
             score_threshold: SCORE_THRESHOLD,
             mmr_lambda: 0.7,
@@ -779,9 +781,12 @@ pub async fn query(
         .collect();
 
     // Neighbor chunk expansion: include adjacent chunks (same file + page) for surrounding context.
+    // Skip for Quick mode — tight context budget makes neighbors wasteful.
     let selected_ids: std::collections::HashSet<&str> =
         results.iter().map(|(_, m)| m.id.as_str()).collect();
-    let neighbor_context_parts = {
+    let neighbor_context_parts = if settings.inference_mode == crate::state::InferenceMode::Quick {
+        Vec::new()
+    } else {
         let s = state.lock().await;
         let mut parts: Vec<String> = Vec::new();
         for (_, meta) in &results {
@@ -803,10 +808,13 @@ pub async fn query(
     };
 
     // Assemble context with per-chunk budget so no chunk is cut mid-sentence.
-    // Saul-7B has a 4096-token context. Budget: 4096 − 1024 (generation) − 250 (overhead) = 2822
-    // tokens for context. Legal text tokenizes at ~2.5 chars/token → 2822 × 2.5 ≈ 7055 chars max.
+    // Saul-7B has a 4096-token context. Budget is mode-dependent (see RetrievalModeParams).
     // When jurisdiction is active, reduce budget to account for extra prompt tokens.
-    let max_context_chars: usize = if resolved_jurisdiction.is_some() { 6_600 } else { 7_000 };
+    let max_context_chars: usize = if resolved_jurisdiction.is_some() {
+        retrieval_params.max_context_chars_jur
+    } else {
+        retrieval_params.max_context_chars_no_jur
+    };
     let separator = "\n\n---\n\n";
     let mut context = String::new();
 
@@ -878,6 +886,7 @@ pub async fn query(
             window_clone.emit("query-token", tok.as_str()).ok();
         },
         resolved_jurisdiction.as_ref(),
+        inference_params,
     )
     .await?;
 
@@ -891,6 +900,9 @@ pub async fn query(
 
     // Always build citations from the retrieved chunks — even on not_found,
     // showing the sources lets the user investigate the document directly.
+    // Normalize scores to 0–1 so the frontend can display meaningful strength
+    // labels (raw RRF scores are tiny, ~0.01–0.03, which breaks threshold UIs).
+    let max_score = results.iter().map(|(s, _)| *s).fold(0.0f32, f32::max);
     let citations: Vec<Citation> = results
         .iter()
         .map(|(score, meta)| Citation {
@@ -898,7 +910,8 @@ pub async fn query(
             file_path: meta.file_path.clone(),
             page_number: meta.page_number,
             excerpt: RagState::best_excerpt(&meta.text, &question),
-            score: *score,
+            summary: RagState::summarize_chunk(&meta.text),
+            score: if max_score > 0.0 { score / max_score } else { 0.0 },
         })
         .collect();
 
@@ -1208,6 +1221,7 @@ mod tests {
             top_k: 6,
             theme: "dark".to_string(),
             jurisdiction: None,
+            inference_mode: crate::state::InferenceMode::default(),
         }
     }
 

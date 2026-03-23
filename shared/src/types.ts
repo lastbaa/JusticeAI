@@ -66,6 +66,7 @@ export interface Citation {
   filePath: string;
   pageNumber: number;
   excerpt: string;
+  summary?: string;
   score: number;
 }
 
@@ -103,12 +104,15 @@ export interface OllamaStatus {
 
 export type Theme = 'dark' | 'light';
 
+export type InferenceMode = 'quick' | 'balanced' | 'extended';
+
 export interface AppSettings {
   chunkSize: number;
   chunkOverlap: number;
   topK: number;
   theme: Theme;
   jurisdiction?: Jurisdiction;
+  inferenceMode: InferenceMode;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -116,6 +120,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chunkOverlap: 150,
   topK: 6,
   theme: 'dark',
+  inferenceMode: 'balanced',
 };
 
 // ─── Model Status Types ────────────────────────────────────────────────────────

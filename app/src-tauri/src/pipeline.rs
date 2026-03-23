@@ -4,7 +4,7 @@
 //! embedding, chunking, LLM inference, and retrieval helpers. Tauri command handlers
 //! remain in `commands/rag.rs` and call into this module.
 
-use crate::state::{AppSettings, ChunkMetadata, DocumentPage, Jurisdiction, JurisdictionLevel, RagState};
+use crate::state::{AppSettings, ChunkMetadata, DocumentPage, InferenceMode, Jurisdiction, JurisdictionLevel, RagState};
 use llama_cpp_2::llama_backend::LlamaBackend;
 use regex::Regex;
 use std::path::Path;
@@ -41,6 +41,79 @@ Format:\n\
 - Use ### headers only to separate distinct topics in longer answers.\n\
 - Keep paragraphs to 2-3 sentences.\n\
 - No pleasantries, preambles, or sign-offs.";
+
+// ── Inference Mode Params ────────────────────────────────────────────────────
+
+pub struct InferenceParams {
+    pub max_new_tokens: usize,
+    pub temperature: f32,
+    pub system_prompt_suffix: &'static str,
+}
+
+impl InferenceParams {
+    /// Context window budget notes (Saul-7B: n_ctx = 4096):
+    ///   prompt_tokens ≈ (sys_prompt + context + question + overhead) / 2.5
+    ///   gen_tokens = 4096 - prompt_tokens
+    /// Quick:    ~2000 prompt → ~2000 gen headroom (256 used)
+    /// Balanced: ~2900 prompt → ~1200 gen headroom (1024 used)
+    /// Extended: ~2900 prompt → ~1200 gen headroom (1024 used, but 10 sources)
+    /// A runtime cap in ask_saul ensures we never overshoot.
+    pub fn from_mode(mode: &InferenceMode) -> Self {
+        match mode {
+            InferenceMode::Quick => Self {
+                max_new_tokens: 256,
+                temperature: 0.3,
+                system_prompt_suffix: "\nAnswer in 2-3 concise bullet points. Focus on the single most relevant fact. Be brief.",
+            },
+            InferenceMode::Balanced => Self {
+                max_new_tokens: 1024,
+                temperature: 0.35,
+                system_prompt_suffix: "",
+            },
+            InferenceMode::Extended => Self {
+                max_new_tokens: 1024,
+                temperature: 0.2,
+                system_prompt_suffix: "\nThink step by step. Cite each claim with page number. Provide comprehensive analysis.",
+            },
+        }
+    }
+}
+
+pub struct RetrievalModeParams {
+    pub top_k: usize,
+    pub candidate_pool_k: usize,
+    pub max_context_chars_jur: usize,
+    pub max_context_chars_no_jur: usize,
+}
+
+impl RetrievalModeParams {
+    /// Budget = (4096 - max_new_tokens - ~600 sys/overhead) * 2.5 chars/token.
+    /// Quick:    (4096-256-600)*2.5 ≈ 8100 → use 3200/3500 (fast, intentionally small)
+    /// Balanced: (4096-1024-600)*2.5 ≈ 6180 → use 5800/6200
+    /// Extended: (4096-1024-600)*2.5 ≈ 6180 → use 5800/6200 (same gen budget, more sources)
+    pub fn from_mode(mode: &InferenceMode) -> Self {
+        match mode {
+            InferenceMode::Quick => Self {
+                top_k: 3,
+                candidate_pool_k: 30,
+                max_context_chars_jur: 3_200,
+                max_context_chars_no_jur: 3_500,
+            },
+            InferenceMode::Balanced => Self {
+                top_k: 6,
+                candidate_pool_k: 60,
+                max_context_chars_jur: 5_800,
+                max_context_chars_no_jur: 6_200,
+            },
+            InferenceMode::Extended => Self {
+                top_k: 10,
+                candidate_pool_k: 80,
+                max_context_chars_jur: 5_800,
+                max_context_chars_no_jur: 6_200,
+            },
+        }
+    }
+}
 
 // ── Jurisdiction Detection ────────────────────────────────────────────────────
 
@@ -457,6 +530,7 @@ pub async fn ask_saul(
     model_cache: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>>,
     on_token: impl Fn(String) + Send + 'static,
     jurisdiction: Option<&Jurisdiction>,
+    inference_params: InferenceParams,
 ) -> Result<String, String> {
     use llama_cpp_2::{
         context::params::LlamaContextParams,
@@ -501,10 +575,12 @@ Answer the current question using ONLY these excerpts.\n\n\
 
     // Inject jurisdiction-specific rules into the system prompt when available.
     let j_fragment = jurisdiction.map(jurisdiction_prompt_fragment).unwrap_or_default();
-    let sys_prompt = if j_fragment.is_empty() {
-        RULES_PROMPT.to_string()
-    } else {
-        format!("{RULES_PROMPT}\n\n{j_fragment}")
+    let mode_suffix = inference_params.system_prompt_suffix;
+    let sys_prompt = match (j_fragment.is_empty(), mode_suffix.is_empty()) {
+        (true, true) => RULES_PROMPT.to_string(),
+        (false, true) => format!("{RULES_PROMPT}\n\n{j_fragment}"),
+        (true, false) => format!("{RULES_PROMPT}{mode_suffix}"),
+        (false, false) => format!("{RULES_PROMPT}\n\n{j_fragment}{mode_suffix}"),
     };
 
     // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
@@ -600,12 +676,20 @@ Answer the current question using ONLY these excerpts.\n\n\
             LlamaSampler::penalties(64, 1.1, 0.0, 0.0),
             LlamaSampler::min_p(0.05, 1),
             LlamaSampler::top_p(0.95, 1),
-            LlamaSampler::temp(0.35),
+            LlamaSampler::temp(inference_params.temperature),
             LlamaSampler::dist(42),
         ]);
         let mut response = String::new();
         let mut pos = n_tokens;
-        let max_new_tokens = 1024usize;
+        // Cap generation to what actually fits in the context window.
+        let available_gen = (n_ctx_size as usize).saturating_sub(n_tokens);
+        let max_new_tokens = inference_params.max_new_tokens.min(available_gen);
+        if max_new_tokens < inference_params.max_new_tokens {
+            log::info!(
+                "Generation capped to {} tokens (prompt used {}/{} tokens).",
+                max_new_tokens, n_tokens, n_ctx_size
+            );
+        }
 
         for _ in 0..max_new_tokens {
             if pos >= n_ctx_size as usize {
@@ -1667,11 +1751,85 @@ mod tests {
             top_k: 6,
             theme: "dark".to_string(),
             jurisdiction: None,
+            inference_mode: InferenceMode::default(),
         }
     }
 
     fn make_page(text: &str) -> DocumentPage {
         DocumentPage { page_number: 1, text: text.to_string() }
+    }
+
+    // ── InferenceParams / RetrievalModeParams ──────────────────────────────
+
+    #[test]
+    fn inference_params_quick() {
+        let p = InferenceParams::from_mode(&InferenceMode::Quick);
+        assert_eq!(p.max_new_tokens, 256);
+        assert!((p.temperature - 0.3).abs() < 0.01);
+        assert!(!p.system_prompt_suffix.is_empty());
+    }
+
+    #[test]
+    fn inference_params_balanced() {
+        let p = InferenceParams::from_mode(&InferenceMode::Balanced);
+        assert_eq!(p.max_new_tokens, 1024);
+        assert!((p.temperature - 0.35).abs() < 0.01);
+        assert!(p.system_prompt_suffix.is_empty());
+    }
+
+    #[test]
+    fn inference_params_extended() {
+        let p = InferenceParams::from_mode(&InferenceMode::Extended);
+        assert_eq!(p.max_new_tokens, 1024);
+        assert!((p.temperature - 0.2).abs() < 0.01);
+        assert!(!p.system_prompt_suffix.is_empty());
+    }
+
+    #[test]
+    fn retrieval_params_scale_with_mode() {
+        let q = RetrievalModeParams::from_mode(&InferenceMode::Quick);
+        let b = RetrievalModeParams::from_mode(&InferenceMode::Balanced);
+        let e = RetrievalModeParams::from_mode(&InferenceMode::Extended);
+
+        // top_k increases across modes
+        assert!(q.top_k < b.top_k);
+        assert!(b.top_k < e.top_k);
+
+        // candidate pool scales with top_k
+        assert!(q.candidate_pool_k <= b.candidate_pool_k);
+        assert!(b.candidate_pool_k <= e.candidate_pool_k);
+
+        // Quick has a tighter context budget
+        assert!(q.max_context_chars_no_jur < b.max_context_chars_no_jur);
+
+        // Extended has at least as much context as Balanced
+        assert!(e.max_context_chars_no_jur >= b.max_context_chars_no_jur);
+
+        // Jurisdiction always reduces budget
+        assert!(q.max_context_chars_jur < q.max_context_chars_no_jur);
+        assert!(b.max_context_chars_jur < b.max_context_chars_no_jur);
+        assert!(e.max_context_chars_jur < e.max_context_chars_no_jur);
+    }
+
+    #[test]
+    fn inference_mode_serde_backward_compat() {
+        // Old settings.json without inferenceMode should deserialize to Balanced
+        let json = r#"{"chunkSize":1000,"chunkOverlap":150,"topK":6,"theme":"dark"}"#;
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.inference_mode, InferenceMode::Balanced);
+    }
+
+    #[test]
+    fn inference_mode_serde_round_trip() {
+        let settings = AppSettings {
+            inference_mode: InferenceMode::Extended,
+            ..default_settings()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        // AppSettings uses camelCase, InferenceMode uses snake_case values
+        assert!(json.contains("\"inferenceMode\":\"extended\""));
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.inference_mode, InferenceMode::Extended);
     }
 
     // ── is_section_header ──────────────────────────────────────────────────

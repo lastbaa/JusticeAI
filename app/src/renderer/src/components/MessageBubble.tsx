@@ -11,16 +11,17 @@ interface Props {
 }
 
 // ── Primary/secondary partition ───────────────────────────────────────────────
-// Top citation is always primary. Any subsequent citation within 0.05 score of
-// the top is also primary (handles ties), capped at 2 primaries total.
+// Primary = top citation + any within 75% of the top score (max 2 primaries).
+// Scores are normalized 0–1 (top is always 1.0), so this is ratio-based.
 function partitionCitations(items: Citation[]): { primary: Citation[]; secondary: Citation[] } {
   if (items.length === 0) return { primary: [], secondary: [] }
   if (items.length === 1) return { primary: items, secondary: [] }
   const topScore = items[0].score
+  const threshold = topScore * 0.75
   const primary: Citation[] = []
   const secondary: Citation[] = []
   for (const c of items) {
-    if (primary.length < 2 && topScore - c.score <= 0.05) primary.push(c)
+    if (primary.length < 2 && c.score >= threshold) primary.push(c)
     else secondary.push(c)
   }
   return { primary, secondary }
@@ -29,7 +30,7 @@ function partitionCitations(items: Citation[]): { primary: Citation[]; secondary
 // ── Deduplicated citation list with "show all" toggle ────────────────────────
 function CitationSources({ citations, onViewCitation }: { citations: Citation[]; onViewCitation?: (c: Citation) => void }): JSX.Element {
   const [showAll, setShowAll] = useState(false)
-  const [secondaryOpen, setSecondaryOpen] = useState(false)
+  const [secondaryOpen, setSecondaryOpen] = useState(() => citations.length <= 3)
 
   // Deduplicate by (fileName, pageNumber) — keep highest-scored citation per page
   const deduped: Citation[] = []
@@ -47,7 +48,7 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
 
   const displayBase = showAll ? citations : deduped
   const { primary: primarySlice, secondary: secondaryAll } = partitionCitations(displayBase)
-  const secondarySlice = secondaryAll.slice(0, 6 - primarySlice.length)
+  const secondarySlice = secondaryAll.slice(0, 4)
 
   return (
     <div className="mt-3">

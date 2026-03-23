@@ -10,6 +10,7 @@ import {
   Citation,
   DEFAULT_SETTINGS,
   FileInfo,
+  InferenceMode,
 } from '../../../../shared/src/types'
 import { v4 as uuidv4 } from 'uuid'
 import Sidebar from './components/Sidebar'
@@ -712,6 +713,11 @@ export default function App(): JSX.Element {
     handleSaveSettings(newSettings)
   }
 
+  function handleInferenceModeChange(mode: InferenceMode): void {
+    const newSettings = { ...settings, inferenceMode: mode }
+    handleSaveSettings(newSettings)
+  }
+
   function handleDeleteMessage(id: string): void {
     setMessages((prev) => {
       const idx = prev.findIndex((m) => m.id === id)
@@ -866,6 +872,8 @@ export default function App(): JSX.Element {
           onToggleTheme={handleToggleTheme}
           onDeleteMessage={handleDeleteMessage}
           onRetryMessage={handleRetryMessage}
+          inferenceMode={settings.inferenceMode ?? 'balanced'}
+          onInferenceModeChange={handleInferenceModeChange}
         />
       </main>
 

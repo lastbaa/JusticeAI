@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, KeyboardEvent } from 'react'
-import { ChatMessage, Citation, FileInfo, Theme } from '../../../../../shared/src/types'
+import { ChatMessage, Citation, FileInfo, InferenceMode, Theme } from '../../../../../shared/src/types'
 import MessageBubble from './MessageBubble'
 import QueryTemplates from './QueryTemplates'
 import FactsPanel from './FactsPanel'
@@ -27,6 +27,8 @@ interface Props {
   onToggleTheme?: () => void
   onDeleteMessage?: (id: string) => void
   onRetryMessage?: (id: string) => void
+  inferenceMode?: InferenceMode
+  onInferenceModeChange?: (mode: InferenceMode) => void
 }
 
 // ── Thinking animation ────────────────────────────────────────────────────────
@@ -190,6 +192,8 @@ export default function ChatInterface({
   onToggleTheme,
   onDeleteMessage,
   onRetryMessage,
+  inferenceMode = 'balanced',
+  onInferenceModeChange,
 }: Props): JSX.Element {
   const [input, setInput] = useState('')
   const [isDragging, setIsDragging] = useState(false)
@@ -627,6 +631,68 @@ export default function ChatInterface({
         </div>
 
         <div className="no-drag flex items-center gap-2 shrink-0">
+          {/* Inference mode toggle */}
+          {onInferenceModeChange && (
+            <div
+              role="radiogroup"
+              aria-label="Inference mode"
+              className="flex items-center rounded-lg overflow-hidden"
+              style={{
+                border: '1px solid rgb(var(--ov) / 0.06)',
+                background: 'rgb(var(--ov) / 0.02)',
+              }}
+            >
+              {([
+                { key: 'quick' as InferenceMode, label: 'Quick', tooltip: 'Faster, shorter answers with fewer sources', icon: (
+                  <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.5 0L5 8h3.5L7 16l7-10H9.5L13 0z"/></svg>
+                )},
+                { key: 'balanced' as InferenceMode, label: 'Balanced', tooltip: 'Standard depth and detail', icon: (
+                  <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a.75.75 0 0 1 .75.75V3h4.5a.75.75 0 0 1 .65 1.126L11.03 8l2.87 3.874A.75.75 0 0 1 13.25 13h-4.5v1.25a.75.75 0 0 1-1.5 0V13h-4.5a.75.75 0 0 1-.65-1.126L4.97 8 2.1 4.126A.75.75 0 0 1 2.75 3h4.5V1.75A.75.75 0 0 1 8 1z"/></svg>
+                )},
+                { key: 'extended' as InferenceMode, label: 'Extended', tooltip: 'Comprehensive analysis with more sources and citations', icon: (
+                  <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.868-3.834zm-5.242.156a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zM6 4v1.5H4.5a.5.5 0 0 0 0 1H6V8a.5.5 0 0 0 1 0V6.5h1.5a.5.5 0 0 0 0-1H7V4a.5.5 0 0 0-1 0z"/></svg>
+                )},
+              ]).map(({ key, label, tooltip, icon }, idx) => {
+                const active = inferenceMode === key
+                return (
+                  <button
+                    key={key}
+                    role="radio"
+                    aria-checked={active}
+                    aria-label={`${label} inference mode — ${tooltip}`}
+                    onClick={() => onInferenceModeChange(key)}
+                    disabled={isQuerying}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium transition-all outline-none focus-visible:ring-1 focus-visible:ring-amber-500/50"
+                    style={{
+                      color: active ? 'rgba(201,168,76,0.95)' : 'rgb(var(--ov) / 0.35)',
+                      background: active ? 'rgba(201,168,76,0.12)' : 'transparent',
+                      borderLeft: idx > 0 ? '1px solid rgb(var(--ov) / 0.06)' : 'none',
+                      opacity: isQuerying ? 0.5 : 1,
+                      cursor: isQuerying ? 'not-allowed' : 'pointer',
+                    }}
+                    title={tooltip}
+                    onMouseEnter={(e) => {
+                      if (!active && !isQuerying) {
+                        const el = e.currentTarget
+                        el.style.color = 'rgba(201,168,76,0.6)'
+                        el.style.background = 'rgba(201,168,76,0.04)'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!active) {
+                        const el = e.currentTarget
+                        el.style.color = 'rgb(var(--ov) / 0.35)'
+                        el.style.background = 'transparent'
+                      }
+                    }}
+                  >
+                    {icon}
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           {/* Doc count pill */}
           {files.length > 0 && (
             <div

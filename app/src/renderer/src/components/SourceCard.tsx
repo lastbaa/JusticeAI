@@ -7,10 +7,12 @@ interface Props {
   isPrimary?: boolean
 }
 
-function relevanceLabel(score: number): { label: string; color: string } {
-  if (score >= 0.40) return { label: 'Strong', color: '#3fb950' }
-  if (score >= 0.22) return { label: 'Good',   color: '#c9a84c' }
-  return                    { label: 'Weak',   color: 'rgb(var(--ov) / 0.28)' }
+function relevanceLabel(score: number): { label: string; color: string; pct: number } {
+  const pct = Math.round(score * 100)
+  if (score >= 0.80) return { label: 'Strong', color: '#3fb950', pct }
+  if (score >= 0.55) return { label: 'Good',   color: '#c9a84c', pct }
+  if (score >= 0.30) return { label: 'Fair',   color: '#d29922', pct }
+  return                    { label: 'Weak',   color: 'rgb(var(--ov) / 0.35)', pct }
 }
 
 export default function SourceCard({ citation, onView, isPrimary = false }: Props): JSX.Element {
@@ -18,6 +20,9 @@ export default function SourceCard({ citation, onView, isPrimary = false }: Prop
   const [copied, setCopied] = useState(false)
   const ext = citation.fileName.split('.').pop()?.toUpperCase() ?? 'DOC'
   const rel = relevanceLabel(citation.score)
+
+  const displaySummary = citation.summary ||
+    (citation.excerpt.length > 80 ? citation.excerpt.slice(0, 80) + '…' : citation.excerpt)
 
   function handleCopyExcerpt(e: React.MouseEvent): void {
     e.stopPropagation()
@@ -76,7 +81,7 @@ export default function SourceCard({ citation, onView, isPrimary = false }: Prop
         )}
       </div>
 
-      {/* Right: file info + excerpt */}
+      {/* Right: file info + summary + excerpt */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2 mb-1">
           <span
@@ -86,35 +91,57 @@ export default function SourceCard({ citation, onView, isPrimary = false }: Prop
           >
             {citation.fileName}
           </span>
-          <div className="shrink-0 flex items-center gap-1.5">
-            <span
-              style={{
-                display: 'inline-block',
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: rel.color,
-                opacity: 0.85,
-              }}
-            />
-            <span className="text-[10px]" style={{ color: rel.color, opacity: 0.85 }}>
-              {rel.label}
-            </span>
+          <div className="shrink-0 flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <div
+                style={{
+                  width: 32,
+                  height: 4,
+                  borderRadius: 2,
+                  background: 'rgb(var(--ov) / 0.08)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${rel.pct}%`,
+                    height: '100%',
+                    borderRadius: 2,
+                    background: rel.color,
+                    transition: 'width 0.3s ease',
+                  }}
+                />
+              </div>
+              <span className="text-[10px] font-medium" style={{ color: rel.color }}>
+                {rel.label} {rel.pct}%
+              </span>
+            </div>
             <span className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
-              · p.{citation.pageNumber}
+              p.{citation.pageNumber}
             </span>
           </div>
         </div>
+
+        {/* Summary line — always visible */}
         <p
-          className="text-[11px] leading-relaxed italic"
-          style={{ color: 'rgb(var(--ov) / 0.35)' }}
+          className="text-[11.5px] leading-relaxed"
+          style={{ color: 'rgb(var(--ov) / 0.6)' }}
         >
-          "{isPrimary
-            ? citation.excerpt
-            : citation.excerpt.length > 140
-              ? citation.excerpt.slice(0, 140) + '…'
-              : citation.excerpt}"
+          {displaySummary}
         </p>
+
+        {/* Raw excerpt — only on Key Source cards, smaller italic below summary */}
+        {isPrimary && citation.excerpt && (
+          <p
+            className="text-[10.5px] leading-relaxed italic mt-1"
+            style={{ color: 'rgb(var(--ov) / 0.38)' }}
+          >
+            &ldquo;{citation.excerpt.length > 180
+              ? citation.excerpt.slice(0, 180) + '…'
+              : citation.excerpt}&rdquo;
+          </p>
+        )}
+
         <div className="mt-1.5 flex items-center gap-3">
             {onView && (
               <p className="text-[10px] font-semibold" style={{ color: hovered ? 'rgba(201,168,76,0.75)' : 'rgba(201,168,76,0.35)' }}>
