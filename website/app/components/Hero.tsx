@@ -56,7 +56,7 @@ export default function Hero() {
       <div className="relative z-20 max-w-4xl mx-auto flex flex-col items-center pb-12">
 
         {/* Floating scales icon with multi-ring treatment */}
-        <div className="hero-icon mb-10 relative inline-flex items-center justify-center">
+        <div className="hero-icon mt-6 mb-10 relative inline-flex items-center justify-center">
           {/* Outermost pulse ring */}
           <div
             className="absolute rounded-full ring-pulse"
