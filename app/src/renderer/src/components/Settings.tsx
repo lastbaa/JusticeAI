@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AppSettings, Jurisdiction, JurisdictionLevel, Theme } from '../../../../../shared/src/types'
 
 // ── Practice Area Presets ─────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ function findActivePreset(s: AppSettings): string | null {
   const match = PRESETS.find(
     (p) => p.chunkSize === s.chunkSize && p.chunkOverlap === s.chunkOverlap && p.topK === s.topK
   )
-  return match?.name ?? null
+  return match?.name ?? 'General'
 }
 
 // ── Shared UI Components ──────────────────────────────────────────────────────
@@ -69,6 +69,87 @@ function Field({
         </p>
       )}
       {children}
+    </div>
+  )
+}
+
+// ── Custom styled select (replaces ugly native <select>) ─────────────────────
+function StyledSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (value: string) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent): void {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const selected = options.find((o) => o.value === value)
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-[12px] outline-none transition-colors"
+        style={{
+          background: 'var(--surface-dark)',
+          color: 'var(--text)',
+          border: open ? '1px solid rgba(201,168,76,0.35)' : '1px solid rgb(var(--ov) / 0.08)',
+        }}
+      >
+        <span>{selected?.label ?? value}</span>
+        <svg
+          width="10" height="10" viewBox="0 0 10 10" fill="none"
+          stroke="rgb(var(--ov) / 0.35)" strokeWidth="1.6" strokeLinecap="round"
+          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' }}
+        >
+          <path d="M2 3.5l3 3 3-3" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute z-50 mt-1 w-full rounded-lg py-1 overflow-auto"
+          style={{
+            background: 'var(--surface-dark)',
+            border: '1px solid rgba(201,168,76,0.15)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            maxHeight: 200,
+          }}
+        >
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => { onChange(opt.value); setOpen(false) }}
+              className="w-full text-left px-3 py-1.5 text-[12px] transition-colors"
+              style={{
+                background: opt.value === value ? 'rgba(201,168,76,0.1)' : 'transparent',
+                color: opt.value === value ? 'var(--gold)' : 'var(--text)',
+              }}
+              onMouseEnter={(e) => {
+                if (opt.value !== value) (e.currentTarget as HTMLButtonElement).style.background = 'rgb(var(--ov) / 0.06)'
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = opt.value === value ? 'rgba(201,168,76,0.1)' : 'transparent'
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -304,10 +385,16 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
           style={{ borderBottom: '1px solid rgb(var(--ov) / 0.06)' }}
         >
           <div className="flex items-center gap-2.5">
-            <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
-              <rect x="1" y="3" width="11" height="4" rx="1.25" fill="#c9a84c" transform="rotate(45 6.5 5)" />
-              <line x1="10.5" y1="10.5" x2="18.5" y2="18.5" stroke="#c9a84c" strokeWidth="2.5" strokeLinecap="round" />
-              <rect x="0.5" y="16.5" width="8.5" height="2.5" rx="0.75" fill="#c9a84c" opacity="0.38" />
+            <svg width="15" height="15" viewBox="0 0 28 28" fill="none">
+              <circle cx="14" cy="5" r="1.5" fill="#c9a84c" />
+              <rect x="13.25" y="5" width="1.5" height="16" fill="#c9a84c" />
+              <rect x="9" y="21" width="10" height="1.5" rx="0.75" fill="#c9a84c" />
+              <rect x="12" y="22.5" width="4" height="1.5" rx="0.75" fill="#c9a84c" />
+              <rect x="5" y="8.25" width="18" height="1.5" rx="0.75" fill="#c9a84c" />
+              <line x1="7" y1="9.75" x2="5.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
+              <line x1="21" y1="9.75" x2="22.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
+              <path d="M3 17 Q5.5 20 8 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+              <path d="M20 17 Q22.5 20 25 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
             </svg>
             <h2 className="text-[14px] font-semibold" style={{ color: 'var(--text)' }}>Settings</h2>
           </div>
@@ -443,10 +530,15 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
             </p>
             <div className="flex flex-col gap-3">
               <Field label="Level">
-                <select
+                <StyledSelect
                   value={local.jurisdiction?.level ?? 'auto'}
-                  onChange={(e) => {
-                    const val = e.target.value
+                  options={[
+                    { value: 'auto', label: 'Auto (from documents)' },
+                    { value: 'federal', label: 'Federal' },
+                    { value: 'state', label: 'State' },
+                    { value: 'county', label: 'County' },
+                  ]}
+                  onChange={(val) => {
                     if (val === 'auto') {
                       setLocal((prev) => ({ ...prev, jurisdiction: undefined }))
                     } else {
@@ -460,44 +552,26 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
                       }))
                     }
                   }}
-                  className="w-full rounded-lg px-3 py-2 text-[12px] outline-none"
-                  style={{
-                    background: 'var(--surface-dark)',
-                    color: 'var(--text)',
-                    border: '1px solid rgb(var(--ov) / 0.08)',
-                  }}
-                >
-                  <option value="auto">Auto (from documents)</option>
-                  <option value="federal">Federal</option>
-                  <option value="state">State</option>
-                  <option value="county">County</option>
-                </select>
+                />
               </Field>
 
               {(local.jurisdiction?.level === 'state' || local.jurisdiction?.level === 'county') && (
                 <Field label="State">
-                  <select
+                  <StyledSelect
                     value={local.jurisdiction?.state ?? ''}
-                    onChange={(e) => {
+                    options={[
+                      { value: '', label: 'Select state...' },
+                      ...US_STATES.map((s) => ({ value: s, label: s })),
+                    ]}
+                    onChange={(val) => {
                       setLocal((prev) => ({
                         ...prev,
                         jurisdiction: prev.jurisdiction
-                          ? { ...prev.jurisdiction, state: e.target.value || undefined }
-                          : { level: 'state', state: e.target.value || undefined },
+                          ? { ...prev.jurisdiction, state: val || undefined }
+                          : { level: 'state' as JurisdictionLevel, state: val || undefined },
                       }))
                     }}
-                    className="w-full rounded-lg px-3 py-2 text-[12px] outline-none"
-                    style={{
-                      background: 'var(--surface-dark)',
-                      color: 'var(--text)',
-                      border: '1px solid rgb(var(--ov) / 0.08)',
-                    }}
-                  >
-                    <option value="">Select state...</option>
-                    {US_STATES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                  />
                 </Field>
               )}
 

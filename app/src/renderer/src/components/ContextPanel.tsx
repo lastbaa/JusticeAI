@@ -228,26 +228,6 @@ export default function ContextPanel({
             </span>
           )}
         </div>
-        <button
-          onClick={onAddFiles}
-          disabled={isLoading}
-          title="Add documents"
-          aria-label="Add documents"
-          className="no-drag flex h-6 w-6 items-center justify-center rounded-md transition-all disabled:opacity-40"
-          style={{ color: 'rgb(var(--ov) / 0.3)' }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.6)'
-            ;(e.currentTarget as HTMLButtonElement).style.background = 'rgb(var(--ov) / 0.05)'
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.3)'
-            ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-          }}
-        >
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2z" />
-          </svg>
-        </button>
       </div>
 
       {/* ── Two-pane body: sources (top) + documents (bottom) ── */}

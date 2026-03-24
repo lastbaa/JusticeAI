@@ -43,7 +43,7 @@ function getActivePracticeArea(s: AppSettings): string | null {
   const m = PRACTICE_AREA_PRESETS.find(
     (p) => p.chunkSize === s.chunkSize && p.chunkOverlap === s.chunkOverlap && p.topK === s.topK
   )
-  return m?.name ?? null
+  return m?.name ?? 'General'
 }
 
 export default function App(): JSX.Element {
@@ -268,8 +268,8 @@ export default function App(): JSX.Element {
   async function handleClearFiles(): Promise<void> {
     if (files.length === 0) return
     const ok = await confirm(
-      `Remove all ${files.length} document${files.length === 1 ? '' : 's'}? This will clear the vector index.`,
-      { title: 'Clear Documents', kind: 'warning' }
+      `Strike all ${files.length} document${files.length === 1 ? '' : 's'} from the record? This will clear the vector index.`,
+      { title: 'Strike from the Record', kind: 'warning' }
     )
     if (!ok) return
     try {
@@ -277,7 +277,7 @@ export default function App(): JSX.Element {
       setFiles([])
       setLastCitations([])
       setPageTexts([])
-      addToast('success', 'All documents removed')
+      addToast('success', 'Documents struck from the record')
     } catch (err) {
       console.error('Failed to clear files:', err)
       addToast('error', 'Failed to remove documents')
@@ -287,15 +287,15 @@ export default function App(): JSX.Element {
   async function handleClearSessions(): Promise<void> {
     if (sessions.length === 0) return
     const ok = await confirm(
-      `Delete all ${sessions.length} conversation${sessions.length === 1 ? '' : 's'}? This cannot be undone.`,
-      { title: 'Clear All Chats', kind: 'warning' }
+      `Strike all ${sessions.length} conversation${sessions.length === 1 ? '' : 's'} from the record? This cannot be undone.`,
+      { title: 'Strike from the Record', kind: 'warning' }
     )
     if (!ok) return
     try {
       await Promise.all(sessions.map((s) => window.api.deleteSession(s.id)))
       setSessions([])
       handleNewChat()
-      addToast('success', 'All conversations deleted')
+      addToast('success', 'All conversations struck from the record')
     } catch (err) {
       console.error('Failed to clear sessions:', err)
       addToast('error', 'Failed to delete conversations')
@@ -563,15 +563,15 @@ export default function App(): JSX.Element {
   async function handleDeleteSession(sessionId: string): Promise<void> {
     const session = sessions.find((s) => s.id === sessionId)
     const ok = await confirm(
-      `Delete "${session?.name ?? 'this conversation'}"?`,
-      { title: 'Delete Chat', kind: 'warning' }
+      `Strike "${session?.name ?? 'this conversation'}" from the record?`,
+      { title: 'Strike from the Record', kind: 'warning' }
     )
     if (!ok) return
     try {
       await window.api.deleteSession(sessionId)
       setSessions((prev) => prev.filter((s) => s.id !== sessionId))
       if (sessionId === currentSessionId) handleNewChat()
-      addToast('success', 'Conversation deleted')
+      addToast('success', 'Struck from the record')
     } catch (err) {
       console.error('Failed to delete session:', err)
       addToast('error', 'Failed to delete conversation')
@@ -937,9 +937,9 @@ export default function App(): JSX.Element {
             style={{ background: 'var(--modal-bg)', color: 'var(--fg)', maxWidth: 420, width: '90%' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 id="delete-case-title" className="text-lg font-semibold mb-2">Delete Case</h3>
+            <h3 id="delete-case-title" className="text-lg font-semibold mb-2">Strike from the Record</h3>
             <p id="delete-case-desc" className="text-sm mb-4" style={{ color: 'var(--fg-muted)' }}>
-              Delete &ldquo;{deleteCaseTarget.name}&rdquo;? Choose what happens to its files and sessions.
+              Strike &ldquo;{deleteCaseTarget.name}&rdquo; from the record? Choose what happens to its files and sessions.
             </p>
             <div className="flex flex-col gap-2">
               <button

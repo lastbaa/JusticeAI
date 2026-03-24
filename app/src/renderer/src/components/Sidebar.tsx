@@ -339,10 +339,22 @@ export default function Sidebar({
   const [newCaseName, setNewCaseName] = useState('')
   const [editingProjectName, setEditingProjectName] = useState(false)
   const [projectEditName, setProjectEditName] = useState('')
+  const [projectsOpen, setProjectsOpen] = useState(true)
+  const [chatsOpen, setChatsOpen] = useState(true)
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
   const newCaseInputRef = useRef<HTMLInputElement>(null)
   const projectNameInputRef = useRef<HTMLInputElement>(null)
   const caseCreatedRef = useRef(false)
   const projectNameCommittedRef = useRef(false)
+
+  function toggleProject(id: string): void {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   useEffect(() => {
     if (collapsed) setSearchQuery('')
@@ -398,8 +410,11 @@ export default function Sidebar({
         overflow: 'hidden',
       }}
     >
-      {/* Drag region + logo */}
-      <div className="drag-region flex items-center gap-2.5 px-4 pt-4 pb-3">
+      {/* Traffic-light safe zone (macOS overlay titlebar) */}
+      <div className="drag-region h-[38px] shrink-0" />
+
+      {/* Logo row */}
+      <div className="flex items-center gap-2.5 px-4 pb-2.5">
         <button
           onClick={onGoHome}
           aria-label="Go to home screen"
@@ -669,7 +684,7 @@ export default function Sidebar({
           <div className="flex-1 overflow-y-auto px-2 py-1">
             {visibleSessions.length === 0 ? (
               <div className="flex flex-col items-center py-8 text-center px-4">
-                <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>No conversations yet</p>
+                <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>No matters on file</p>
                 <p className="mt-0.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>Start a chat to begin</p>
               </div>
             ) : (
@@ -733,12 +748,12 @@ export default function Sidebar({
            MODE 1: HOME VIEW
            ══════════════════════════════════════════════════════════════ */
         <>
-          {/* New Chat + New Project buttons */}
-          <div className="px-3 pt-0 pb-3 flex gap-2">
+          {/* New Chat button */}
+          <div className="px-3 pt-0 pb-3">
             <button
               onClick={onNewChat}
               aria-label="New chat"
-              className="no-drag flex flex-1 items-center gap-2.5 rounded-xl px-3 py-2.5 text-[12px] font-medium transition-all"
+              className="no-drag flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[12px] font-medium transition-all"
               style={{
                 background: 'rgb(var(--ov) / 0.04)',
                 border: '1px solid rgb(var(--ov) / 0.07)',
@@ -762,145 +777,209 @@ export default function Sidebar({
               </svg>
               New chat
             </button>
-            <button
-              onClick={() => { setCreatingCase(true); caseCreatedRef.current = false; setTimeout(() => newCaseInputRef.current?.focus(), 0) }}
-              title="New project"
-              className="no-drag flex items-center gap-1.5 rounded-xl px-3 py-2.5 text-[12px] font-medium transition-all shrink-0"
-              style={{
-                background: 'rgba(201,168,76,0.05)',
-                border: '1px solid rgba(201,168,76,0.12)',
-                color: 'rgba(201,168,76,0.6)',
-              }}
-              onMouseEnter={(e) => {
-                const el = e.currentTarget as HTMLButtonElement
-                el.style.background = 'rgba(201,168,76,0.1)'
-                el.style.color = '#c9a84c'
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget as HTMLButtonElement
-                el.style.background = 'rgba(201,168,76,0.05)'
-                el.style.color = 'rgba(201,168,76,0.6)'
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
-              </svg>
-              Project
-            </button>
           </div>
 
-          {/* New project inline input */}
-          {creatingCase && (
-            <div className="px-3 pb-2">
-              <div
-                className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
-                style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)' }}
+          {/* Scrollable content area */}
+          <div className="flex-1 overflow-y-auto px-2 py-1">
+
+            {/* ── Projects section ── */}
+            <div className="mb-1">
+              {/* Collapsible header */}
+              <button
+                onClick={() => setProjectsOpen((v) => !v)}
+                className="no-drag flex w-full items-center gap-2 px-3 py-1.5 rounded-md transition-colors"
+                style={{ color: 'rgba(201,168,76,0.5)' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgb(var(--ov) / 0.03)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
               >
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="rgba(201,168,76,0.6)" className="shrink-0">
-                  <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
-                </svg>
-                <input
-                  ref={newCaseInputRef}
-                  value={newCaseName}
-                  onChange={(e) => setNewCaseName(e.target.value)}
-                  onBlur={() => {
-                    if (!caseCreatedRef.current) {
-                      caseCreatedRef.current = true
-                      const trimmed = newCaseName.trim()
-                      if (trimmed) onCreateCase(trimmed)
-                    }
-                    setNewCaseName('')
-                    setCreatingCase(false)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      if (!caseCreatedRef.current) {
-                        caseCreatedRef.current = true
-                        const trimmed = newCaseName.trim()
-                        if (trimmed) onCreateCase(trimmed)
-                      }
-                      setNewCaseName('')
-                      setCreatingCase(false)
-                    }
-                    if (e.key === 'Escape') { caseCreatedRef.current = true; setNewCaseName(''); setCreatingCase(false) }
-                  }}
-                  placeholder="Project name..."
-                  className="flex-1 bg-transparent text-[11px] outline-none placeholder:text-[rgba(201,168,76,0.35)]"
-                  style={{ color: 'var(--text)' }}
-                  maxLength={60}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="mx-3 mb-2 h-px" style={{ background: 'rgb(var(--ov) / 0.04)' }} />
-
-          {/* Projects section */}
-          {cases.length > 0 && (
-            <div className="px-2 pb-3">
-              <div className="flex items-center px-3 mb-2">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgba(201,168,76,0.45)' }}>
-                  Projects
-                </span>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {cases.map((c) => (
-                  <ProjectCard
-                    key={c.id}
-                    caseItem={c}
-                    sessionCount={sessions.filter((s) => s.caseId === c.id).length}
-                    docCount={files.filter((f) => f.caseId === c.id).length}
-                    onSelect={() => onSelectCase(c.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Divider before recent chats */}
-          {cases.length > 0 && sessions.filter((s) => !s.caseId).length > 0 && (
-            <div className="mx-3 mb-2 h-px" style={{ background: 'rgb(var(--ov) / 0.04)' }} />
-          )}
-
-          {/* Recent Chats (uncategorized) header + search */}
-          {sessions.length > 0 && (
-            <>
-              <div className="flex items-center justify-between px-5 mb-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>
-                  Recent Chats
-                </span>
-                <button
-                  onClick={onClearSessions}
-                  title="Clear all conversations"
-                  aria-label="Clear all conversations"
-                  className="flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-md transition-all"
-                  style={{
-                    background: 'rgb(var(--ov) / 0.04)',
-                    border: '1px solid rgb(var(--ov) / 0.08)',
-                    color: 'rgb(var(--ov) / 0.25)',
-                  }}
-                  onMouseEnter={(e) => {
-                    const el = e.currentTarget as HTMLButtonElement
-                    el.style.color = '#f85149'
-                    el.style.borderColor = 'rgba(248,81,73,0.3)'
-                  }}
-                  onMouseLeave={(e) => {
-                    const el = e.currentTarget as HTMLButtonElement
-                    el.style.color = 'rgb(var(--ov) / 0.25)'
-                    el.style.borderColor = 'rgb(var(--ov) / 0.08)'
-                  }}
+                <svg
+                  width="8" height="8" viewBox="0 0 16 16" fill="currentColor"
+                  style={{ transition: 'transform 0.15s ease', transform: projectsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
                 >
-                  <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15z" />
+                  <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/>
+                </svg>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.1em]">Projects</span>
+                {/* New project button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setCreatingCase(true); caseCreatedRef.current = false; setTimeout(() => newCaseInputRef.current?.focus(), 0) }}
+                  title="New project"
+                  className="no-drag ml-auto flex h-4 w-4 items-center justify-center rounded transition-colors"
+                  style={{ color: 'rgba(201,168,76,0.4)' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#c9a84c' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.4)' }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2z" />
                   </svg>
-                  Clear all
                 </button>
+              </button>
+
+              {/* New project inline input */}
+              {creatingCase && projectsOpen && (
+                <div className="px-3 py-1">
+                  <div
+                    className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+                    style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)' }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="rgba(201,168,76,0.6)" className="shrink-0">
+                      <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
+                    </svg>
+                    <input
+                      ref={newCaseInputRef}
+                      value={newCaseName}
+                      onChange={(e) => setNewCaseName(e.target.value)}
+                      onBlur={() => {
+                        if (!caseCreatedRef.current) {
+                          caseCreatedRef.current = true
+                          const trimmed = newCaseName.trim()
+                          if (trimmed) onCreateCase(trimmed)
+                        }
+                        setNewCaseName('')
+                        setCreatingCase(false)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          if (!caseCreatedRef.current) {
+                            caseCreatedRef.current = true
+                            const trimmed = newCaseName.trim()
+                            if (trimmed) onCreateCase(trimmed)
+                          }
+                          setNewCaseName('')
+                          setCreatingCase(false)
+                        }
+                        if (e.key === 'Escape') { caseCreatedRef.current = true; setNewCaseName(''); setCreatingCase(false) }
+                      }}
+                      placeholder="Project name..."
+                      className="flex-1 bg-transparent text-[11px] outline-none placeholder:text-[rgba(201,168,76,0.35)]"
+                      style={{ color: 'var(--text)' }}
+                      maxLength={60}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Project list with expandable conversations */}
+              {projectsOpen && (
+                <div className="flex flex-col gap-0.5 mt-0.5">
+                  {cases.map((c) => {
+                    const isExpanded = expandedProjects.has(c.id)
+                    const projectSessions = sessions.filter((s) => s.caseId === c.id)
+                    const docCount = files.filter((f) => f.caseId === c.id).length
+                    return (
+                      <div key={c.id}>
+                        {/* Project row */}
+                        <div
+                          className="flex items-center gap-2 rounded-lg px-3 py-1.5 cursor-pointer transition-all"
+                          style={{ color: currentCaseId === c.id ? 'var(--text)' : 'rgb(var(--ov) / 0.45)' }}
+                          onClick={() => toggleProject(c.id)}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgb(var(--ov) / 0.04)' }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+                        >
+                          <svg
+                            width="7" height="7" viewBox="0 0 16 16" fill="currentColor"
+                            style={{ transition: 'transform 0.15s ease', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', flexShrink: 0, opacity: 0.4 }}
+                          >
+                            <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/>
+                          </svg>
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill={currentCaseId === c.id ? '#c9a84c' : 'rgb(var(--ov) / 0.25)'} className="shrink-0 transition-colors">
+                            <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
+                          </svg>
+                          <span className="flex-1 truncate text-[12px] font-medium">{c.name}</span>
+                          <span className="text-[9px] shrink-0" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+                            {docCount}d · {projectSessions.length}c
+                          </span>
+                        </div>
+
+                        {/* Expanded: conversations inside project */}
+                        {isExpanded && (
+                          <div className="ml-5 mt-0.5 mb-1 flex flex-col gap-0.5" style={{ borderLeft: '1px solid rgb(var(--ov) / 0.06)', paddingLeft: 8 }}>
+                            {/* Open project button */}
+                            <button
+                              onClick={() => onSelectCase(c.id)}
+                              className="no-drag flex items-center gap-2 rounded-md px-2 py-1 text-[10.5px] font-medium transition-all"
+                              style={{ color: 'rgba(201,168,76,0.6)' }}
+                              onMouseEnter={(e) => {
+                                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(201,168,76,0.06)'
+                                ;(e.currentTarget as HTMLButtonElement).style.color = '#c9a84c'
+                              }}
+                              onMouseLeave={(e) => {
+                                (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                                ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.6)'
+                              }}
+                            >
+                              <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/>
+                              </svg>
+                              Open project
+                            </button>
+                            {projectSessions.length === 0 ? (
+                              <p className="text-[10px] px-2 py-1" style={{ color: 'rgb(var(--ov) / 0.2)' }}>No matters on file</p>
+                            ) : (
+                              projectSessions.map((session) => (
+                                <SessionItem
+                                  key={session.id}
+                                  session={session}
+                                  isActive={session.id === currentSessionId}
+                                  onLoad={() => { onSelectCase(c.id); onLoadSession(session) }}
+                                  onDelete={() => onDeleteSession(session.id)}
+                                  onRename={(name) => onRenameSession(session.id, name)}
+                                />
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {cases.length === 0 && (
+                    <p className="text-[10px] px-3 py-1" style={{ color: 'rgb(var(--ov) / 0.2)' }}>No cases on the docket</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mx-1 my-1.5 h-px" style={{ background: 'rgb(var(--ov) / 0.04)' }} />
+
+            {/* ── Your chats section ── */}
+            <div>
+              {/* Collapsible header */}
+              <div className="flex items-center">
+                <button
+                  onClick={() => setChatsOpen((v) => !v)}
+                  className="no-drag flex flex-1 items-center gap-2 px-3 py-1.5 rounded-md transition-colors"
+                  style={{ color: 'rgb(var(--ov) / 0.25)' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgb(var(--ov) / 0.03)' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                >
+                  <svg
+                    width="8" height="8" viewBox="0 0 16 16" fill="currentColor"
+                    style={{ transition: 'transform 0.15s ease', transform: chatsOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                  >
+                    <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/>
+                  </svg>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.1em]">Your chats</span>
+                </button>
+                {chatsOpen && sessions.filter((s) => !s.caseId).length > 0 && (
+                  <button
+                    onClick={onClearSessions}
+                    title="Clear all"
+                    aria-label="Clear all conversations"
+                    className="no-drag mr-2 flex h-4 w-4 items-center justify-center rounded transition-colors"
+                    style={{ color: 'rgb(var(--ov) / 0.15)' }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.15)' }}
+                  >
+                    <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15z" />
+                    </svg>
+                  </button>
+                )}
               </div>
 
               {/* Search */}
-              {visibleSessions.length > 3 && (
-                <div className="px-3 mb-1.5">
+              {chatsOpen && visibleSessions.length > 3 && (
+                <div className="px-2 mb-1">
                   <div
                     className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
                     style={{ background: 'rgb(var(--ov) / 0.03)', border: '1px solid rgb(var(--ov) / 0.06)' }}
@@ -925,63 +1004,38 @@ export default function Sidebar({
                   </div>
                 </div>
               )}
-            </>
-          )}
 
-          {/* Sessions list */}
-          <div className="flex-1 overflow-y-auto px-2 py-1">
-            {sessions.length === 0 ? (
-              <div className="flex flex-col items-center py-12 text-center px-4">
-                <div
-                  className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl"
-                  style={{ background: 'rgb(var(--ov) / 0.03)', border: '1px solid rgb(var(--ov) / 0.05)' }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                    <path
-                      d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25z"
-                      stroke="rgb(var(--ov) / 0.1)"
-                      strokeWidth="1.2"
-                      fill="none"
-                    />
-                  </svg>
-                </div>
-                <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>No chats yet</p>
-                <p className="mt-0.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.35)' }}>Sessions auto-save</p>
-              </div>
-            ) : visibleSessions.length === 0 ? (
-              <div className="flex flex-col items-center py-8 text-center px-4">
-                {searchQuery ? (
-                  <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>No results for "{searchQuery}"</p>
-                ) : (
-                  <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>No uncategorized chats</p>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-5 py-1">
-                {groups.map((group) => (
-                  <div key={group.label}>
-                    <p
-                      className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.1em]"
-                      style={{ color: 'rgb(var(--ov) / 0.18)' }}
-                    >
-                      {group.label}
-                    </p>
-                    <div className="flex flex-col gap-0.5">
-                      {group.items.map((session) => (
-                        <SessionItem
-                          key={session.id}
-                          session={session}
-                          isActive={session.id === currentSessionId}
-                          onLoad={() => onLoadSession(session)}
-                          onDelete={() => onDeleteSession(session.id)}
-                          onRename={(name) => onRenameSession(session.id, name)}
-                        />
-                      ))}
+              {/* Chat sessions */}
+              {chatsOpen && (
+                <div className="flex flex-col gap-0.5 mt-0.5">
+                  {sessions.filter((s) => !s.caseId).length === 0 && !searchQuery ? (
+                    <div className="flex flex-col items-center py-6 text-center px-4">
+                      <p className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.2)' }}>The docket is clear</p>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ) : visibleSessions.length === 0 && searchQuery ? (
+                    <p className="text-[10px] px-3 py-2" style={{ color: 'rgb(var(--ov) / 0.18)' }}>No results for &ldquo;{searchQuery}&rdquo;</p>
+                  ) : (
+                    groups.map((group) => (
+                      <div key={group.label}>
+                        <p className="mb-0.5 mt-2 px-3 text-[9px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'rgb(var(--ov) / 0.15)' }}>
+                          {group.label}
+                        </p>
+                        {group.items.map((session) => (
+                          <SessionItem
+                            key={session.id}
+                            session={session}
+                            isActive={session.id === currentSessionId}
+                            onLoad={() => onLoadSession(session)}
+                            onDelete={() => onDeleteSession(session.id)}
+                            onRename={(name) => onRenameSession(session.id, name)}
+                          />
+                        ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Bottom actions */}
