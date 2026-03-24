@@ -11,6 +11,101 @@ interface Props {
 // WKWebView reliably renders PDFs in iframes from http://127.0.0.1 URLs —
 // this is the only origin type that triggers WKWebView's built-in PDF renderer.
 // PDF.js Web Workers do NOT work in WKWebView under Tauri's tauri:// protocol.
+// ── Highlighted text panel ─────────────────────────────────────────────────────
+// Renders extracted page text with the cited excerpt highlighted in gold.
+function HighlightedText({ citation }: { citation: Citation }): JSX.Element | null {
+  const [text, setText] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(true)
+  const hlRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    ;(window as any).api
+      .getPageText(citation.filePath, citation.pageNumber)
+      .then((t: string) => setText(t || ''))
+      .catch(() => setText(''))
+  }, [citation.filePath, citation.pageNumber])
+
+  // Auto-scroll to highlighted text
+  useEffect(() => {
+    if (!text || !expanded || !hlRef.current) return
+    const mark = hlRef.current.querySelector('mark')
+    if (mark) {
+      requestAnimationFrame(() => {
+        mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    }
+  }, [text, expanded])
+
+  if (text === null) return null // still loading
+  if (!text) return null // no text extracted
+
+  const needle = citation.excerpt.replace(/\s+/g, ' ').trim().slice(0, 250)
+  const escapedNeedle = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const parts = escapedNeedle.length >= 8
+    ? text.split(new RegExp(`(${escapedNeedle})`, 'gi'))
+    : [text]
+  const hasMatch = parts.length > 1
+
+  if (!hasMatch) return null // excerpt not found in page text
+
+  return (
+    <div style={{ borderBottom: '1px solid rgba(201,168,76,0.1)' }}>
+      {/* Toggle header */}
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center gap-2 px-4 py-2 text-left"
+        style={{ background: 'rgba(234,197,80,0.03)' }}
+      >
+        <svg
+          width="8" height="8" viewBox="0 0 8 8" fill="rgba(201,168,76,0.5)"
+          style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}
+        >
+          <path d="M2 1l4 3-4 3V1z" />
+        </svg>
+        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(201,168,76,0.55)' }}>
+          Highlighted Text
+        </span>
+        <span className="text-[9px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+          p.{citation.pageNumber}
+        </span>
+      </button>
+
+      {/* Collapsible text body */}
+      {expanded && (
+        <div
+          ref={hlRef}
+          className="overflow-auto px-4 pb-3"
+          style={{ maxHeight: 180 }}
+        >
+          <p
+            className="text-[11px] leading-[1.8] whitespace-pre-wrap"
+            style={{ color: 'rgb(var(--ov) / 0.45)' }}
+          >
+            {parts.map((part, i) =>
+              part.toLowerCase() === needle.toLowerCase() ? (
+                <mark
+                  key={i}
+                  style={{
+                    background: 'rgba(234,197,80,0.35)',
+                    color: 'rgb(var(--ov) / 0.9)',
+                    borderRadius: 3,
+                    padding: '1px 3px',
+                    boxShadow: '0 0 0 1px rgba(234,197,80,0.5), 0 1px 4px rgba(234,197,80,0.15)',
+                  }}
+                >
+                  {part}
+                </mark>
+              ) : (
+                part
+              )
+            )}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
   const [port, setPort] = useState<number>(0)
   const [copied, setCopied] = useState(false)
@@ -68,6 +163,9 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
           )}
         </button>
       </div>
+
+      {/* Highlighted text panel — shows page text with excerpt highlighted */}
+      <HighlightedText citation={citation} />
 
       {/* PDF iframe — WKWebView's native PDF renderer */}
       {!port ? (
