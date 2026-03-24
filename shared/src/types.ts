@@ -81,6 +81,13 @@ export interface ChatMessage {
   timestamp: number;
   notFound?: boolean;
   qualityAssertions?: AssertionResult[];
+  inferenceMode?: InferenceMode;
+}
+
+export interface KeyFigure {
+  type: 'dollar' | 'date' | 'percentage';
+  label: string;
+  value: string;
 }
 
 // ─── Ollama / Model Types ──────────────────────────────────────────────────────

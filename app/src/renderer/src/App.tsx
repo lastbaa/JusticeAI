@@ -413,6 +413,7 @@ export default function App(): JSX.Element {
         isStreaming: false,
         timestamp: Date.now(),
         qualityAssertions: result.assertions,
+        inferenceMode: settings.inferenceMode,
       }
       setMessages((prev) => {
         const hasStreaming = prev.some((m) => m.id === streamingId)

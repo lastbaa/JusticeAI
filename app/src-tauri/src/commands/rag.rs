@@ -743,6 +743,7 @@ pub async fn query(
         let corpus = pipeline::RetrievalCorpus {
             texts: filtered_chunks.iter().map(|e| e.meta.text.as_str()).collect(),
             vectors: filtered_chunks.iter().map(|e| e.vector.as_slice()).collect(),
+            chunk_indices: filtered_chunks.iter().map(|e| e.meta.chunk_index).collect(),
         };
         let config = pipeline::RetrievalConfig {
             top_k: retrieval_params.top_k,

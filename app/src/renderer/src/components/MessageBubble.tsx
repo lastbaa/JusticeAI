@@ -1,13 +1,22 @@
 import { useState } from 'react'
-import { AssertionResult, ChatMessage, Citation } from '../../../../../shared/src/types'
+import { AssertionResult, ChatMessage, Citation, FileInfo, InferenceMode } from '../../../../../shared/src/types'
 import SourceCard from './SourceCard'
+import KeyFiguresCard, { extractKeyFigures } from './KeyFiguresCard'
 
 interface Props {
   message: ChatMessage
+  files?: FileInfo[]
   onViewCitation?: (citation: Citation) => void
   onDeleteMessage?: (id: string) => void
   onRetryMessage?: (id: string) => void
   isLastAssistant?: boolean
+}
+
+// ── Markdown rendering context ───────────────────────────────────────────────
+interface MarkdownCtx {
+  files?: FileInfo[]
+  onViewCitation?: (c: Citation) => void
+  inferenceMode?: InferenceMode
 }
 
 // ── Primary/secondary partition ───────────────────────────────────────────────
@@ -201,8 +210,47 @@ function CopyButton({ text, className, style }: { text: string; className?: stri
   )
 }
 
+// ── Extended mode section icon helper ────────────────────────────────────────
+function SectionIcon({ heading }: { heading: string }): JSX.Element | null {
+  const lower = heading.toLowerCase()
+  if (lower.includes('direct answer')) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--gold)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+        <circle cx="8" cy="8" r="6" />
+        <path d="M5.5 8l2 2 3.5-3.5" />
+      </svg>
+    )
+  }
+  if (lower.includes('key findings')) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--gold)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+        <path d="M8 1C5.24 1 3 3.24 3 6c0 1.77.93 3.32 2.33 4.2V12a1 1 0 001 1h3.34a1 1 0 001-1v-1.8A5 5 0 0013 6c0-2.76-2.24-5-5-5z" />
+        <line x1="6" y1="14.5" x2="10" y2="14.5" />
+      </svg>
+    )
+  }
+  if (lower.includes('relevant provisions')) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--gold)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+        <path d="M2 1.5h4a2 2 0 012 2v11l-3-2-3 2V1.5z" />
+        <path d="M14 1.5h-4a2 2 0 00-2 2v11l3-2 3 2V1.5z" />
+      </svg>
+    )
+  }
+  if (lower.includes('caveat')) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--gold)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+        <path d="M7.13 1.65a1 1 0 011.74 0l5.87 10.3A1 1 0 0113.87 13.5H2.13a1 1 0 01-.87-1.55z" />
+        <line x1="8" y1="6" x2="8" y2="9" />
+        <circle cx="8" cy="11" r="0.5" fill="var(--gold)" />
+      </svg>
+    )
+  }
+  return null
+}
+
 // ── Lightweight markdown renderer ─────────────────────────────────────────────
-function renderMarkdown(text: string): JSX.Element {
+function renderMarkdown(text: string, ctx?: MarkdownCtx): JSX.Element {
   const lines = text.split('\n')
   const elements: JSX.Element[] = []
   let i = 0
@@ -246,7 +294,7 @@ function renderMarkdown(text: string): JSX.Element {
       elements.push(
         <ul key={i} style={{ listStyle: 'disc', paddingLeft: '1.25em', margin: '4px 0 6px' }}>
           {items.map((item, j) => (
-            <li key={j} style={{ marginBottom: '0.35em' }}>{inlineMarkdown(item)}</li>
+            <li key={j} style={{ marginBottom: '0.35em' }}>{inlineMarkdown(item, ctx)}</li>
           ))}
         </ul>
       )
@@ -263,7 +311,7 @@ function renderMarkdown(text: string): JSX.Element {
       elements.push(
         <ol key={i} style={{ listStyle: 'decimal', paddingLeft: '1.25em', margin: '4px 0 6px' }}>
           {items.map((item, j) => (
-            <li key={j} style={{ marginBottom: '0.35em' }}>{inlineMarkdown(item)}</li>
+            <li key={j} style={{ marginBottom: '0.35em' }}>{inlineMarkdown(item, ctx)}</li>
           ))}
         </ol>
       )
@@ -275,8 +323,33 @@ function renderMarkdown(text: string): JSX.Element {
     if (headingMatch) {
       const level = headingMatch[1].length
       const content = headingMatch[2]
-      const style: React.CSSProperties = { fontWeight: 600, color: 'var(--text)', margin: '14px 0 3px', lineHeight: 1.3, fontSize: level === 1 ? '1.05em' : level === 2 ? '0.98em' : '0.93em' }
-      elements.push(<p key={i} style={style}>{inlineMarkdown(content)}</p>)
+
+      // Extended mode: h3 gets styled section container with icon
+      if (ctx?.inferenceMode === 'extended' && level === 3) {
+        elements.push(
+          <div
+            key={i}
+            style={{
+              borderLeft: '3px solid var(--gold)',
+              background: 'rgba(201,168,76,0.04)',
+              borderRadius: '0 8px 8px 0',
+              padding: '8px 12px',
+              margin: '16px 0 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <SectionIcon heading={content} />
+            <p style={{ fontWeight: 600, color: 'var(--text)', margin: 0, lineHeight: 1.3, fontSize: '0.93em' }}>
+              {inlineMarkdown(content, ctx)}
+            </p>
+          </div>
+        )
+      } else {
+        const style: React.CSSProperties = { fontWeight: 600, color: 'var(--text)', margin: '14px 0 3px', lineHeight: 1.3, fontSize: level === 1 ? '1.05em' : level === 2 ? '0.98em' : '0.93em' }
+        elements.push(<p key={i} style={style}>{inlineMarkdown(content, ctx)}</p>)
+      }
       i++
       continue
     }
@@ -305,7 +378,7 @@ function renderMarkdown(text: string): JSX.Element {
                   <tr>
                     {headerRow.map((cell, ci) => (
                       <th key={ci} style={{ border: '1px solid rgb(var(--ov) / 0.1)', padding: '6px 10px', background: 'rgb(var(--ov) / 0.04)', fontWeight: 600, textAlign: 'left' }}>
-                        {inlineMarkdown(cell)}
+                        {inlineMarkdown(cell, ctx)}
                       </th>
                     ))}
                   </tr>
@@ -316,7 +389,7 @@ function renderMarkdown(text: string): JSX.Element {
                   <tr key={ri}>
                     {row.map((cell, ci) => (
                       <td key={ci} style={{ border: '1px solid rgb(var(--ov) / 0.1)', padding: '5px 10px' }}>
-                        {inlineMarkdown(cell)}
+                        {inlineMarkdown(cell, ctx)}
                       </td>
                     ))}
                   </tr>
@@ -348,7 +421,7 @@ function renderMarkdown(text: string): JSX.Element {
       elements.push(
         <blockquote key={i} style={{ borderLeft: '3px solid rgba(201,168,76,0.3)', paddingLeft: '1em', margin: '6px 0', color: 'rgb(var(--ov) / 0.7)' }}>
           {quoteLines.map((ql, qi) => (
-            <p key={qi} style={{ margin: '2px 0' }}>{inlineMarkdown(ql)}</p>
+            <p key={qi} style={{ margin: '2px 0' }}>{inlineMarkdown(ql, ctx)}</p>
           ))}
         </blockquote>
       )
@@ -366,7 +439,7 @@ function renderMarkdown(text: string): JSX.Element {
 
     // Normal paragraph line
     elements.push(
-      <p key={i} style={{ margin: 0 }}>{inlineMarkdown(line)}</p>
+      <p key={i} style={{ margin: 0 }}>{inlineMarkdown(line, ctx)}</p>
     )
     i++
   }
@@ -374,32 +447,81 @@ function renderMarkdown(text: string): JSX.Element {
   return <>{elements}</>
 }
 
-// Inline markdown: **bold**, *italic*, `code`, [links](url)
-function inlineMarkdown(text: string): (string | JSX.Element)[] {
+// Inline markdown: **bold**, *italic*, `code`, [filename, p. N] citations, [links](url)
+function inlineMarkdown(text: string, ctx?: MarkdownCtx): (string | JSX.Element)[] {
   const parts: (string | JSX.Element)[] = []
-  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g
+  // Groups: 1=full, 2=bold text, 3=italic text, 4=code text,
+  //         5=citation filename, 6=citation page,
+  //         7=link text, 8=link URL
+  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^,\[\]]+),\s*p\.\s*(\d+)\]|\[([^\]]+)\]\(([^)]+)\))/g
   let last = 0
   let m: RegExpExecArray | null
 
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index))
-    if (m[0].startsWith('**')) {
+    if (m[2]) {
+      // Bold
       parts.push(<strong key={m.index} style={{ color: 'var(--text)', fontWeight: 600 }}>{m[2]}</strong>)
-    } else if (m[0].startsWith('*')) {
+    } else if (m[3]) {
+      // Italic
       parts.push(<em key={m.index}>{m[3]}</em>)
-    } else if (m[0].startsWith('[')) {
-      parts.push(
-        <a key={m.index} href={m[6]} target="_blank" rel="noopener noreferrer"
-          style={{ color: 'var(--gold)', textDecoration: 'none' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
-        >{m[5]}</a>
-      )
-    } else {
+    } else if (m[4]) {
+      // Inline code
       parts.push(
         <code key={m.index} style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.85em', background: 'rgb(var(--ov) / 0.07)', border: '1px solid rgb(var(--ov) / 0.08)', borderRadius: 4, padding: '0.1em 0.35em' }}>
           {m[4]}
         </code>
+      )
+    } else if (m[5] && m[6]) {
+      // Citation: [filename, p. N]
+      const fileName = m[5].trim()
+      const pageNumber = parseInt(m[6], 10)
+      const file = ctx?.files?.find(f =>
+        f.fileName === fileName || f.fileName.startsWith(fileName)
+      )
+      if (ctx?.onViewCitation && file) {
+        parts.push(
+          <button
+            key={m.index}
+            onClick={() => ctx.onViewCitation!({
+              fileName: file.fileName,
+              filePath: file.filePath,
+              pageNumber,
+              excerpt: '',
+              score: 0,
+            })}
+            title={`View ${fileName}, page ${pageNumber}`}
+            style={{
+              color: 'var(--gold)',
+              background: 'none',
+              border: 'none',
+              font: 'inherit',
+              fontSize: 'inherit',
+              padding: 0,
+              cursor: 'pointer',
+              textDecoration: 'none',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none' }}
+          >
+            [{fileName}, p. {pageNumber}]
+          </button>
+        )
+      } else {
+        parts.push(
+          <span key={m.index} style={{ color: 'var(--gold)', fontSize: 'inherit' }}>
+            [{fileName}, p. {pageNumber}]
+          </span>
+        )
+      }
+    } else if (m[7]) {
+      // Link: [text](url)
+      parts.push(
+        <a key={m.index} href={m[8]} target="_blank" rel="noopener noreferrer"
+          style={{ color: 'var(--gold)', textDecoration: 'none' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
+        >{m[7]}</a>
       )
     }
     last = m.index + m[0].length
@@ -489,7 +611,7 @@ function ActionButton({ title, onClick, children }: { title: string; onClick: (e
   )
 }
 
-export default function MessageBubble({ message, onViewCitation, onDeleteMessage, onRetryMessage, isLastAssistant }: Props): JSX.Element {
+export default function MessageBubble({ message, files, onViewCitation, onDeleteMessage, onRetryMessage, isLastAssistant }: Props): JSX.Element {
   const [hovered, setHovered] = useState(false)
   const isUser = message.role === 'user'
 
@@ -535,6 +657,7 @@ export default function MessageBubble({ message, onViewCitation, onDeleteMessage
   }
 
   const isNotFound = message.notFound
+  const mdCtx: MarkdownCtx = { files, onViewCitation, inferenceMode: message.inferenceMode }
 
   return (
     <div
@@ -575,17 +698,20 @@ export default function MessageBubble({ message, onViewCitation, onDeleteMessage
         </div>
 
         {isNotFound ? (
+          /* ── Feature 4: Enhanced Not-Found State ──────────────────── */
           <div
             className="rounded-xl px-4 py-3.5"
             style={{
-              background: 'rgb(var(--ov) / 0.02)',
-              border: '1px solid rgb(var(--ov) / 0.07)',
-              borderLeft: '2px solid rgb(var(--ov) / 0.15)',
+              background: 'rgba(201,168,76,0.05)',
+              border: '1px solid rgba(201,168,76,0.15)',
+              borderLeft: '3px solid var(--gold)',
             }}
           >
             <div className="flex items-start gap-2.5">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="shrink-0 mt-0.5">
-                <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 3.5a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4.5zm0 6.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5z" fill="rgb(var(--ov) / 0.25)" />
+              {/* Magnifying glass icon */}
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0 mt-0.5" stroke="var(--gold)" strokeWidth="1.4" strokeLinecap="round">
+                <circle cx="7" cy="7" r="4.5" />
+                <line x1="10.2" y1="10.2" x2="14" y2="14" />
               </svg>
               <p
                 className="text-[13px] leading-relaxed whitespace-pre-wrap"
@@ -593,6 +719,24 @@ export default function MessageBubble({ message, onViewCitation, onDeleteMessage
               >
                 {message.content}
               </p>
+            </div>
+            <hr style={{ border: 'none', borderTop: '1px solid rgba(201,168,76,0.15)', margin: '12px 0' }} />
+            <div>
+              <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--gold)' }}>Suggestions</p>
+              <ul className="flex flex-col gap-1.5" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {[
+                  'Rephrase your question with different keywords',
+                  'Check that the relevant documents are uploaded',
+                  'Try a broader or more specific question',
+                ].map((tip, idx) => (
+                  <li key={idx} className="flex items-center gap-2 text-[12px]" style={{ color: 'rgb(var(--ov) / 0.6)' }}>
+                    <svg width="6" height="6" viewBox="0 0 6 6" fill="var(--gold)" className="shrink-0">
+                      <circle cx="3" cy="3" r="2" />
+                    </svg>
+                    {tip}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         ) : (
@@ -607,7 +751,7 @@ export default function MessageBubble({ message, onViewCitation, onDeleteMessage
             <div className="text-[13.5px] leading-[1.75]" style={{ color: 'var(--text)' }}>
               {message.content.trim()
                 ? <>
-                    {renderMarkdown(message.content)}
+                    {renderMarkdown(message.content, mdCtx)}
                     {message.isStreaming && (
                       <span
                         style={{
@@ -631,6 +775,12 @@ export default function MessageBubble({ message, onViewCitation, onDeleteMessage
         <p className="mt-1.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
           {formatTime(message.timestamp)}
         </p>
+
+        {/* Feature 3: Key Figures Summary Card */}
+        {!message.isStreaming && !isNotFound && message.content.trim() && (() => {
+          const figures = extractKeyFigures(message.content)
+          return figures.length > 0 ? <KeyFiguresCard figures={figures} /> : null
+        })()}
 
         {!message.isStreaming && message.qualityAssertions && message.qualityAssertions.length > 0 && (
           <QualityBadges assertions={message.qualityAssertions} />

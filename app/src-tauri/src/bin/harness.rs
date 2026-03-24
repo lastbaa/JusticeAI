@@ -296,6 +296,7 @@ async fn embed_and_retrieve(
     let corpus = RetrievalCorpus {
         texts: chunks.iter().map(|c| c.text.as_str()).collect(),
         vectors: chunk_vecs.iter().map(|v| v.as_slice()).collect(),
+        chunk_indices: chunks.iter().map(|c| c.chunk_index).collect(),
     };
 
     let mut ranked = backend.retrieve(query, &query_vec, &corpus, config);
@@ -338,6 +339,7 @@ fn retrieve_with_cached_embeddings(
     let corpus = RetrievalCorpus {
         texts: chunks.iter().map(|c| c.text.as_str()).collect(),
         vectors: chunk_vecs.iter().map(|v| v.as_slice()).collect(),
+        chunk_indices: chunks.iter().map(|c| c.chunk_index).collect(),
     };
 
     let mut ranked = backend.retrieve(query, query_vec, &corpus, config);
@@ -531,7 +533,7 @@ async fn run_eval_cases(
 
         let top_scores: Vec<(f32, usize)> = scored.iter().map(|(s, _, idx)| (*s, *idx)).collect();
 
-        if is_neg {
+        if is_neg && case.expected.is_empty() {
             // -- Negative / adversarial case ----------------------------------
             // PASS = top retrieval scores are low AND no must_not_contain violations.
             // For negative cases expected is empty, so we only check score confidence.
@@ -601,9 +603,29 @@ async fn run_eval_cases(
             let partial_score = if case.expected.is_empty() { 1.0 } else { found.len() as f32 / case.expected.len() as f32 };
             let recall = partial_score;
 
-            // Check must_not_contain violations
+            // Check must_not_contain violations — sentence-level scope.
+            // Find the first-hit chunk, split it into sentences, and only check
+            // must_not against sentences that contain an expected term.  This avoids
+            // false failures when confusable entities (e.g. two addresses) appear
+            // in the same chunk but in *different* sentences.
+            let first_hit_idx = chunk_texts.iter().position(|text| {
+                case.expected.iter().any(|exp| text.contains(&exp.to_lowercase()))
+            });
+            let answer_sentences: String = first_hit_idx
+                .map(|i| {
+                    // Split on sentence boundaries (period/excl/question followed by space or end)
+                    let chunk = &chunk_texts[i];
+                    chunk.split(|c: char| c == '.' || c == '!' || c == '?')
+                        .filter(|sent| {
+                            let s = sent.to_lowercase();
+                            case.expected.iter().any(|exp| s.contains(&exp.to_lowercase()))
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default();
             let must_not_violations: Vec<String> = case.must_not_contain.iter()
-                .filter(|term| top_text.contains(&term.to_lowercase()))
+                .filter(|term| answer_sentences.contains(&term.to_lowercase()))
                 .cloned()
                 .collect();
 

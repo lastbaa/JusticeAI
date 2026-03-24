@@ -868,6 +868,7 @@ export default function ChatInterface({
                 <MessageBubble
                   key={msg.id}
                   message={msg}
+                  files={files}
                   onViewCitation={onViewCitation}
                   onDeleteMessage={onDeleteMessage}
                   onRetryMessage={onRetryMessage}
