@@ -17,6 +17,7 @@ interface MarkdownCtx {
   files?: FileInfo[]
   onViewCitation?: (c: Citation) => void
   inferenceMode?: InferenceMode
+  citations?: Citation[]
 }
 
 // ── Primary/secondary partition ───────────────────────────────────────────────
@@ -479,33 +480,64 @@ function inlineMarkdown(text: string, ctx?: MarkdownCtx): (string | JSX.Element)
       const file = ctx?.files?.find(f =>
         f.fileName === fileName || f.fileName.startsWith(fileName)
       )
+      // Look up matching citation for hover preview
+      const matchedCitation = ctx?.citations?.find(
+        (c) => (c.fileName === fileName || c.fileName.startsWith(fileName)) && c.pageNumber === pageNumber
+      )
+      const previewExcerpt = matchedCitation?.excerpt
+        ? matchedCitation.excerpt.length > 200
+          ? matchedCitation.excerpt.slice(0, 200) + '\u2026'
+          : matchedCitation.excerpt
+        : null
+
       if (ctx?.onViewCitation && file) {
         parts.push(
-          <button
-            key={m.index}
-            onClick={() => ctx.onViewCitation!({
-              fileName: file.fileName,
-              filePath: file.filePath,
-              pageNumber,
-              excerpt: '',
-              score: 0,
-            })}
-            title={`View ${fileName}, page ${pageNumber}`}
-            style={{
-              color: 'var(--gold)',
-              background: 'none',
-              border: 'none',
-              font: 'inherit',
-              fontSize: 'inherit',
-              padding: 0,
-              cursor: 'pointer',
-              textDecoration: 'none',
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none' }}
-          >
-            [{fileName}, p. {pageNumber}]
-          </button>
+          <span key={m.index} className="group/cite" style={{ position: 'relative', display: 'inline' }}>
+            <button
+              onClick={() => ctx.onViewCitation!({
+                fileName: file.fileName,
+                filePath: file.filePath,
+                pageNumber,
+                excerpt: matchedCitation?.excerpt ?? '',
+                score: matchedCitation?.score ?? 0,
+              })}
+              title={`View ${fileName}, page ${pageNumber}`}
+              style={{
+                color: 'var(--gold)',
+                background: 'none',
+                border: 'none',
+                font: 'inherit',
+                fontSize: 'inherit',
+                padding: 0,
+                cursor: 'pointer',
+                textDecoration: 'none',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none' }}
+            >
+              [{fileName}, p. {pageNumber}]
+            </button>
+            {previewExcerpt && (
+              <span
+                className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 opacity-0 group-hover/cite:opacity-100 transition-opacity duration-150 z-50"
+                style={{
+                  width: 280,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  background: 'var(--bg-alt)',
+                  border: '1px solid rgb(var(--ov) / 0.12)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+                  fontSize: '0.78em',
+                  lineHeight: 1.5,
+                  color: 'rgb(var(--ov) / 0.6)',
+                  fontStyle: 'italic',
+                  whiteSpace: 'normal',
+                }}
+              >
+                "{previewExcerpt}"
+              </span>
+            )}
+          </span>
         )
       } else {
         parts.push(
@@ -657,7 +689,7 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
   }
 
   const isNotFound = message.notFound
-  const mdCtx: MarkdownCtx = { files, onViewCitation, inferenceMode: message.inferenceMode }
+  const mdCtx: MarkdownCtx = { files, onViewCitation, inferenceMode: message.inferenceMode, citations: message.citations }
 
   return (
     <div

@@ -21,6 +21,7 @@ import DocumentViewer from './components/DocumentViewer'
 import ModelSetup from './components/ModelSetup'
 import PanelErrorBoundary from './components/PanelErrorBoundary'
 import Toast, { ToastMessage } from './components/Toast'
+import CommandPalette, { PaletteAction } from './components/CommandPalette'
 import { makeSessionName, makeSessionSummary } from './utils/sessionName'
 
 type View = 'main' | 'settings'
@@ -72,6 +73,10 @@ export default function App(): JSX.Element {
   const [currentCaseId, setCurrentCaseId] = useState<string | null>(null)
   // Delete-case confirmation modal
   const [deleteCaseTarget, setDeleteCaseTarget] = useState<Case | null>(null)
+  // Context panel minimize state
+  const [contextPanelMinimized, setContextPanelMinimized] = useState(false)
+  // Command palette
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
 
   const messagesRef = useRef(messages)
   const sessionIdRef = useRef(currentSessionId)
@@ -169,18 +174,28 @@ export default function App(): JSX.Element {
     init()
   }, [])
 
+  // Inject greeting on initial load if no messages and no files
+  useEffect(() => {
+    if (messages.length === 0 && files.length === 0) {
+      setMessages([makeGreetingMessage()])
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-save current session (debounced 1s)
   useEffect(() => {
-    if (messages.length === 0) return
+    // Don't save if only greeting messages exist
+    const persistable = messages.filter((m) => !m.isGreeting)
+    if (persistable.length === 0) return
     const timer = setTimeout(async () => {
+      const saveMsgs = messagesRef.current.filter((m) => !m.isGreeting)
       const session: ChatSession = {
         id: sessionIdRef.current,
-        name: sessionCustomNameRef.current ?? makeSessionName(messagesRef.current),
-        messages: messagesRef.current,
+        name: sessionCustomNameRef.current ?? makeSessionName(saveMsgs),
+        messages: saveMsgs,
         createdAt: sessionCreatedAtRef.current,
         updatedAt: Date.now(),
         caseId: currentCaseIdRef.current ?? undefined,
-        summary: makeSessionSummary(messagesRef.current) || undefined,
+        summary: makeSessionSummary(saveMsgs) || undefined,
       }
       try {
         await window.api.saveSession(session)
@@ -451,46 +466,72 @@ export default function App(): JSX.Element {
   // ── Export ─────────────────────────────────────────────────────
   async function handleExportChat(): Promise<void> {
     if (messages.length === 0) return
-    const sessionName = sessionCustomName ?? makeSessionName(messages)
-    const dateStr = new Date().toLocaleString()
+    const exportMsgs = messages.filter((m) => !m.isGreeting && !m.isStreaming)
+    if (exportMsgs.length === 0) return
+    const sessionName = sessionCustomName ?? makeSessionName(exportMsgs)
+    const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 
     const parts: string[] = [
-      `# Justice AI — Conversation Export`,
+      `# MEMORANDUM`,
       ``,
-      `**Session:** ${sessionName}  `,
-      `**Exported:** ${dateStr}`,
+      `| | |`,
+      `|---|---|`,
+      `| **TO:** | [Client / File] |`,
+      `| **FROM:** | Justice AI Legal Research Assistant |`,
+      `| **DATE:** | ${dateStr} |`,
+      `| **RE:** | ${sessionName} |`,
       ``,
       `---`,
       ``,
     ]
 
-    for (const m of messages) {
-      if (m.isStreaming) continue
+    // Collect all citations for footnotes
+    const allCitations: Citation[] = []
+    const citationKey = (c: Citation): string => `${c.fileName}::${c.pageNumber}`
+    const seenCitations = new Set<string>()
+
+    let questionNum = 0
+    for (const m of exportMsgs) {
       if (m.role === 'user') {
-        parts.push(`## You`, ``, m.content, ``)
+        questionNum++
+        parts.push(`## ${questionNum}. Question`, ``, `> ${m.content}`, ``)
       } else {
-        parts.push(`## Justice AI`, ``, m.content, ``)
+        parts.push(`### Analysis`, ``, m.content, ``)
         if (m.citations && m.citations.length > 0) {
-          parts.push(``, `**Sources:**`)
-          m.citations.forEach((c, i) => {
-            const excerpt = c.excerpt.length > 160 ? c.excerpt.slice(0, 160) + '…' : c.excerpt
-            parts.push(`${i + 1}. **${c.fileName}** · Page ${c.pageNumber}`, `   > "${excerpt}"`)
-          })
-          parts.push(``)
+          for (const c of m.citations) {
+            const key = citationKey(c)
+            if (!seenCitations.has(key)) {
+              seenCitations.add(key)
+              allCitations.push(c)
+            }
+          }
         }
+        parts.push(`---`, ``)
       }
-      parts.push(`---`, ``)
     }
+
+    // Footnotes section
+    if (allCitations.length > 0) {
+      parts.push(`## Sources Cited`, ``)
+      allCitations.forEach((c, i) => {
+        const excerpt = c.excerpt.length > 200 ? c.excerpt.slice(0, 200) + '\u2026' : c.excerpt
+        parts.push(`${i + 1}. **${c.fileName}**, p. ${c.pageNumber}`)
+        parts.push(`   > "${excerpt}"`)
+        parts.push(``)
+      })
+    }
+
+    parts.push(`---`, ``, `*Generated by Justice AI — all processing performed locally on-device.*`)
 
     const content = parts.join('\n')
     try {
       const filePath = await save({
-        defaultPath: `${sessionName.replace(/[/\\:*?"<>|]/g, '-')}.md`,
+        defaultPath: `${sessionName.replace(/[/\\:*?"<>|]/g, '-')} — Memo.md`,
         filters: [{ name: 'Markdown', extensions: ['md'] }],
       })
       if (!filePath) return
       await window.api.saveFile(filePath, content)
-      addToast('success', 'Conversation exported')
+      addToast('success', 'Legal memo exported')
     } catch (err) {
       console.error('Export failed:', err)
       addToast('error', 'Export failed')
@@ -533,10 +574,22 @@ export default function App(): JSX.Element {
     setView('main')
   }
 
+  // ── Greeting ────────────────────────────────────────────────────
+  function makeGreetingMessage(): ChatMessage {
+    return {
+      id: uuidv4(),
+      role: 'assistant',
+      content: `Welcome to **Justice AI** — your private legal research assistant.\n\nTo get started:\n- **Upload documents** using the sidebar or drag & drop\n- **Ask questions** about your documents in plain language\n- **Click citations** to jump to the exact source text\n\nSupported formats: PDF, DOCX, XLSX, TXT, CSV, HTML, EML, and images.\n\nAll processing runs locally on your device — nothing leaves your machine.`,
+      timestamp: Date.now(),
+      isGreeting: true,
+    }
+  }
+
   // ── Sessions ──────────────────────────────────────────────────
   function handleNewChat(): void {
     const newId = uuidv4()
-    setMessages([])
+    const greeting = makeGreetingMessage()
+    setMessages(files.length === 0 ? [greeting] : [])
     setCurrentSessionId(newId)
     setSessionCreatedAt(Date.now())
     setChatMode(true)
@@ -821,6 +874,62 @@ export default function App(): JSX.Element {
     document.documentElement.setAttribute('data-theme', settings.theme)
   }, [settings.theme])
 
+  // Cmd+K / Ctrl+K command palette
+  useEffect(() => {
+    function handleKeyDown(e: globalThis.KeyboardEvent): void {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setShowCommandPalette((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  const paletteActions: PaletteAction[] = [
+    {
+      id: 'new-chat',
+      label: 'New Chat',
+      icon: <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.06l-2.573 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25H3v2.19l2.72-2.72h4.53a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Z"/></svg>,
+      onAction: handleNewChat,
+    },
+    {
+      id: 'upload-docs',
+      label: 'Upload Documents',
+      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>,
+      onAction: handleAddFiles,
+    },
+    {
+      id: 'upload-folder',
+      label: 'Upload Folder',
+      icon: <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3H13.5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V3.87Z"/></svg>,
+      onAction: handleAddFolder,
+    },
+    {
+      id: 'cycle-mode',
+      label: 'Cycle Inference Mode',
+      icon: <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8"/><line x1="8" y1="8" x2="10.5" y2="10"/></svg>,
+      onAction: () => {
+        const modes: InferenceMode[] = ['quick', 'balanced', 'extended']
+        const cur = settings.inferenceMode ?? 'balanced'
+        const next = modes[(modes.indexOf(cur) + 1) % modes.length]
+        handleInferenceModeChange(next)
+      },
+    },
+    {
+      id: 'export',
+      label: 'Export Chat',
+      icon: <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14ZM7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.97a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.779a.749.749 0 1 1 1.06-1.06l1.97 1.97Z"/></svg>,
+      onAction: handleExportChat,
+    },
+    {
+      id: 'settings',
+      label: 'Open Settings',
+      icon: <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8.2 8.2 0 0 1 .701.031C9.444.095 9.99.645 10.16 1.29l.288 1.107c.018.066.079.158.2.196a5.5 5.5 0 0 1 .874.455c.112.07.214.063.276.04l1.063-.39c.618-.228 1.306-.016 1.705.474a8.2 8.2 0 0 1 .782 1.236c.306.586.2 1.294-.24 1.724l-.775.717c-.048.044-.084.136-.076.251a5.5 5.5 0 0 1 0 .91c-.008.115.028.207.076.251l.775.717c.44.43.546 1.138.24 1.724a8.2 8.2 0 0 1-.782 1.236c-.399.49-1.087.702-1.705.474l-1.063-.39c-.062-.023-.164-.03-.276.04a5.5 5.5 0 0 1-.874.455c-.121.038-.182.13-.2.196l-.288 1.107c-.17.645-.716 1.195-1.459 1.259a8.3 8.3 0 0 1-1.402 0c-.743-.064-1.289-.614-1.459-1.259l-.288-1.107c-.018-.066-.079-.158-.2-.196a5.5 5.5 0 0 1-.874-.455c-.112-.07-.214-.063-.276-.04l-1.063.39c-.618.228-1.306.016-1.705-.474a8.2 8.2 0 0 1-.782-1.236c-.306-.586-.2-1.294.24-1.724l.775-.717c.048-.044.084-.136.076-.251a5.5 5.5 0 0 1 0-.91c.008-.115-.028-.207-.076-.251l-.775-.717c-.44-.43-.546-1.138-.24-1.724a8.2 8.2 0 0 1 .782-1.236c.399-.49 1.087-.702 1.705-.474l1.063.39c.062.023.164.03.276-.04a5.5 5.5 0 0 1 .874-.455c.121-.038.182-.13.2-.196l.288-1.107C6.01.645 6.556.095 7.299.03 7.53.01 7.764 0 8 0Zm-.571 1.525c-.036.003-.108.036-.137.146l-.289 1.105c-.147.561-.549.967-.998 1.189a4 4 0 0 0-.634.33c-.418.266-.862.395-1.378.235l-1.063-.39c-.104-.038-.175.006-.21.055a6.7 6.7 0 0 0-.635 1.002c-.046.09-.042.18.026.252l.775.717c.416.384.634.917.612 1.468a4 4 0 0 0 0 .654c.022.551-.196 1.084-.612 1.468l-.775.717c-.068.072-.072.162-.026.252.167.32.363.617.635 1.002.035.049.106.093.21.055l1.063-.39c.516-.16.96-.031 1.378.235.197.126.41.235.634.33.449.222.851.628.998 1.189l.289 1.105c.029.11.101.143.137.146a6.6 6.6 0 0 0 1.142 0c.036-.003.108-.036.137-.146l.289-1.105c.147-.561.549-.967.998-1.189.224-.095.437-.204.634-.33.418-.266.862-.395 1.378-.235l1.063.39c.104.038.175-.006.21-.055a6.7 6.7 0 0 0 .635-1.002c.046-.09.042-.18-.026-.252l-.775-.717c-.416-.384-.634-.917-.612-1.468a4 4 0 0 0 0-.654c-.022-.551.196-1.084.612-1.468l.775-.717c.068-.072.072-.162.026-.252a6.7 6.7 0 0 0-.635-1.002c-.035-.049-.106-.093-.21-.055l-1.063.39c-.516.16-.96.031-1.378-.235a4 4 0 0 0-.634-.33c-.449-.222-.851-.628-.998-1.189l-.289-1.105c-.029-.11-.101-.143-.137-.146a6.6 6.6 0 0 0-1.142 0ZM11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9.5 8a1.5 1.5 0 1 0-3.001.001A1.5 1.5 0 0 0 9.5 8Z"/></svg>,
+      onAction: () => setView('settings'),
+    },
+  ]
+
   return (
     <div className="flex h-screen w-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
       <Sidebar
@@ -858,7 +967,8 @@ export default function App(): JSX.Element {
           isLoading={isLoading}
           loadError={loadError}
           chatMode={chatMode}
-          sessionName={sessionCustomName ?? makeSessionName(messages)}
+          sessionName={sessionCustomName ?? makeSessionName(messages.filter((m) => !m.isGreeting))}
+          sessionId={currentSessionId}
           onQuery={handleQuery}
           onNewChat={handleNewChat}
           onAddFiles={handleAddFiles}
@@ -884,7 +994,9 @@ export default function App(): JSX.Element {
           citations={lastCitations}
           isQuerying={isQuerying}
           isLoading={isLoading}
-          collapsed={false}
+          collapsed={caseFiles.length === 0 && lastCitations.length === 0}
+          minimized={contextPanelMinimized}
+          onToggleMinimize={() => setContextPanelMinimized((v) => !v)}
           onAddFiles={handleAddFiles}
           onRemoveFile={handleRemoveFile}
           onClearFiles={handleClearFiles}
@@ -918,6 +1030,13 @@ export default function App(): JSX.Element {
       )}
 
       <Toast toasts={toasts} onDismiss={removeToast} />
+
+      {showCommandPalette && (
+        <CommandPalette
+          actions={paletteActions}
+          onClose={() => setShowCommandPalette(false)}
+        />
+      )}
 
       {/* Delete case confirmation modal */}
       {deleteCaseTarget && (

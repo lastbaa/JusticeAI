@@ -21,6 +21,7 @@ interface Props {
   onLoadPaths: (paths: string[]) => void
   onViewCitation: (citation: Citation) => void
   onExportChat?: () => void
+  sessionId?: string
   practiceArea?: string | null
   chunkTexts?: string[]
   theme?: Theme
@@ -307,6 +308,7 @@ export default function ChatInterface({
   onLoadPaths,
   onViewCitation,
   onExportChat,
+  sessionId,
   practiceArea,
   chunkTexts,
   theme,
@@ -348,7 +350,7 @@ export default function ChatInterface({
 
   function handleSend(): void {
     const trimmed = input.trim()
-    if (!trimmed || isQuerying || !hasFiles) return
+    if (!trimmed || isQuerying) return
     setInput('')
     onQuery(trimmed)
   }
@@ -379,305 +381,6 @@ export default function ChatInterface({
       if (f.path) paths.push(f.path)
     }
     if (paths.length > 0) onLoadPaths(paths)
-  }
-
-  // ── WELCOME SCREEN ──────────────────────────────────────────────────────────
-  if (!hasFiles && !chatMode) {
-    return (
-      <div
-        className="flex flex-1 flex-col h-screen overflow-hidden"
-        style={{ background: 'var(--bg)' }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        {/* Title bar drag zone */}
-        <div className="drag-region h-11 shrink-0" />
-
-        <div className="flex-1 flex flex-col items-center justify-center px-10 pb-16">
-
-          {/* Ambient glow behind icon */}
-          <div className="relative mb-7">
-            <div
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full pointer-events-none"
-              style={{ background: 'radial-gradient(circle, rgba(201,168,76,0.12) 0%, transparent 70%)' }}
-            />
-            <div
-              className="relative flex h-[68px] w-[68px] items-center justify-center rounded-[20px]"
-              style={{
-                background: 'rgba(201,168,76,0.07)',
-                border: '1px solid rgba(201,168,76,0.2)',
-                boxShadow: '0 8px 32px rgba(201,168,76,0.08)',
-                animation: 'floatY 4s ease-in-out infinite',
-              }}
-            >
-              <svg width="30" height="30" viewBox="0 0 28 28" fill="none">
-                <circle cx="14" cy="5" r="1.5" fill="#c9a84c" />
-                <rect x="13.25" y="5" width="1.5" height="16" fill="#c9a84c" />
-                <rect x="9" y="21" width="10" height="1.5" rx="0.75" fill="#c9a84c" />
-                <rect x="12" y="22.5" width="4" height="1.5" rx="0.75" fill="#c9a84c" />
-                <rect x="5" y="8.25" width="18" height="1.5" rx="0.75" fill="#c9a84c" />
-                <line x1="7" y1="9.75" x2="5.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
-                <line x1="21" y1="9.75" x2="22.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
-                <path d="M3 17 Q5.5 20 8 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
-                <path d="M20 17 Q22.5 20 25 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
-              </svg>
-            </div>
-          </div>
-
-          {/* Heading */}
-          <h1 className="mb-2 text-[28px] font-bold tracking-[-0.03em] leading-tight text-center" style={{ color: 'var(--text)' }}>
-            Justice <span style={{ color: 'var(--gold)' }}>AI</span>
-          </h1>
-          <p
-            className="mb-10 text-[13.5px] text-center leading-relaxed"
-            style={{ color: 'rgb(var(--ov) / 0.45)', maxWidth: 340 }}
-          >
-            Ask anything about your case files.
-            <br />
-            Every query runs locally — nothing leaves your device.
-          </p>
-
-          {/* Drop zone */}
-          <div
-            onClick={onAddFiles}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            className="w-full cursor-pointer"
-            style={{
-              maxWidth: 480,
-              borderRadius: 20,
-              border: `1.5px dashed ${isDragging ? 'rgba(201,168,76,0.6)' : 'rgb(var(--ov) / 0.09)'}`,
-              background: isDragging
-                ? 'rgba(201,168,76,0.05)'
-                : 'rgb(var(--ov) / 0.01)',
-              padding: '40px 36px',
-              transition: 'border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',
-              boxShadow: isDragging
-                ? '0 0 0 4px rgba(201,168,76,0.06), inset 0 0 40px rgba(201,168,76,0.03)'
-                : 'none',
-            }}
-            onMouseEnter={(e) => {
-              if (!isDragging) {
-                const el = e.currentTarget as HTMLDivElement
-                el.style.borderColor = 'rgba(201,168,76,0.25)'
-                el.style.background = 'rgba(201,168,76,0.02)'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isDragging) {
-                const el = e.currentTarget as HTMLDivElement
-                el.style.borderColor = 'rgb(var(--ov) / 0.09)'
-                el.style.background = 'rgb(var(--ov) / 0.01)'
-              }
-            }}
-          >
-            <div className="flex flex-col items-center text-center gap-4">
-              {/* Upload icon */}
-              <div
-                className="flex h-16 w-16 items-center justify-center rounded-2xl"
-                style={{
-                  background: isDragging ? 'rgba(201,168,76,0.12)' : 'rgb(var(--ov) / 0.03)',
-                  border: `1px solid ${isDragging ? 'rgba(201,168,76,0.35)' : 'rgb(var(--ov) / 0.07)'}`,
-                  transition: 'all 0.2s ease',
-                  boxShadow: isDragging ? '0 0 24px rgba(201,168,76,0.1)' : 'none',
-                }}
-              >
-                {isDragging ? (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                ) : (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--ov) / 0.28)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                )}
-              </div>
-
-              <div>
-                <p className="text-[15.5px] font-semibold tracking-[-0.01em] leading-snug" style={{ color: isDragging ? '#c9a84c' : 'var(--text)' }}>
-                  {isDragging ? 'Release to load documents' : 'Drop your documents here'}
-                </p>
-                <p className="mt-1.5 text-[12.5px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
-                  PDF and DOCX supported · or click to browse
-                </p>
-              </div>
-
-              {/* CTA buttons */}
-              <div className="flex items-center gap-3 mt-1">
-                <div
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[12.5px] font-semibold"
-                  style={{
-                    background: 'rgba(201,168,76,0.12)',
-                    border: '1px solid rgba(201,168,76,0.28)',
-                    color: '#c9a84c',
-                    boxShadow: '0 2px 8px rgba(201,168,76,0.08)',
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25V1.75z" />
-                  </svg>
-                  Browse files
-                </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onAddFolder() }}
-                  aria-label="Load folder"
-                  className="btn-outline text-[12px] no-drag px-3 py-2 rounded-lg"
-                >
-                  Load folder
-                </button>
-              </div>
-
-              {isLoading && (
-                <div className="flex items-center gap-2 mt-1">
-                  <div
-                    className="h-3.5 w-3.5 rounded-full animate-spin"
-                    style={{ border: '2px solid var(--gold-border)', borderTopColor: 'var(--gold)' }}
-                  />
-                  <p className="text-[12px]" style={{ color: 'var(--gold)' }}>
-                    Processing documents…
-                  </p>
-                </div>
-              )}
-              {justLoaded && !isLoading && (
-                <div className="flex items-center gap-2 mt-1" style={{ animation: 'fadeUp 0.3s ease both' }}>
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="#3fb950" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 5l2 2 4-4" />
-                  </svg>
-                  <p className="text-[12px]" style={{ color: '#3fb950' }}>
-                    {files.length} {files.length === 1 ? 'document' : 'documents'} loaded — ready to chat
-                  </p>
-                </div>
-              )}
-              {loadError && (
-                <div
-                  role="alert"
-                  className="flex items-start gap-2.5 rounded-xl px-4 py-3 mt-1 w-full"
-                  style={{
-                    background: 'rgba(201,168,76,0.06)',
-                    border: '1px solid rgba(201,168,76,0.28)',
-                    borderLeft: '2px solid rgba(201,168,76,0.7)',
-                    maxWidth: 360,
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="shrink-0 mt-0.5">
-                    <path d="M8.22 1.754a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368L8.22 1.754zm-1.358-.29a1.75 1.75 0 0 1 3.076 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15.5H1.918a1.75 1.75 0 0 1-1.538-2.658L6.862 1.464z" fill="rgba(201,168,76,0.75)" />
-                    <path d="M9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm-.25-5.25a.75.75 0 0 0-1.5 0v2.5a.75.75 0 0 0 1.5 0v-2.5z" fill="rgba(201,168,76,0.75)" />
-                  </svg>
-                  <p className="text-[12px] leading-relaxed text-left" style={{ color: 'rgba(201,168,76,0.9)' }}>
-                    {loadError}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Bento capability cards */}
-          <div className="grid grid-cols-2 gap-2 mt-8" style={{ maxWidth: 440, width: '100%' }}>
-            {([
-              {
-                icon: (
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="#c9a84c">
-                    <path d="M8.533.133a1.75 1.75 0 0 0-1.066 0l-5.25 1.68A1.75 1.75 0 0 0 1 3.48V7c0 1.566.832 3.125 2.561 4.608C5.163 13.101 6.97 14 8 14s2.837-.899 4.439-2.392C14.168 10.125 15 8.566 15 7V3.48a1.75 1.75 0 0 0-1.217-1.667zM5.5 9l2 2 3.5-3.5" stroke="#3fb950" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                  </svg>
-                ),
-                title: 'Privacy-First',
-                desc: 'Nothing ever leaves your device',
-                accent: 'rgba(63,185,80,0.55)',
-                bg: 'rgba(63,185,80,0.04)',
-                border: 'rgba(63,185,80,0.12)',
-              },
-              {
-                icon: (
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#c9a84c" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25V1.75z" />
-                    <line x1="5.5" y1="9" x2="10.5" y2="9" />
-                    <line x1="5.5" y1="11.5" x2="8.5" y2="11.5" />
-                  </svg>
-                ),
-                title: 'Cited Answers',
-                desc: 'Filename + page for every claim',
-                accent: 'rgba(201,168,76,0.6)',
-                bg: 'rgba(201,168,76,0.04)',
-                border: 'rgba(201,168,76,0.12)',
-              },
-              {
-                icon: (
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#c9a84c" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="8" cy="8" r="6.5" />
-                    <path d="M8 4v4l2.5 2" />
-                  </svg>
-                ),
-                title: 'Seconds, Not Hours',
-                desc: 'Semantic search across all pages',
-                accent: 'rgba(201,168,76,0.6)',
-                bg: 'rgba(201,168,76,0.04)',
-                border: 'rgba(201,168,76,0.12)',
-              },
-              {
-                icon: (
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#c9a84c" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="2" width="12" height="12" rx="3" />
-                    <rect x="5" y="5" width="6" height="6" rx="1.5" />
-                    <line x1="2" y1="6" x2="0.5" y2="6" />
-                    <line x1="14" y1="6" x2="15.5" y2="6" />
-                    <line x1="2" y1="10" x2="0.5" y2="10" />
-                    <line x1="14" y1="10" x2="15.5" y2="10" />
-                  </svg>
-                ),
-                title: 'Runs On-Device',
-                desc: 'Saul-7B · no cloud, no API keys',
-                accent: 'rgba(201,168,76,0.6)',
-                bg: 'rgba(201,168,76,0.04)',
-                border: 'rgba(201,168,76,0.12)',
-              },
-            ] as { icon: JSX.Element; title: string; desc: string; accent: string; bg: string; border: string }[]).map((card) => (
-              <div
-                key={card.title}
-                className="rounded-xl px-3.5 py-3 flex flex-col gap-2 group"
-                style={{
-                  background: card.bg,
-                  border: `1px solid ${card.border}`,
-                  transition: 'background 0.18s ease, border-color 0.18s ease, transform 0.18s ease',
-                  cursor: 'default',
-                }}
-                onMouseEnter={(e) => {
-                  const el = e.currentTarget as HTMLDivElement
-                  el.style.background = card.bg.replace('0.04', '0.07')
-                  el.style.borderColor = card.border.replace('0.12', '0.22')
-                  el.style.transform = 'translateY(-2px)'
-                }}
-                onMouseLeave={(e) => {
-                  const el = e.currentTarget as HTMLDivElement
-                  el.style.background = card.bg
-                  el.style.borderColor = card.border
-                  el.style.transform = 'translateY(0)'
-                }}
-              >
-                <div
-                  className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
-                  style={{ background: 'rgb(var(--ov) / 0.04)', border: '1px solid rgb(var(--ov) / 0.07)' }}
-                >
-                  {card.icon}
-                </div>
-                <div>
-                  <p className="text-[11.5px] font-semibold leading-tight" style={{ color: 'var(--text)' }}>{card.title}</p>
-                  <p className="text-[10.5px] mt-0.5 leading-snug" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
-                    {card.desc}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-        </div>
-      </div>
-    )
   }
 
   // ── CHAT VIEW ───────────────────────────────────────────────────────────────
@@ -745,10 +448,9 @@ export default function ChatInterface({
         style={{ borderBottom: '1px solid rgb(var(--ov) / 0.05)' }}
       >
         <div className="no-drag flex items-center gap-3 min-w-0">
-          {onInferenceModeChange ? (
+          <span className="text-[13px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--text)' }}>Justice AI</span>
+          {onInferenceModeChange && (
             <InferenceModeDropdown value={inferenceMode} onChange={onInferenceModeChange} disabled={isQuerying} />
-          ) : (
-            <span className="text-[13px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--text)' }}>Justice AI</span>
           )}
           {!isEmpty && (
             <span
@@ -833,11 +535,11 @@ export default function ChatInterface({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto">
+      <div key={sessionId} className="flex-1 overflow-y-auto" style={{ animation: 'sessionFade 0.25s ease both' }}>
         {isEmpty ? (
           <div className="flex h-full flex-col items-center justify-center px-8 py-16 text-center relative">
             {!hasFiles ? (
-              /* No docs yet — prompt to add */
+              /* No docs yet — welcome state with chat encouragement */
               <>
                 {/* Court seal watermark */}
                 <svg
@@ -847,7 +549,6 @@ export default function ChatInterface({
                 >
                   <circle cx="100" cy="100" r="95" stroke="currentColor" strokeWidth="2.5" />
                   <circle cx="100" cy="100" r="82" stroke="currentColor" strokeWidth="1" />
-                  {/* Scales */}
                   <circle cx="100" cy="52" r="3" fill="currentColor" />
                   <rect x="98.5" y="52" width="3" height="48" fill="currentColor" />
                   <rect x="86" y="100" width="28" height="3" rx="1.5" fill="currentColor" />
@@ -857,22 +558,17 @@ export default function ChatInterface({
                   <line x1="124" y1="61" x2="127" y2="82" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
                   <path d="M67 82 Q73 92 79 82" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" />
                   <path d="M121 82 Q127 92 133 82" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-                  {/* Laurel leaves — left */}
                   <path d="M38 140 Q30 120 42 100" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M42 148 Q32 130 40 112" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M48 155 Q36 140 42 122" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M56 160 Q42 148 46 132" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M65 163 Q52 155 54 140" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                  {/* Laurel leaves — right */}
                   <path d="M162 140 Q170 120 158 100" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M158 148 Q168 130 160 112" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M152 155 Q164 140 158 122" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M144 160 Q158 148 154 132" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M135 163 Q148 155 146 140" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                  {/* JUSTICE text arc */}
-                  <text
-                    textAnchor="middle" fontSize="10" fontWeight="600" letterSpacing="4" fill="currentColor"
-                  >
+                  <text textAnchor="middle" fontSize="10" fontWeight="600" letterSpacing="4" fill="currentColor">
                     <textPath href="#sealArcTop" startOffset="50%">JUSTICE AI</textPath>
                   </text>
                   <defs>
@@ -888,36 +584,109 @@ export default function ChatInterface({
                     boxShadow: '0 4px 20px rgba(201,168,76,0.06)',
                   }}
                 >
-                  <svg width="22" height="22" viewBox="0 0 16 16" fill="rgba(201,168,76,0.8)">
-                    <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25V1.75zM8.75 9.25a.75.75 0 0 0-1.5 0v1.5H5.75a.75.75 0 0 0 0 1.5h1.5v1.5a.75.75 0 0 0 1.5 0v-1.5h1.5a.75.75 0 0 0 0-1.5H8.75v-1.5z" />
+                  <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
+                    <circle cx="14" cy="5" r="1.5" fill="#c9a84c" />
+                    <rect x="13.25" y="5" width="1.5" height="16" fill="#c9a84c" />
+                    <rect x="9" y="21" width="10" height="1.5" rx="0.75" fill="#c9a84c" />
+                    <rect x="12" y="22.5" width="4" height="1.5" rx="0.75" fill="#c9a84c" />
+                    <rect x="5" y="8.25" width="18" height="1.5" rx="0.75" fill="#c9a84c" />
+                    <line x1="7" y1="9.75" x2="5.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
+                    <line x1="21" y1="9.75" x2="22.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
+                    <path d="M3 17 Q5.5 20 8 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+                    <path d="M20 17 Q22.5 20 25 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
                   </svg>
                 </div>
-                <h3 className="mb-2 text-[18px] font-semibold tracking-[-0.02em] relative z-10" style={{ color: 'var(--text)' }}>
-                  Add documents to get started
+                <h3 className="mb-2 text-[22px] font-bold tracking-[-0.03em] relative z-10" style={{ color: 'var(--text)' }}>
+                  Justice <span style={{ color: 'var(--gold)' }}>AI</span>
                 </h3>
-                <p className="mb-7 text-[12.5px] leading-relaxed relative z-10" style={{ color: 'rgb(var(--ov) / 0.45)', maxWidth: 300 }}>
-                  Supports PDFs, Word, Excel, images,{' '}
-                  <span
-                    className="inline-block cursor-help"
-                    style={{
-                      color: 'rgba(201,168,76,0.7)',
-                      borderBottom: '1px dashed rgba(201,168,76,0.35)',
-                    }}
-                    title="TXT, MD, CSV, HTML, MHTML, XML, EML, PNG, JPG, JPEG, TIFF"
-                  >
-                    and more
-                  </span>
-                  {' '}— then ask any question about your case.
+                <p className="mb-6 text-[13px] leading-relaxed relative z-10" style={{ color: 'rgb(var(--ov) / 0.45)', maxWidth: 340 }}>
+                  Ask anything — or upload documents for cited, case-specific answers.
                 </p>
+
+                {/* Suggestion chips */}
+                <div className="flex flex-wrap justify-center gap-2 mb-6 relative z-10" style={{ maxWidth: 440 }}>
+                  {[
+                    'What is Justice AI?',
+                    'How do I upload documents?',
+                    'What file types are supported?',
+                  ].map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => { setInput(q); textareaRef.current?.focus() }}
+                      className="px-3.5 py-2 rounded-xl text-[12px] transition-all"
+                      style={{
+                        background: 'rgb(var(--ov) / 0.03)',
+                        border: '1px solid rgb(var(--ov) / 0.08)',
+                        color: 'rgb(var(--ov) / 0.5)',
+                      }}
+                      onMouseEnter={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement
+                        el.style.borderColor = 'rgba(201,168,76,0.3)'
+                        el.style.color = 'rgba(201,168,76,0.8)'
+                        el.style.background = 'rgba(201,168,76,0.04)'
+                      }}
+                      onMouseLeave={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement
+                        el.style.borderColor = 'rgb(var(--ov) / 0.08)'
+                        el.style.color = 'rgb(var(--ov) / 0.5)'
+                        el.style.background = 'rgb(var(--ov) / 0.03)'
+                      }}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Upload prompt */}
                 <button
                   onClick={onAddFiles}
-                  className="btn-gold flex items-center gap-2 rounded-xl px-6 py-3 text-[13px] font-semibold relative z-10"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[12.5px] font-semibold relative z-10 transition-all"
+                  style={{
+                    background: 'rgba(201,168,76,0.08)',
+                    border: '1px solid rgba(201,168,76,0.2)',
+                    color: 'rgba(201,168,76,0.8)',
+                  }}
+                  onMouseEnter={(e) => {
+                    const el = e.currentTarget as HTMLButtonElement
+                    el.style.background = 'rgba(201,168,76,0.14)'
+                    el.style.borderColor = 'rgba(201,168,76,0.35)'
+                  }}
+                  onMouseLeave={(e) => {
+                    const el = e.currentTarget as HTMLButtonElement
+                    el.style.background = 'rgba(201,168,76,0.08)'
+                    el.style.borderColor = 'rgba(201,168,76,0.2)'
+                  }}
                 >
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2z" />
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
-                  Add Documents
+                  Upload documents for cited answers
                 </button>
+                <p className="mt-2.5 text-[11px] relative z-10" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
+                  Supports PDFs, Word, Excel, images,{' '}
+                  <span
+                    className="inline-block cursor-help relative group/tip"
+                    style={{
+                      color: 'rgba(201,168,76,0.5)',
+                      borderBottom: '1px dashed rgba(201,168,76,0.25)',
+                    }}
+                  >
+                    and more
+                    <span
+                      className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[10px] font-medium z-10"
+                      style={{
+                        background: 'var(--bg-alt)',
+                        border: '1px solid rgb(var(--ov) / 0.12)',
+                        color: 'rgb(var(--ov) / 0.6)',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                      }}
+                    >
+                      TXT, MD, CSV, HTML, XML, EML, PNG, JPG, TIFF
+                    </span>
+                  </span>
+                </p>
               </>
             ) : (
               /* Has docs — show template prompts + key facts */
@@ -1016,9 +785,9 @@ export default function ChatInterface({
               />
               <button
                 onClick={handleSend}
-                disabled={isQuerying || !input.trim() || !hasFiles}
-                title={!hasFiles ? 'Add documents first' : 'Send message'}
-                aria-label={!hasFiles ? 'Add documents first' : 'Send message'}
+                disabled={isQuerying || !input.trim()}
+                title="Send message"
+                aria-label="Send message"
                 className="flex shrink-0 h-8 w-8 items-center justify-center rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
                 style={{
                   background: input.trim() && !isQuerying ? 'var(--gold)' : 'rgb(var(--ov) / 0.06)',
@@ -1110,6 +879,7 @@ export default function ChatInterface({
                     { keys: 'Enter', desc: 'Send message' },
                     { keys: 'Shift + Enter', desc: 'New line' },
                     { keys: 'Esc', desc: 'Close settings / dialogs' },
+                    { keys: navigator.platform?.includes('Mac') ? '\u2318K' : 'Ctrl+K', desc: 'Command palette' },
                     { keys: 'Drag & Drop', desc: 'Add files to your session' },
                   ].map((item) => (
                     <div key={item.keys} className="flex items-center justify-between">
@@ -1135,7 +905,7 @@ export default function ChatInterface({
                 </h3>
                 <ul className="flex flex-col gap-2">
                   {[
-                    'Load your documents first — PDFs and DOCX files are supported.',
+                    'Load your documents first. Supports PDFs, Word, Excel, images, and more.',
                     'Ask questions in plain, natural language.',
                     'Citations link directly to the source page in your documents.',
                     'Use cases to organize research across different matters.',

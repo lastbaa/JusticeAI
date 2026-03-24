@@ -1,6 +1,6 @@
 use crate::pipeline::{
-    self, chunk_document, embed_text, RetrievalBackend, GGUF_MIN_SIZE, SAUL_GGUF_URL,
-    SCORE_THRESHOLD,
+    self, chunk_document, embed_text, is_non_document_query, RetrievalBackend,
+    COSINE_FLOOR, GGUF_MIN_SIZE, SAUL_GGUF_URL, SCORE_THRESHOLD,
 };
 use crate::state::{
     AppSettings, Case, ChatSession, ChunkMetadata, Citation, EmbeddedChunkEntry, FileInfo,
@@ -686,6 +686,50 @@ pub async fn query(
         )
     };
 
+    // ── Layer 1: Query intent classification ─────────────────────────────────
+    // Detect greetings, chitchat, and off-topic queries BEFORE any retrieval.
+    // Route them to the general chat prompt to prevent hallucination.
+    let has_chunks = {
+        let s = state.lock().await;
+        !s.embedded_chunks.is_empty()
+    };
+    if has_chunks && is_non_document_query(&question) {
+        log::info!("Non-document query detected ('{}'); routing to general chat.", &question);
+        let model_dir_clone = model_dir.clone();
+        let window_clone = window.clone();
+        window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
+        let mut chat_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
+        chat_params.system_prompt_override = Some(
+            "You are Justice AI, a friendly and helpful legal research assistant that runs \
+            entirely on the user's device.\n\n\
+            The user has documents loaded, but their message is a greeting or general question — \
+            NOT a question about their documents.\n\n\
+            When the user greets you or asks a general question:\n\
+            - Respond warmly and naturally.\n\
+            - Let them know you're ready to answer questions about their loaded documents.\n\
+            - Do NOT make up or reference any content from their documents.\n\
+            - Do NOT fabricate case details, court names, parties, or legal facts.\n\
+            - Be conversational, concise, and helpful.\n\
+            - Never fabricate case citations, statutes, or specific legal advice.".to_string(),
+        );
+        let general_answer = pipeline::ask_saul(
+            &question,
+            "",
+            &history,
+            &model_dir_clone,
+            Arc::clone(&model_cache),
+            move |tok| { window_clone.emit("query-token", tok.as_str()).ok(); },
+            resolved_jurisdiction.as_ref(),
+            chat_params,
+        ).await?;
+        return Ok(QueryResult {
+            answer: general_answer,
+            citations: vec![],
+            not_found: false,
+            assertions: vec![],
+        });
+    }
+
     window
         .emit("query-status", serde_json::json!({"phase": "embedding"}))
         .ok();
@@ -728,12 +772,45 @@ pub async fn query(
             )
             .ok();
 
-        // No chunks at all → no files were successfully embedded.
+        // No chunks at all → no documents loaded. Run as general chat assistant.
         if filtered_chunks.is_empty() {
+            window
+                .emit("query-status", serde_json::json!({"phase": "generating"}))
+                .ok();
+            let window_clone = window.clone();
+            // Use a conversational system prompt instead of the document-analysis prompt.
+            let mut chat_params = inference_params;
+            chat_params.system_prompt_override = Some(
+                "You are Justice AI, a friendly and helpful legal research assistant that runs \
+                entirely on the user's device.\n\n\
+                When no documents are loaded, you should:\n\
+                - Greet the user warmly and introduce yourself if they say hello.\n\
+                - Explain that you can analyze legal documents (PDFs, Word, Excel, images, and more) \
+                with cited, page-level answers — all locally and privately.\n\
+                - Answer general legal knowledge questions from your training, but note that you are \
+                not a lawyer and answers may vary by jurisdiction.\n\
+                - Help users understand how to use the app: they can upload documents via the sidebar \
+                or drag-and-drop, then ask questions about their case files.\n\
+                - Be conversational, concise, and helpful. Use a warm but professional tone.\n\
+                - Never fabricate case citations, statutes, or specific legal advice.".to_string(),
+            );
+            let general_answer = pipeline::ask_saul(
+                &question,
+                "",  // no document context
+                &history,
+                &model_dir,
+                Arc::clone(&model_cache),
+                move |tok| {
+                    window_clone.emit("query-token", tok.as_str()).ok();
+                },
+                resolved_jurisdiction.as_ref(),
+                chat_params,
+            )
+            .await?;
             return Ok(QueryResult {
-                answer: "I could not find information about this in your loaded documents. Please ensure the relevant files are loaded.".to_string(),
+                answer: general_answer,
                 citations: vec![],
-                not_found: true,
+                not_found: false,
                 assertions: vec![],
             });
         }
@@ -766,6 +843,72 @@ pub async fn query(
             })
             .collect::<Vec<(f32, ChunkMetadata)>>()
     };
+
+    // ── Layer 2: Cosine floor check ───────────────────────────────────────────
+    // If retrieval returned nothing (all below threshold) OR the raw cosine
+    // similarity of the best chunk is too low, route to general chat.
+    // This prevents hallucination when the query is unrelated to loaded documents.
+    let route_to_general = if results.is_empty() {
+        log::info!("Retrieval returned no results above threshold; routing to general chat.");
+        true
+    } else {
+        // Check raw cosine of best chunk against the query
+        let best_cosine = {
+            let s = state.lock().await;
+            let mut best = 0.0f32;
+            for (_, meta) in &results {
+                // Find the embedded chunk to get its vector
+                if let Some(entry) = s.embedded_chunks.iter().find(|e| e.meta.id == meta.id) {
+                    let cos = crate::state::RagState::cosine_similarity(&query_vec, &entry.vector);
+                    if cos > best { best = cos; }
+                }
+            }
+            best
+        };
+        if best_cosine < COSINE_FLOOR {
+            log::info!(
+                "Best cosine similarity ({:.3}) below floor ({:.2}); routing to general chat.",
+                best_cosine, COSINE_FLOOR
+            );
+            true
+        } else {
+            false
+        }
+    };
+
+    if route_to_general {
+        window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
+        let window_clone = window.clone();
+        let mut chat_params = inference_params;
+        chat_params.system_prompt_override = Some(
+            "You are Justice AI, a legal research assistant.\n\n\
+            The user has documents loaded, but their question does not match any content in those documents.\n\n\
+            CRITICAL RULES:\n\
+            - Say that you could not find relevant information in their loaded documents.\n\
+            - Suggest they rephrase their question or check that the right documents are uploaded.\n\
+            - You may offer general legal knowledge if the question is about law, but clearly note \
+            you are answering from general knowledge, NOT from their documents.\n\
+            - NEVER fabricate or guess document content, case details, parties, courts, or facts.\n\
+            - NEVER pretend to have found something in their documents when you haven't.\n\
+            - Be helpful but honest about the limitation.".to_string(),
+        );
+        let general_answer = pipeline::ask_saul(
+            &question,
+            "",
+            &history,
+            &model_dir,
+            Arc::clone(&model_cache),
+            move |tok| { window_clone.emit("query-token", tok.as_str()).ok(); },
+            resolved_jurisdiction.as_ref(),
+            chat_params,
+        ).await?;
+        return Ok(QueryResult {
+            answer: general_answer,
+            citations: vec![],
+            not_found: true,
+            assertions: vec![],
+        });
+    }
 
     let context_parts: Vec<String> = results
         .iter()
@@ -921,11 +1064,36 @@ pub async fn query(
     let chunk_texts: Vec<&str> = results.iter().map(|(_, m)| m.text.as_str()).collect();
     let mut assertions = crate::assertions::check_citations(&answer, Some(&known_files));
     assertions.extend(crate::assertions::check_no_hallucination(&answer, &chunk_texts));
+    assertions.extend(crate::assertions::check_fabricated_entities(&answer, &chunk_texts));
+
+    // ── Layer 4: Hallucination failsafe ───────────────────────────────────────
+    // If any hallucination assertion FAILED, replace the answer with a safe error.
+    // This is the last line of defense — the model generated something, but it
+    // contains fabricated facts not grounded in the source documents.
+    let has_hallucination = assertions.iter().any(|a| {
+        !a.passed && matches!(a.assertion_type, crate::assertions::AssertionType::Hallucination)
+    });
+    let has_fabrication = assertions.iter().any(|a| {
+        !a.passed && matches!(a.assertion_type, crate::assertions::AssertionType::FabricatedEntity)
+    });
+
+    let (final_answer, final_not_found) = if has_fabrication {
+        log::warn!("Fabricated entity detected in answer — replacing with safe response.");
+        (
+            "I found some relevant excerpts in your documents, but I was unable to produce \
+            a fully grounded answer. Some details may not be supported by your documents.\n\n\
+            Please try rephrasing your question more specifically, or review the source \
+            excerpts below to find the information you need.".to_string(),
+            true,
+        )
+    } else {
+        (answer, not_found)
+    };
 
     Ok(QueryResult {
-        answer,
+        answer: final_answer,
         citations,
-        not_found,
+        not_found: final_not_found,
         assertions,
     })
 }

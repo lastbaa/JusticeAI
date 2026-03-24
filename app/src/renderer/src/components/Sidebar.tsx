@@ -342,10 +342,27 @@ export default function Sidebar({
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [chatsOpen, setChatsOpen] = useState(true)
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
+  const [projectMenuOpen, setProjectMenuOpen] = useState<string | null>(null)
+  const [renamingProject, setRenamingProject] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  const projectMenuRef = useRef<HTMLDivElement>(null)
   const newCaseInputRef = useRef<HTMLInputElement>(null)
   const projectNameInputRef = useRef<HTMLInputElement>(null)
   const caseCreatedRef = useRef(false)
   const projectNameCommittedRef = useRef(false)
+
+  // Close project menu on outside click
+  useEffect(() => {
+    if (!projectMenuOpen) return
+    function handleClick(e: MouseEvent): void {
+      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target as Node)) {
+        setProjectMenuOpen(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [projectMenuOpen])
 
   function toggleProject(id: string): void {
     setExpandedProjects((prev) => {
@@ -869,8 +886,41 @@ export default function Sidebar({
                     return (
                       <div key={c.id}>
                         {/* Project row */}
+                        {renamingProject === c.id ? (
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-3 py-1.5"
+                            style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)' }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="rgba(201,168,76,0.6)" className="shrink-0">
+                              <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
+                            </svg>
+                            <input
+                              ref={renameInputRef}
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onBlur={() => {
+                                const trimmed = renameValue.trim()
+                                if (trimmed && trimmed !== c.name) onRenameCase(c.id, trimmed)
+                                setRenamingProject(null)
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  const trimmed = renameValue.trim()
+                                  if (trimmed && trimmed !== c.name) onRenameCase(c.id, trimmed)
+                                  setRenamingProject(null)
+                                }
+                                if (e.key === 'Escape') setRenamingProject(null)
+                              }}
+                              autoFocus
+                              className="flex-1 bg-transparent text-[12px] font-medium outline-none"
+                              style={{ color: 'var(--text)', minWidth: 0 }}
+                              maxLength={60}
+                            />
+                          </div>
+                        ) : (
                         <div
-                          className="flex items-center gap-2 rounded-lg px-3 py-1.5 cursor-pointer transition-all"
+                          className="group flex items-center gap-2 rounded-lg px-3 py-1.5 cursor-pointer transition-all relative"
                           style={{ color: currentCaseId === c.id ? 'var(--text)' : 'rgb(var(--ov) / 0.45)' }}
                           onClick={() => toggleProject(c.id)}
                           onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgb(var(--ov) / 0.04)' }}
@@ -886,10 +936,69 @@ export default function Sidebar({
                             <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
                           </svg>
                           <span className="flex-1 truncate text-[12px] font-medium">{c.name}</span>
-                          <span className="text-[9px] shrink-0" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+                          <span className="text-[9px] shrink-0 group-hover:hidden" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
                             {docCount}d · {projectSessions.length}c
                           </span>
+
+                          {/* ··· menu button (visible on hover) */}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setProjectMenuOpen(projectMenuOpen === c.id ? null : c.id) }}
+                            className="no-drag hidden group-hover:flex h-5 w-5 items-center justify-center rounded transition-colors shrink-0"
+                            style={{ color: 'rgb(var(--ov) / 0.25)' }}
+                            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.6)' }}
+                            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.25)' }}
+                            title="Project options"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                              <path d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+                            </svg>
+                          </button>
+
+                          {/* Dropdown menu */}
+                          {projectMenuOpen === c.id && (
+                            <div
+                              ref={projectMenuRef}
+                              className="absolute right-0 top-full mt-1 z-50 rounded-lg py-1 shadow-lg"
+                              style={{
+                                background: 'var(--bg-alt)',
+                                border: '1px solid rgb(var(--ov) / 0.1)',
+                                minWidth: 140,
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                onClick={() => {
+                                  setProjectMenuOpen(null)
+                                  setRenameValue(c.name)
+                                  setRenamingProject(c.id)
+                                  setTimeout(() => renameInputRef.current?.select(), 0)
+                                }}
+                                className="no-drag flex w-full items-center gap-2.5 px-3 py-1.5 text-[11px] transition-colors text-left"
+                                style={{ color: 'rgb(var(--ov) / 0.55)' }}
+                                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgb(var(--ov) / 0.05)' }}
+                                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                              >
+                                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                                  <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61z" />
+                                </svg>
+                                Rename
+                              </button>
+                              <button
+                                onClick={() => { setProjectMenuOpen(null); onDeleteCase(c.id) }}
+                                className="no-drag flex w-full items-center gap-2.5 px-3 py-1.5 text-[11px] transition-colors text-left"
+                                style={{ color: '#f85149' }}
+                                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(248,81,73,0.06)' }}
+                                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                              >
+                                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                                  <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15z" />
+                                </svg>
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </div>
+                        )}
 
                         {/* Expanded: conversations inside project */}
                         {isExpanded && (
@@ -948,7 +1057,7 @@ export default function Sidebar({
                 <button
                   onClick={() => setChatsOpen((v) => !v)}
                   className="no-drag flex flex-1 items-center gap-2 px-3 py-1.5 rounded-md transition-colors"
-                  style={{ color: 'rgb(var(--ov) / 0.25)' }}
+                  style={{ color: 'rgba(201,168,76,0.5)' }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgb(var(--ov) / 0.03)' }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
                 >

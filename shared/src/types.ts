@@ -82,6 +82,7 @@ export interface ChatMessage {
   notFound?: boolean;
   qualityAssertions?: AssertionResult[];
   inferenceMode?: InferenceMode;
+  isGreeting?: boolean;
 }
 
 export interface KeyFigure {

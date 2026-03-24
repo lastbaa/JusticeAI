@@ -14,6 +14,61 @@ use uuid::Uuid;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const SCORE_THRESHOLD: f32 = 0.20;
+
+/// Minimum raw cosine similarity between the query and the best-scoring chunk.
+/// If the top chunk is below this, the query is considered unrelated to documents.
+pub const COSINE_FLOOR: f32 = 0.30;
+
+/// Detect whether a query is a greeting, chitchat, or clearly non-document query.
+/// Returns true if the query should be routed to general chat mode even when
+/// documents are loaded (to prevent the LLM from hallucinating document content).
+pub fn is_non_document_query(query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    let q_clean = q.trim_end_matches(|c: char| c.is_ascii_punctuation());
+
+    // Empty or whitespace-only queries
+    if q_clean.is_empty() {
+        return true;
+    }
+
+    // Very short queries that are obviously not legal questions
+    if q_clean.split_whitespace().count() <= 2 {
+        let greetings = [
+            "hello", "hi", "hey", "yo", "sup", "howdy", "hola", "greetings",
+            "good morning", "good afternoon", "good evening", "good night",
+            "thanks", "thank you", "thx", "ty", "bye", "goodbye", "see ya",
+            "ok", "okay", "sure", "yes", "no", "yep", "nope", "cool",
+            "help", "test", "testing", "ping",
+        ];
+        if greetings.iter().any(|g| q_clean == *g) {
+            return true;
+        }
+    }
+
+    // Greeting patterns (even multi-word)
+    let greeting_patterns = [
+        "how are you", "how's it going", "what's up", "whats up",
+        "nice to meet", "pleased to meet", "how do you do",
+        "what can you do", "who are you", "what are you",
+        "tell me about yourself", "introduce yourself",
+    ];
+    if greeting_patterns.iter().any(|p| q.contains(p)) {
+        return true;
+    }
+
+    // Off-topic queries that clearly aren't about legal documents
+    let offtopic = [
+        "what's the weather", "whats the weather", "what is the weather",
+        "tell me a joke", "sing me a song", "write a poem",
+        "what time is it", "what day is it",
+        "how old are you", "where are you from",
+    ];
+    if offtopic.iter().any(|p| q.contains(p)) {
+        return true;
+    }
+
+    false
+}
 pub const GGUF_MIN_SIZE: u64 = 4_000_000_000;
 
 pub const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instruct-v1-GGUF/resolve/main/Saul-Instruct-v1.Q4_K_M.gguf";
@@ -48,6 +103,8 @@ pub struct InferenceParams {
     pub max_new_tokens: usize,
     pub temperature: f32,
     pub system_prompt_suffix: &'static str,
+    /// When set, replaces RULES_PROMPT entirely (used for no-document chat mode).
+    pub system_prompt_override: Option<String>,
 }
 
 impl InferenceParams {
@@ -64,16 +121,19 @@ impl InferenceParams {
                 max_new_tokens: 256,
                 temperature: 0.3,
                 system_prompt_suffix: "\nAnswer in 2-3 concise bullet points. Focus on the single most relevant fact. Be brief.",
+                system_prompt_override: None,
             },
             InferenceMode::Balanced => Self {
                 max_new_tokens: 1024,
                 temperature: 0.35,
                 system_prompt_suffix: "",
+                system_prompt_override: None,
             },
             InferenceMode::Extended => Self {
                 max_new_tokens: 1024,
                 temperature: 0.2,
                 system_prompt_suffix: "\nStructure your response with these markdown section headers:\n### Direct Answer\n### Key Findings\n### Relevant Provisions\n### Caveats\nCite each claim with page number. Be thorough.",
+                system_prompt_override: None,
             },
         }
     }
@@ -574,13 +634,14 @@ Answer the current question using ONLY these excerpts.\n\n\
     };
 
     // Inject jurisdiction-specific rules into the system prompt when available.
+    let base_prompt = inference_params.system_prompt_override.as_deref().unwrap_or(RULES_PROMPT);
     let j_fragment = jurisdiction.map(jurisdiction_prompt_fragment).unwrap_or_default();
     let mode_suffix = inference_params.system_prompt_suffix;
     let sys_prompt = match (j_fragment.is_empty(), mode_suffix.is_empty()) {
-        (true, true) => RULES_PROMPT.to_string(),
-        (false, true) => format!("{RULES_PROMPT}\n\n{j_fragment}"),
-        (true, false) => format!("{RULES_PROMPT}{mode_suffix}"),
-        (false, false) => format!("{RULES_PROMPT}\n\n{j_fragment}{mode_suffix}"),
+        (true, true) => base_prompt.to_string(),
+        (false, true) => format!("{base_prompt}\n\n{j_fragment}"),
+        (true, false) => format!("{base_prompt}{mode_suffix}"),
+        (false, false) => format!("{base_prompt}\n\n{j_fragment}{mode_suffix}"),
     };
 
     // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
@@ -1691,13 +1752,23 @@ impl RetrievalBackend for HybridBm25Cosine {
         let mut indexed: Vec<(usize, f32)> = hybrid.into_iter().enumerate().collect();
         indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        // 5. Threshold filter
+        // 5. Threshold filter — if nothing passes, return empty (do NOT fall back
+        //    to unfiltered results, which caused hallucination on irrelevant queries).
         let above: Vec<(usize, f32)> = if config.score_threshold > 0.0 {
             let filtered: Vec<_> = indexed.iter()
                 .filter(|(_, s)| *s >= config.score_threshold)
                 .cloned()
                 .collect();
-            if filtered.is_empty() { indexed.clone() } else { filtered }
+            if filtered.is_empty() {
+                log::info!(
+                    "All {} chunks scored below threshold {:.2}; returning empty.",
+                    indexed.len(),
+                    config.score_threshold
+                );
+                Vec::new()
+            } else {
+                filtered
+            }
         } else {
             indexed
         };
@@ -3068,5 +3139,62 @@ defers to state insurance regulation."#;
         let text = format!("{padding}Cal. Civ. Code § 1942.5");
         let result = detect_jurisdiction(&text);
         assert!(result.is_some(), "Should detect citation within first 10,000 chars");
+    }
+
+    // ── is_non_document_query tests ────────────────────────────────────────────
+
+    #[test]
+    fn greeting_hello_detected() {
+        assert!(is_non_document_query("Hello"));
+        assert!(is_non_document_query("hello"));
+        assert!(is_non_document_query("Hello!"));
+        assert!(is_non_document_query("Hi"));
+        assert!(is_non_document_query("Hey"));
+        assert!(is_non_document_query("Howdy"));
+    }
+
+    #[test]
+    fn greeting_phrases_detected() {
+        assert!(is_non_document_query("How are you?"));
+        assert!(is_non_document_query("What's up?"));
+        assert!(is_non_document_query("How are you doing today?"));
+        assert!(is_non_document_query("Who are you?"));
+        assert!(is_non_document_query("What can you do?"));
+    }
+
+    #[test]
+    fn thanks_detected() {
+        assert!(is_non_document_query("Thanks"));
+        assert!(is_non_document_query("Thank you"));
+        assert!(is_non_document_query("thanks!"));
+    }
+
+    #[test]
+    fn offtopic_detected() {
+        assert!(is_non_document_query("What's the weather?"));
+        assert!(is_non_document_query("Tell me a joke"));
+    }
+
+    #[test]
+    fn legal_questions_not_detected() {
+        assert!(!is_non_document_query("What are the key terms of this contract?"));
+        assert!(!is_non_document_query("Summarize the liability clauses"));
+        assert!(!is_non_document_query("What is the termination date?"));
+        assert!(!is_non_document_query("Who are the parties in this agreement?"));
+        assert!(!is_non_document_query("Find all deadlines mentioned in the contract"));
+    }
+
+    #[test]
+    fn short_legal_queries_not_detected() {
+        // These are short but legitimate document queries
+        assert!(!is_non_document_query("What is the rent amount?"));
+        assert!(!is_non_document_query("Summarize this"));
+    }
+
+    #[test]
+    fn test_not_detected() {
+        assert!(is_non_document_query("test"));
+        assert!(is_non_document_query("testing"));
+        assert!(is_non_document_query("ping"));
     }
 }

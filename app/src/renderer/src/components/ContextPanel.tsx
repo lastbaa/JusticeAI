@@ -7,6 +7,8 @@ interface Props {
   isQuerying: boolean
   isLoading: boolean
   collapsed: boolean
+  minimized: boolean
+  onToggleMinimize: () => void
   onAddFiles: () => void
   onRemoveFile: (id: string) => void
   onClearFiles: () => void
@@ -127,13 +129,16 @@ function CitationRow({
 
 function FileRow({
   file,
+  index,
   onRemove,
 }: {
   file: FileInfo
+  index: number
   onRemove: () => void
 }): JSX.Element {
   const [hovered, setHovered] = useState(false)
   const ext = file.fileName.split('.').pop()?.toUpperCase() ?? 'DOC'
+  const exhibitLabel = index < 26 ? `Ex. ${String.fromCharCode(65 + index)}` : `Ex. ${index + 1}`
 
   return (
     <div
@@ -154,6 +159,8 @@ function FileRow({
           style={{ color: 'rgb(var(--ov) / 0.6)' }}
           title={file.fileName}
         >
+          <span className="font-semibold" style={{ color: 'rgba(201,168,76,0.55)' }}>{exhibitLabel}</span>
+          <span style={{ color: 'rgb(var(--ov) / 0.15)', margin: '0 4px' }}>{'\u00B7'}</span>
           {file.fileName}
         </p>
         <p className="text-[10px] mt-0.5" style={{ color: 'rgb(var(--ov) / 0.22)' }}>
@@ -184,6 +191,8 @@ export default function ContextPanel({
   isQuerying,
   isLoading,
   collapsed,
+  minimized,
+  onToggleMinimize,
   activeCitation,
   onAddFiles,
   onRemoveFile,
@@ -195,16 +204,84 @@ export default function ContextPanel({
   const hasCitations = citations.length > 0
   const showSources = hasCitations || isQuerying
 
+  // Completely hidden when no files
+  if (collapsed) {
+    return <aside style={{ width: 0, minWidth: 0, overflow: 'hidden' }} />
+  }
+
+  // Minimized strip
+  if (minimized) {
+    return (
+      <aside
+        className="flex h-screen shrink-0 flex-col items-center py-0 cursor-pointer"
+        style={{
+          width: 44,
+          minWidth: 44,
+          borderLeft: '1px solid rgb(var(--ov) / 0.05)',
+          background: 'var(--panel)',
+          transition: 'width 0.2s ease, min-width 0.2s ease',
+        }}
+        onClick={onToggleMinimize}
+        title="Expand documents panel"
+      >
+        {/* Drag region spacer */}
+        <div className="drag-region h-11 w-full shrink-0" />
+
+        {/* Document icon with count badge */}
+        <div className="relative mt-2 mb-3">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="rgba(201,168,76,0.45)">
+            <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25z" />
+          </svg>
+          {files.length > 0 && (
+            <span
+              className="absolute -top-1.5 -right-2 text-[8px] font-bold px-1 rounded-full"
+              style={{ background: '#c9a84c', color: '#0d1117', minWidth: 14, textAlign: 'center' }}
+            >
+              {files.length}
+            </span>
+          )}
+        </div>
+
+        {/* Citation indicators */}
+        {hasCitations && (
+          <div className="flex flex-col items-center gap-1.5 mb-3">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="rgba(201,168,76,0.35)">
+              <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25z" />
+            </svg>
+            <span className="text-[8px] font-bold" style={{ color: 'rgba(201,168,76,0.5)' }}>
+              {citations.length}
+            </span>
+          </div>
+        )}
+
+        {/* Querying indicator */}
+        {isQuerying && (
+          <div
+            className="h-3 w-3 rounded-full animate-spin mt-1"
+            style={{ border: '1.5px solid rgba(201,168,76,0.15)', borderTopColor: 'rgba(201,168,76,0.6)' }}
+          />
+        )}
+
+        {/* Expand chevron at bottom */}
+        <div className="mt-auto mb-4" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M9.78 12.78a.75.75 0 0 1-1.06 0L4.47 8.53a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L6.06 8l3.72 3.72a.75.75 0 0 1 0 1.06z"/>
+          </svg>
+        </div>
+      </aside>
+    )
+  }
+
   return (
     <aside
       className="flex h-screen shrink-0 flex-col"
       style={{
-        width: collapsed ? 0 : 300,
-        minWidth: collapsed ? 0 : 300,
-        borderLeft: collapsed ? 'none' : '1px solid rgb(var(--ov) / 0.05)',
+        width: 300,
+        minWidth: 300,
+        borderLeft: '1px solid rgb(var(--ov) / 0.05)',
         background: 'var(--panel)',
         overflow: 'hidden',
-        transition: 'width 0.25s ease, min-width 0.25s ease',
+        transition: 'width 0.2s ease, min-width 0.2s ease',
       }}
     >
       {/* Header — matches other panels' h-11 drag region */}
@@ -228,6 +305,20 @@ export default function ContextPanel({
             </span>
           )}
         </div>
+        {/* Minimize button */}
+        <button
+          onClick={onToggleMinimize}
+          title="Minimize panel"
+          aria-label="Minimize documents panel"
+          className="no-drag flex h-5 w-5 items-center justify-center rounded transition-colors"
+          style={{ color: 'rgb(var(--ov) / 0.2)' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.5)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.2)' }}
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/>
+          </svg>
+        </button>
       </div>
 
       {/* ── Two-pane body: sources (top) + documents (bottom) ── */}
@@ -363,10 +454,11 @@ export default function ContextPanel({
               </div>
               <div className="overflow-y-auto px-4 pb-3 flex-1 min-h-0">
                 <div className="flex flex-col gap-0.5">
-                  {files.map((file) => (
+                  {files.map((file, i) => (
                     <FileRow
                       key={file.id}
                       file={file}
+                      index={i}
                       onRemove={() => onRemoveFile(file.id)}
                     />
                   ))}
