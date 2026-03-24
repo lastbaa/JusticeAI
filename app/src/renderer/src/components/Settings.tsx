@@ -16,9 +16,9 @@ const PRESETS: Preset[] = [
   { name: 'Family / Domestic',     chunkSize: 800,  chunkOverlap: 100, topK: 5 },
   { name: 'Corporate / Contract',  chunkSize: 1500, chunkOverlap: 200, topK: 8 },
   { name: 'Immigration',           chunkSize: 1000, chunkOverlap: 150, topK: 7 },
-  { name: 'Personal Injury',       chunkSize: 1000, chunkOverlap: 150, topK: 7 },
+  { name: 'Personal Injury',       chunkSize: 1000, chunkOverlap: 120, topK: 7 },
   { name: 'Real Estate / Property',chunkSize: 1200, chunkOverlap: 180, topK: 7 },
-  { name: 'Employment / Labor',    chunkSize: 1000, chunkOverlap: 150, topK: 6 },
+  { name: 'Employment / Labor',    chunkSize: 1100, chunkOverlap: 160, topK: 7 },
   { name: 'Regulatory / Compliance', chunkSize: 1400, chunkOverlap: 200, topK: 8 },
 ]
 

@@ -384,7 +384,7 @@ export default function ChatInterface({
   }
 
   // ── CHAT VIEW ───────────────────────────────────────────────────────────────
-  const isEmpty = messages.length === 0
+  const isEmpty = messages.filter((m) => !m.isGreeting).length === 0
 
   return (
     <div
