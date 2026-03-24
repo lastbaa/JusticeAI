@@ -1,190 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import * as pdfjsLib from 'pdfjs-dist'
-import type { TextItem, TextMarkedContent } from 'pdfjs-dist/types/src/display/api'
-// @ts-ignore — no type declarations for worker module
-import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs'
 import { Citation } from '../../../../../shared/src/types'
-
-// Register worker on main thread at module init time. WKWebView under Tauri's
-// tauri:// protocol silently fails to start Web Workers, so we bypass Worker
-// creation entirely. PDF.js checks globalThis.pdfjsWorker.WorkerMessageHandler
-// and uses it directly on the main thread when found.
-;(globalThis as any).pdfjsWorker = pdfjsWorker
 
 interface Props {
   citation: Citation | null
   onClose: () => void
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Given a PDF.js text content and an excerpt string, return the text items
- * that overlap with the first match of (the first 80 chars of) the excerpt.
- */
-function findHighlightItems(items: TextItem[], excerpt: string): TextItem[] {
-  if (items.length === 0) return []
-
-  const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
-
-  // Pre-normalise each item's text, then build the combined string and ranges
-  // entirely in that normalised space so that indexOf positions map correctly.
-  const ranges: { item: TextItem; start: number; end: number }[] = []
-  let combined = ''
-  for (const item of items) {
-    const s = norm(item.str)
-    if (!s) continue
-    const start = combined.length
-    combined += s
-    ranges.push({ item, start, end: combined.length })
-    combined += ' '  // single space separator — keeps combined already-normalised
-  }
-
-  // Use up to 250 chars of the excerpt so the full citation phrase is covered
-  const needle = norm(excerpt).slice(0, 250)
-  if (needle.length < 5) return []
-
-  const matchStart = combined.indexOf(needle)   // combined is already lower-cased
-  if (matchStart === -1) return []
-  const matchEnd = matchStart + needle.length
-
-  return ranges
-    .filter((r) => r.start < matchEnd && r.end > matchStart)
-    .map((r) => r.item)
-}
-
-// ── PDF Viewer ─────────────────────────────────────────────────────────────────
+// ── Native PDF viewer ─────────────────────────────────────────────────────────
+// Uses a local HTTP server (127.0.0.1:PORT) started at app launch.
+// WKWebView reliably renders PDFs in iframes from http://127.0.0.1 URLs —
+// this is the only origin type that triggers WKWebView's built-in PDF renderer.
+// PDF.js Web Workers do NOT work in WKWebView under Tauri's tauri:// protocol.
 function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const hlCanvasRef = useRef<HTMLCanvasElement>(null)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [currentPage, setCurrentPage] = useState(citation.pageNumber)
-  const [totalPages, setTotalPages] = useState(0)
+  const [port, setPort] = useState<number>(0)
   const [copied, setCopied] = useState(false)
 
-  // Reset current page when citation changes
   useEffect(() => {
-    setCurrentPage(citation.pageNumber)
-  }, [citation.filePath, citation.pageNumber])
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-
-    async function render(): Promise<void> {
-      try {
-        // Load file bytes via Tauri IPC (avoids WKWebView fetch restrictions on http://)
-        const b64: string = await (window as any).api.getFileData(citation.filePath)
-        if (cancelled) return
-        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-
-        // Timeout guard in case PDF.js still hangs for any reason
-        const pdfDoc = await Promise.race([
-          pdfjsLib.getDocument({ data: bytes }).promise,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('PDF load timed out')), 15000)
-          ),
-        ])
-        if (cancelled) { pdfDoc.destroy(); return }
-
-        setTotalPages(pdfDoc.numPages)
-
-        const page = await pdfDoc.getPage(currentPage)
-        if (cancelled) return
-
-        // Scale to fit the 520px panel (with 32px padding on each side → 456px usable)
-        const unscaled = page.getViewport({ scale: 1 })
-        const scale = 456 / unscaled.width
-        const viewport = page.getViewport({ scale })
-
-        // ── Render PDF page to main canvas ──────────────────────────────────
-        const canvas = canvasRef.current
-        const hlCanvas = hlCanvasRef.current
-        if (!canvas || !hlCanvas || cancelled) return
-
-        canvas.width = viewport.width
-        canvas.height = viewport.height
-        hlCanvas.width = viewport.width
-        hlCanvas.height = viewport.height
-
-        const ctx = canvas.getContext('2d')
-        if (!ctx || cancelled) return
-        await page.render({ canvasContext: ctx, viewport }).promise
-        if (cancelled) return
-
-        // ── Draw highlight overlay ───────────────────────────────────────────
-        // Wrapped in its own try/catch: if text extraction fails the PDF still shows.
-        // We use streamTextContent() + getReader().read() instead of getTextContent()
-        // because getTextContent() uses `for await...of` on a ReadableStream which
-        // requires ReadableStream[Symbol.asyncIterator] — not available in all WKWebViews.
-        try {
-          const hlCtx = hlCanvas.getContext('2d')
-          if (hlCtx && !cancelled) {
-            const stream = page.streamTextContent()
-            const reader = stream.getReader()
-            const allItems: TextItem[] = []
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              for (const it of (value as { items: Array<TextItem | TextMarkedContent> }).items) {
-                if ('str' in it && it.str.length > 0) allItems.push(it)
-              }
-            }
-            reader.releaseLock()
-
-            if (!cancelled) {
-              const matchedItems = findHighlightItems(allItems, citation.excerpt)
-
-              hlCtx.clearRect(0, 0, hlCanvas.width, hlCanvas.height)
-              hlCtx.fillStyle = 'rgba(234, 197, 80, 0.45)'
-
-              let firstHighlightY = -1
-              for (const item of matchedItems) {
-                // applyTransform mutates the point array in-place (returns void in v5)
-                const pt = [item.transform[4], item.transform[5]]
-                pdfjsLib.Util.applyTransform(pt, viewport.transform)
-                const tx = pt[0]
-                const ty = pt[1]
-                const fontH = Math.abs(item.transform[3]) * viewport.scale || 12
-                const w = item.width * viewport.scale
-
-                // ty is the text baseline in canvas coords; draw rect upward from baseline
-                hlCtx.fillRect(tx, ty - fontH * 1.15, w, fontH * 1.25)
-                if (firstHighlightY < 0) firstHighlightY = ty - fontH * 1.15
-              }
-
-              // Auto-scroll to the first highlight
-              if (firstHighlightY > 0 && scrollContainerRef.current) {
-                requestAnimationFrame(() => {
-                  scrollContainerRef.current?.scrollTo({
-                    top: Math.max(0, firstHighlightY - 80),
-                    behavior: 'smooth',
-                  })
-                })
-              }
-            }
-          }
-        } catch {
-          // Highlight extraction failed — PDF still shows without highlights
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('PdfViewer render error:', err)
-          setError(err instanceof Error ? err.message : String(err))
-        }
-      } finally {
-        // ALWAYS stop the spinner — even on cancelled early returns or hangs.
-        // React ignores state updates on unmounted components, so this is safe.
-        setLoading(false)
-      }
-    }
-
-    render()
-    return () => { cancelled = true }
-  }, [citation.filePath, currentPage, citation.excerpt])
+    ;(window as any).api.getFileServerPort().then(setPort).catch(() => setPort(0))
+  }, [])
 
   function copyExcerpt(): void {
     navigator.clipboard.writeText(citation.excerpt).then(() => {
@@ -205,7 +38,7 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
           <path d="M10 10l4 4" stroke="rgba(201,168,76,0.5)" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
         <p className="flex-1 text-[11px] italic truncate" style={{ color: 'rgb(var(--ov) / 0.38)' }}>
-          "{citation.excerpt.slice(0, 100)}{citation.excerpt.length > 100 ? '…' : ''}"
+          "{citation.excerpt.slice(0, 100)}{citation.excerpt.length > 100 ? '...' : ''}"
         </p>
         <button
           onClick={copyExcerpt}
@@ -236,77 +69,21 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
         </button>
       </div>
 
-      {/* Canvas viewport */}
-      <div
-        ref={scrollContainerRef}
-        className="flex-1 overflow-auto flex justify-center"
-        style={{ padding: '16px', background: 'rgb(var(--ov) / 0.04)' }}
-      >
-        {loading && (
-          <div className="flex items-center justify-center" style={{ minHeight: 200, width: '100%' }}>
-            <div
-              className="h-5 w-5 rounded-full animate-spin"
-              style={{ border: '2px solid rgba(201,168,76,0.2)', borderTopColor: '#c9a84c' }}
-            />
-          </div>
-        )}
-        {error && (
+      {/* PDF iframe — WKWebView's native PDF renderer */}
+      {!port ? (
+        <div className="flex-1 flex items-center justify-center">
           <div
-            className="flex items-center justify-center text-[12px] text-center"
-            style={{ minHeight: 200, width: '100%', color: 'rgba(201,168,76,0.5)', padding: '0 24px' }}
-          >
-            Could not render PDF — {error}
-          </div>
-        )}
-        {!error && (
-          <div style={{ position: 'relative', display: loading ? 'none' : 'block' }}>
-            <canvas ref={canvasRef} style={{ display: 'block', boxShadow: '0 2px 12px rgba(0,0,0,0.18)' }} />
-            <canvas
-              ref={hlCanvasRef}
-              style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Page navigation */}
-      {totalPages > 1 && (
-        <div
-          className="shrink-0 flex items-center justify-center gap-3 py-2"
-          style={{ borderTop: '1px solid rgba(201,168,76,0.08)' }}
-        >
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage <= 1}
-            aria-label="Previous page"
-            className="flex items-center justify-center h-6 w-6 rounded text-[11px] transition-all"
-            style={{
-              background: currentPage <= 1 ? 'transparent' : 'rgba(201,168,76,0.08)',
-              color: currentPage <= 1 ? 'rgb(var(--ov) / 0.2)' : 'rgba(201,168,76,0.7)',
-              border: '1px solid rgba(201,168,76,0.15)',
-              cursor: currentPage <= 1 ? 'default' : 'pointer',
-            }}
-          >
-            ‹
-          </button>
-          <span className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage >= totalPages}
-            aria-label="Next page"
-            className="flex items-center justify-center h-6 w-6 rounded text-[11px] transition-all"
-            style={{
-              background: currentPage >= totalPages ? 'transparent' : 'rgba(201,168,76,0.08)',
-              color: currentPage >= totalPages ? 'rgb(var(--ov) / 0.2)' : 'rgba(201,168,76,0.7)',
-              border: '1px solid rgba(201,168,76,0.15)',
-              cursor: currentPage >= totalPages ? 'default' : 'pointer',
-            }}
-          >
-            ›
-          </button>
+            className="h-5 w-5 rounded-full animate-spin"
+            style={{ border: '2px solid rgba(201,168,76,0.2)', borderTopColor: '#c9a84c' }}
+          />
         </div>
+      ) : (
+        <iframe
+          key={`${citation.filePath}-${citation.pageNumber}`}
+          src={`http://127.0.0.1:${port}${encodeURI(citation.filePath)}#page=${citation.pageNumber}`}
+          style={{ flex: 1, width: '100%', height: '100%', border: 'none', background: '#fff' }}
+          title={citation.fileName}
+        />
       )}
     </div>
   )
@@ -329,7 +106,6 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
     if (!text || !containerRef.current) return
     const mark = containerRef.current.querySelector('mark')
     if (mark) {
-      // Small delay so layout is stable before scrolling
       requestAnimationFrame(() => {
         mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
       })
@@ -465,7 +241,7 @@ export default function DocumentViewer({ citation, onClose }: Props): JSX.Elemen
             </button>
           </div>
 
-          {/* Document body — PDF has canvas+highlight; text has inline highlights */}
+          {/* Document body */}
           {isPdf ? (
             <PdfViewer
               key={`${citation.filePath}-${citation.pageNumber}`}
