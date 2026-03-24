@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { TextItem, TextMarkedContent } from 'pdfjs-dist/types/src/display/api'
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+// @ts-ignore — no type declarations for worker module
+import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs'
 import { Citation } from '../../../../../shared/src/types'
 
-// Configure PDF.js worker once at module level
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc
+// Register worker on main thread at module init time. WKWebView under Tauri's
+// tauri:// protocol silently fails to start Web Workers, so we bypass Worker
+// creation entirely. PDF.js checks globalThis.pdfjsWorker.WorkerMessageHandler
+// and uses it directly on the main thread when found.
+;(globalThis as any).pdfjsWorker = pdfjsWorker
 
 interface Props {
   citation: Citation | null
@@ -77,7 +81,13 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
         if (cancelled) return
         const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
-        const pdfDoc = await pdfjsLib.getDocument({ data: bytes }).promise
+        // Timeout guard in case PDF.js still hangs for any reason
+        const pdfDoc = await Promise.race([
+          pdfjsLib.getDocument({ data: bytes }).promise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('PDF load timed out')), 15000)
+          ),
+        ])
         if (cancelled) { pdfDoc.destroy(); return }
 
         setTotalPages(pdfDoc.numPages)
@@ -100,7 +110,9 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
         hlCanvas.width = viewport.width
         hlCanvas.height = viewport.height
 
-        await page.render({ canvas, viewport }).promise
+        const ctx = canvas.getContext('2d')
+        if (!ctx || cancelled) return
+        await page.render({ canvasContext: ctx, viewport }).promise
         if (cancelled) return
 
         // ── Draw highlight overlay ───────────────────────────────────────────
@@ -158,14 +170,15 @@ function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
         } catch {
           // Highlight extraction failed — PDF still shows without highlights
         }
-
-        setLoading(false)
       } catch (err) {
         if (!cancelled) {
           console.error('PdfViewer render error:', err)
           setError(err instanceof Error ? err.message : String(err))
-          setLoading(false)
         }
+      } finally {
+        // ALWAYS stop the spinner — even on cancelled early returns or hangs.
+        // React ignores state updates on unmounted components, so this is safe.
+        setLoading(false)
       }
     }
 

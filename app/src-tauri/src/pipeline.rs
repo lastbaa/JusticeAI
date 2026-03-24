@@ -13,11 +13,28 @@ use uuid::Uuid;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-pub const SCORE_THRESHOLD: f32 = 0.20;
+/// RRF scores max out at ~0.033 (2 lists × 1/(60+1)). A threshold above that
+/// filters everything. Set to 0.0 and rely on COSINE_FLOOR for quality gating.
+pub const SCORE_THRESHOLD: f32 = 0.0;
 
 /// Minimum raw cosine similarity between the query and the best-scoring chunk.
 /// If the top chunk is below this, the query is considered unrelated to documents.
-pub const COSINE_FLOOR: f32 = 0.30;
+/// Note: generic queries like "tell me about this file" score ~0.15-0.25 against
+/// document content, so this must be low enough to allow them through.
+pub const COSINE_FLOOR: f32 = 0.15;
+
+/// Find the largest byte index <= `pos` that is a valid UTF-8 char boundary.
+fn floor_char_boundary(s: &str, pos: usize) -> usize {
+    if pos >= s.len() { return s.len(); }
+    let mut i = pos;
+    while i > 0 && !s.is_char_boundary(i) { i -= 1; }
+    i
+}
+
+/// Truncate a string to at most `max` bytes, respecting UTF-8 char boundaries.
+pub fn safe_truncate(s: &str, max: usize) -> &str {
+    if s.len() <= max { s } else { &s[..floor_char_boundary(s, max)] }
+}
 
 /// Detect whether a query is a greeting, chitchat, or clearly non-document query.
 /// Returns true if the query should be routed to general chat mode even when
@@ -69,6 +86,49 @@ pub fn is_non_document_query(query: &str) -> bool {
 
     false
 }
+
+/// Detect whether a query is a simple greeting/hello that should get a
+/// hardcoded response (no LLM inference at all). This is a strict subset of
+/// `is_non_document_query` — only the conversational openers where the user
+/// clearly isn't asking a substantive question.
+pub fn is_simple_greeting(query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    let q_clean = q.trim_end_matches(|c: char| c.is_ascii_punctuation());
+    if q_clean.is_empty() {
+        return true;
+    }
+    let greetings = [
+        "hello", "hi", "hey", "yo", "sup", "howdy", "hola", "greetings",
+        "good morning", "good afternoon", "good evening", "good night",
+        "thanks", "thank you", "thx", "ty", "bye", "goodbye", "see ya",
+        "ok", "okay", "sure", "yes", "no", "yep", "nope", "cool",
+        "help", "test", "testing", "ping",
+        "how are you", "how's it going", "what's up", "whats up",
+        "nice to meet you", "pleased to meet you", "how do you do",
+    ];
+    // Exact match only — q.contains() caused false positives:
+    // "hiring" matched "hi", "notice" matched "no", etc.
+    greetings.iter().any(|g| q_clean == *g)
+}
+
+/// Return a hardcoded greeting response. `has_documents` controls whether
+/// we mention that documents are ready to analyze.
+pub fn greeting_response(has_documents: bool) -> String {
+    if has_documents {
+        "Hello! I'm **Justice AI**, your private legal research assistant. \
+        I can see you have documents loaded — feel free to ask me anything about them. \
+        I'll provide cited, page-level answers drawn directly from your files."
+            .to_string()
+    } else {
+        "Hello! I'm **Justice AI**, your private legal research assistant.\n\n\
+        To get started, upload your legal documents (PDFs, Word files, Excel, images, and more) \
+        using the sidebar or drag-and-drop. Once loaded, you can ask me questions and I'll provide \
+        cited, page-level answers — all processed locally on your device.\n\n\
+        Everything runs privately on your machine — nothing leaves your device."
+            .to_string()
+    }
+}
+
 pub const GGUF_MIN_SIZE: u64 = 4_000_000_000;
 
 pub const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instruct-v1-GGUF/resolve/main/Saul-Instruct-v1.Q4_K_M.gguf";
@@ -364,7 +424,7 @@ fn county_regex() -> &'static Regex {
 /// and state references. Returns the highest-confidence match or None.
 pub fn detect_jurisdiction(text: &str) -> Option<DetectionResult> {
     // Only scan the first 10,000 chars for performance
-    let scan_text = if text.len() > 10_000 { &text[..10_000] } else { text };
+    let scan_text = safe_truncate(text, 10_000);
 
     let patterns = jurisdiction_patterns();
 
@@ -574,8 +634,8 @@ pub fn format_history(history: &[(String, String)]) -> String {
     let recent = if history.len() > 4 { &history[history.len() - 4..] } else { history };
     for (user, assistant) in recent {
         // Trim each side to avoid bloating the prompt with long prior answers
-        let u = if user.len() > 400 { &user[..400] } else { user };
-        let a = if assistant.len() > 600 { &assistant[..600] } else { assistant };
+        let u = safe_truncate(user, 400);
+        let a = safe_truncate(assistant, 600);
         s.push_str(&format!("User: {u}\nAssistant: {a}\n\n"));
     }
     s
@@ -734,7 +794,7 @@ Answer the current question using ONLY these excerpts.\n\n\
         }
 
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(64, 1.1, 0.0, 0.0),
+            LlamaSampler::penalties(256, 1.3, 0.0, 0.0),
             LlamaSampler::min_p(0.05, 1),
             LlamaSampler::top_p(0.95, 1),
             LlamaSampler::temp(inference_params.temperature),
@@ -839,7 +899,7 @@ fn strip_trailing_filler(text: &str) -> String {
     if trimmed.len() < 10 {
         return trimmed.to_string();
     }
-    let tail_start = trimmed.len().saturating_sub(200);
+    let tail_start = floor_char_boundary(trimmed, trimmed.len().saturating_sub(200));
     let tail = &trimmed[tail_start..];
     let lower_tail = tail.to_lowercase();
 
@@ -1222,6 +1282,8 @@ pub struct Bm25Index {
     avg_dl: f32,
     /// Per-document token counts (parallel to the chunk slice).
     doc_lens: Vec<usize>,
+    /// Cached tokenized documents (parallel to the chunk slice).
+    doc_tokens: Vec<Vec<String>>,
 }
 
 impl Bm25Index {
@@ -1230,6 +1292,7 @@ impl Bm25Index {
         let mut doc_freq: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         let mut doc_lens = Vec::with_capacity(texts.len());
+        let mut doc_tokens_cache = Vec::with_capacity(texts.len());
         let mut total_tokens = 0usize;
 
         for text in texts {
@@ -1242,6 +1305,7 @@ impl Bm25Index {
             for term in unique {
                 *doc_freq.entry(term.to_string()).or_insert(0) += 1;
             }
+            doc_tokens_cache.push(tokens);
         }
 
         let n_docs = texts.len();
@@ -1251,22 +1315,21 @@ impl Bm25Index {
             1.0
         };
 
-        Bm25Index { doc_freq, n_docs, avg_dl, doc_lens }
+        Bm25Index { doc_freq, n_docs, avg_dl, doc_lens, doc_tokens: doc_tokens_cache }
     }
 
     /// Score a single document against a query. Returns BM25 score.
     /// `doc_idx` is the index into the original texts slice.
-    /// `doc_text` is the document text (re-tokenized per query for TF).
-    pub fn score(&self, query_terms: &[String], doc_text: &str, doc_idx: usize) -> f32 {
+    pub fn score(&self, query_terms: &[String], doc_idx: usize) -> f32 {
         const K1: f32 = 1.2;
         const B: f32 = 0.75;
 
-        let doc_tokens = bm25_tokenize(doc_text);
+        let doc_tokens = &self.doc_tokens[doc_idx];
         let dl = self.doc_lens[doc_idx] as f32;
 
         // Count term frequencies in this document.
         let mut tf: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        for t in &doc_tokens {
+        for t in doc_tokens {
             *tf.entry(t.as_str()).or_insert(0) += 1;
         }
 
@@ -1286,11 +1349,9 @@ impl Bm25Index {
     }
 
     /// Score all documents against query terms, returning scores in index order.
-    pub fn score_all(&self, query_terms: &[String], texts: &[&str]) -> Vec<f32> {
-        texts
-            .iter()
-            .enumerate()
-            .map(|(i, text)| self.score(query_terms, text, i))
+    pub fn score_all(&self, query_terms: &[String]) -> Vec<f32> {
+        (0..self.n_docs)
+            .map(|i| self.score(query_terms, i))
             .collect()
     }
 }
@@ -1727,7 +1788,7 @@ impl RetrievalBackend for HybridBm25Cosine {
                 }
             }
         }
-        let bm25_scores = bm25_index.score_all(&query_terms, &corpus.texts);
+        let bm25_scores = bm25_index.score_all(&query_terms);
 
         // 2. Cosine scoring
         let cosine_scores: Vec<f32> = corpus.vectors
@@ -2161,9 +2222,9 @@ mod tests {
         ];
         let index = Bm25Index::build(&texts);
         let query = super::bm25_tokenize("liam neild name");
-        let s0 = index.score(&query, texts[0], 0);
-        let s1 = index.score(&query, texts[1], 1);
-        let s2 = index.score(&query, texts[2], 2);
+        let s0 = index.score(&query, 0);
+        let s1 = index.score(&query, 1);
+        let s2 = index.score(&query, 2);
         assert!(s0 > s1, "Chunk with 'Liam Neild' should score higher: {s0} vs {s1}");
         assert!(s0 > s2, "Chunk with 'Liam Neild' should score higher: {s0} vs {s2}");
     }

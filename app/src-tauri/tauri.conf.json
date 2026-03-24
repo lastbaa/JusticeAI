@@ -12,12 +12,13 @@
   "app": {
     "windows": [
       {
-        "title": "Justice AI",
+        "title": "",
         "width": 1280,
         "height": 800,
         "minWidth": 900,
         "minHeight": 600,
         "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "resizable": true,
         "fullscreen": false,
         "maximized": true
@@ -25,7 +26,7 @@
     ],
     "macOSPrivateApi": true,
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' blob: 'unsafe-eval'; worker-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: http://127.0.0.1:*; connect-src 'self' http://127.0.0.1:* https://huggingface.co; font-src 'self'; frame-src http://127.0.0.1:*"
     }
   },
   "bundle": {

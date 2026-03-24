@@ -144,13 +144,19 @@ pub struct ChatMessage {
     pub id: String,
     pub role: String,
     pub content: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub citations: Option<Vec<Citation>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_streaming: Option<bool>,
     pub timestamp: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_found: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_assertions: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_greeting: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -364,38 +370,68 @@ impl RagState {
     }
 
     pub async fn save_chunks(&self) {
-        if let Ok(data) = serde_json::to_vec(&self.embedded_chunks) {
-            tokio::fs::write(&self.chunks_path(), data).await.ok();
+        match serde_json::to_vec(&self.embedded_chunks) {
+            Ok(data) => {
+                if let Err(e) = tokio::fs::write(&self.chunks_path(), data).await {
+                    log::error!("Failed to write chunks.json: {e}");
+                }
+            }
+            Err(e) => log::error!("Failed to serialize chunks: {e}"),
         }
     }
 
     pub async fn save_embed_model(&self) {
-        if let Ok(data) = serde_json::to_vec(&self.embed_model) {
-            tokio::fs::write(&self.embed_model_path(), data).await.ok();
+        match serde_json::to_vec(&self.embed_model) {
+            Ok(data) => {
+                if let Err(e) = tokio::fs::write(&self.embed_model_path(), data).await {
+                    log::error!("Failed to write embed_model.json: {e}");
+                }
+            }
+            Err(e) => log::error!("Failed to serialize embed_model: {e}"),
         }
     }
 
     pub async fn save_settings(&self) {
-        if let Ok(data) = serde_json::to_vec(&self.settings) {
-            tokio::fs::write(&self.settings_path(), data).await.ok();
+        match serde_json::to_vec(&self.settings) {
+            Ok(data) => {
+                if let Err(e) = tokio::fs::write(&self.settings_path(), data).await {
+                    log::error!("Failed to write settings.json: {e}");
+                }
+            }
+            Err(e) => log::error!("Failed to serialize settings: {e}"),
         }
     }
 
     pub async fn save_sessions(&self) {
-        if let Ok(data) = serde_json::to_vec(&self.sessions) {
-            tokio::fs::write(&self.sessions_path(), data).await.ok();
+        match serde_json::to_vec(&self.sessions) {
+            Ok(data) => {
+                if let Err(e) = tokio::fs::write(&self.sessions_path(), data).await {
+                    log::error!("Failed to write sessions.json: {e}");
+                }
+            }
+            Err(e) => log::error!("Failed to serialize sessions: {e}"),
         }
     }
 
     pub async fn save_cases(&self) {
-        if let Ok(data) = serde_json::to_vec(&self.cases) {
-            tokio::fs::write(&self.cases_path(), data).await.ok();
+        match serde_json::to_vec(&self.cases) {
+            Ok(data) => {
+                if let Err(e) = tokio::fs::write(&self.cases_path(), data).await {
+                    log::error!("Failed to write cases.json: {e}");
+                }
+            }
+            Err(e) => log::error!("Failed to serialize cases: {e}"),
         }
     }
 
     pub async fn save_file_registry(&self) {
-        if let Ok(data) = serde_json::to_vec(&self.file_registry) {
-            tokio::fs::write(&self.file_registry_path(), data).await.ok();
+        match serde_json::to_vec(&self.file_registry) {
+            Ok(data) => {
+                if let Err(e) = tokio::fs::write(&self.file_registry_path(), data).await {
+                    log::error!("Failed to write file_registry.json: {e}");
+                }
+            }
+            Err(e) => log::error!("Failed to serialize file_registry: {e}"),
         }
     }
 

@@ -12,8 +12,5 @@
     "app": "npm run dev --workspace=app",
     "build:website": "npm run build --workspace=website",
     "build:app": "npm run build --workspace=app"
-  },
-  "devDependencies": {
-    "electron": "^40.6.1"
   }
 }

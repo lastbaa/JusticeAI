@@ -1,6 +1,7 @@
 use crate::pipeline::{
-    self, chunk_document, embed_text, is_non_document_query, RetrievalBackend,
-    COSINE_FLOOR, GGUF_MIN_SIZE, SAUL_GGUF_URL, SCORE_THRESHOLD,
+    self, chunk_document, embed_text, greeting_response, is_non_document_query,
+    is_simple_greeting, RetrievalBackend, COSINE_FLOOR, GGUF_MIN_SIZE, SAUL_GGUF_URL,
+    SCORE_THRESHOLD,
 };
 use crate::state::{
     AppSettings, Case, ChatSession, ChunkMetadata, Citation, EmbeddedChunkEntry, FileInfo,
@@ -371,6 +372,20 @@ pub fn set_can_close(state: tauri::State<'_, crate::state::CloseAllowed>) {
 /// Called from the export-chat and export-citations features.
 #[tauri::command]
 pub fn save_file(file_path: String, content: String) -> Result<(), String> {
+    // Reject path traversal and system directories
+    if file_path.contains("..") {
+        return Err("Path traversal (..) is not allowed.".to_string());
+    }
+    #[cfg(unix)]
+    {
+        let blocked = ["/etc", "/usr", "/System", "/Library", "/bin", "/sbin", "/var"];
+        for prefix in blocked {
+            if file_path.starts_with(prefix) {
+                return Err(format!("Writing to {prefix} is not allowed."));
+            }
+        }
+    }
+
     // Validate the filename portion for Windows-reserved names and invalid characters.
     // The Tauri save dialog normally returns safe paths, but we guard against edge cases
     // so the user gets a clear error instead of a cryptic OS message.
@@ -541,7 +556,7 @@ async fn process_file(
 
     // Detect jurisdiction from first few pages (cap at 10,000 chars)
     let detect_text: String = pages.iter().take(3).map(|p| p.text.as_str()).collect::<Vec<_>>().join("\n");
-    let detect_text = if detect_text.len() > 10_000 { &detect_text[..10_000] } else { &detect_text };
+    let detect_text = pipeline::safe_truncate(&detect_text, 10_000);
     let detected_jurisdiction = pipeline::detect_jurisdiction(detect_text).map(|r| {
         log::info!(
             "Jurisdiction detected for {}: {:?} (confidence: {:.2}, signal: {})",
@@ -695,22 +710,35 @@ pub async fn query(
     };
     if has_chunks && is_non_document_query(&question) {
         log::info!("Non-document query detected ('{}'); routing to general chat.", &question);
+
+        // Simple greetings → hardcoded response, no LLM inference at all.
+        // Saul-7B regurgitates bullet-point instructions as numbered lists,
+        // so bypassing inference is the only reliable approach.
+        if is_simple_greeting(&question) {
+            log::info!("Simple greeting with docs loaded — hardcoded response.");
+            let response = greeting_response(true);
+            for word in response.split_inclusive(' ') {
+                window.emit("query-token", word).ok();
+            }
+            return Ok(QueryResult {
+                answer: response,
+                citations: vec![],
+                not_found: false,
+                assertions: vec![],
+            });
+        }
+
+        // Non-greeting general questions: use LLM with a safe, non-enumerable prompt
         let model_dir_clone = model_dir.clone();
         let window_clone = window.clone();
         window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
         let mut chat_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
         chat_params.system_prompt_override = Some(
-            "You are Justice AI, a friendly and helpful legal research assistant that runs \
-            entirely on the user's device.\n\n\
-            The user has documents loaded, but their message is a greeting or general question — \
-            NOT a question about their documents.\n\n\
-            When the user greets you or asks a general question:\n\
-            - Respond warmly and naturally.\n\
-            - Let them know you're ready to answer questions about their loaded documents.\n\
-            - Do NOT make up or reference any content from their documents.\n\
-            - Do NOT fabricate case details, court names, parties, or legal facts.\n\
-            - Be conversational, concise, and helpful.\n\
-            - Never fabricate case citations, statutes, or specific legal advice.".to_string(),
+            "You are Justice AI, a legal research assistant running locally on the user's device. \
+            The user has documents loaded but is asking a general question. \
+            Answer naturally and concisely. Mention that you are ready to help with their documents \
+            whenever they have questions. Do not reference or fabricate any document content, \
+            court names, case details, or legal citations.".to_string(),
         );
         let general_answer = pipeline::ask_saul(
             &question,
@@ -738,7 +766,7 @@ pub async fn query(
     let retrieval_params = pipeline::RetrievalModeParams::from_mode(&settings.inference_mode);
     let inference_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
     let candidate_k = retrieval_params.candidate_pool_k;
-    let results = {
+    let mut results = {
         let s = state.lock().await;
 
         // When case_id is set, filter to only chunks belonging to that case's files.
@@ -772,31 +800,43 @@ pub async fn query(
             )
             .ok();
 
-        // No chunks at all → no documents loaded. Run as general chat assistant.
+        // No chunks at all → no documents loaded.
         if filtered_chunks.is_empty() {
+            // Simple greetings → hardcoded response, no inference.
+            if is_simple_greeting(&question) {
+                log::info!("No documents + simple greeting — hardcoded response.");
+                let response = greeting_response(false);
+                for word in response.split_inclusive(' ') {
+                    window.emit("query-token", word).ok();
+                }
+                return Ok(QueryResult {
+                    answer: response,
+                    citations: vec![],
+                    not_found: false,
+                    assertions: vec![],
+                });
+            }
+
+            // Drop the state lock BEFORE running LLM inference to avoid
+            // blocking all other IPC commands during generation.
+            drop(s);
+
+            // Non-greeting general questions: use LLM with safe prompt
             window
                 .emit("query-status", serde_json::json!({"phase": "generating"}))
                 .ok();
             let window_clone = window.clone();
-            // Use a conversational system prompt instead of the document-analysis prompt.
             let mut chat_params = inference_params;
             chat_params.system_prompt_override = Some(
-                "You are Justice AI, a friendly and helpful legal research assistant that runs \
-                entirely on the user's device.\n\n\
-                When no documents are loaded, you should:\n\
-                - Greet the user warmly and introduce yourself if they say hello.\n\
-                - Explain that you can analyze legal documents (PDFs, Word, Excel, images, and more) \
-                with cited, page-level answers — all locally and privately.\n\
-                - Answer general legal knowledge questions from your training, but note that you are \
-                not a lawyer and answers may vary by jurisdiction.\n\
-                - Help users understand how to use the app: they can upload documents via the sidebar \
-                or drag-and-drop, then ask questions about their case files.\n\
-                - Be conversational, concise, and helpful. Use a warm but professional tone.\n\
-                - Never fabricate case citations, statutes, or specific legal advice.".to_string(),
+                "You are Justice AI, a legal research assistant running locally on the user's device. \
+                No documents are currently loaded. Answer the user's question naturally and concisely. \
+                You can answer general legal knowledge questions, but remind the user you are not a lawyer. \
+                Suggest they upload documents to get cited, page-level answers from their own files. \
+                Do not fabricate case citations, statutes, or specific legal advice.".to_string(),
             );
             let general_answer = pipeline::ask_saul(
                 &question,
-                "",  // no document context
+                "",
                 &history,
                 &model_dir,
                 Arc::clone(&model_cache),
@@ -829,10 +869,7 @@ pub async fn query(
             mmr_lambda: 0.7,
             expand_keywords: true,
         };
-        let mut ranked = backend.retrieve(&question, &query_vec, &corpus, &config);
-
-        // Always include filled form data chunks — they're tiny and contain the actual answers.
-        pipeline::ensure_form_data_included(&mut ranked, &corpus, 2);
+        let ranked = backend.retrieve(&question, &query_vec, &corpus, &config);
 
         // Map ScoredResult indices back via global_indices to (score, ChunkMetadata).
         ranked
@@ -877,37 +914,41 @@ pub async fn query(
     };
 
     if route_to_general {
-        window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
-        let window_clone = window.clone();
-        let mut chat_params = inference_params;
-        chat_params.system_prompt_override = Some(
-            "You are Justice AI, a legal research assistant.\n\n\
-            The user has documents loaded, but their question does not match any content in those documents.\n\n\
-            CRITICAL RULES:\n\
-            - Say that you could not find relevant information in their loaded documents.\n\
-            - Suggest they rephrase their question or check that the right documents are uploaded.\n\
-            - You may offer general legal knowledge if the question is about law, but clearly note \
-            you are answering from general knowledge, NOT from their documents.\n\
-            - NEVER fabricate or guess document content, case details, parties, courts, or facts.\n\
-            - NEVER pretend to have found something in their documents when you haven't.\n\
-            - Be helpful but honest about the limitation.".to_string(),
-        );
-        let general_answer = pipeline::ask_saul(
-            &question,
-            "",
-            &history,
-            &model_dir,
-            Arc::clone(&model_cache),
-            move |tok| { window_clone.emit("query-token", tok.as_str()).ok(); },
-            resolved_jurisdiction.as_ref(),
-            chat_params,
-        ).await?;
+        // Return a hardcoded not-found response instead of running inference.
+        // Saul-7B regurgitates system prompt instructions as numbered lists,
+        // so bypassing it entirely avoids that problem.
+        log::info!("No relevant chunks found — returning hardcoded not-found response.");
+        let not_found_msg = "I could not find relevant information in your loaded documents.\n\n\
+            **Suggestions**\n\
+            - Rephrase your question with different keywords\n\
+            - Check that the relevant documents are uploaded\n\
+            - Try a broader or more specific question".to_string();
+        for word in not_found_msg.split_inclusive(' ') {
+            window.emit("query-token", word).ok();
+        }
         return Ok(QueryResult {
-            answer: general_answer,
+            answer: not_found_msg,
             citations: vec![],
             not_found: true,
             assertions: vec![],
         });
+    }
+
+    // Inject filled form data chunks AFTER cosine floor check passes.
+    // These are tiny and contain actual filled values that help ground the answer.
+    {
+        let s = state.lock().await;
+        let form_chunks: Vec<(f32, ChunkMetadata)> = s
+            .embedded_chunks
+            .iter()
+            .filter(|e| e.meta.text.starts_with("FILLED FORM DATA"))
+            .filter(|e| !results.iter().any(|(_, m)| m.id == e.meta.id))
+            .take(2)
+            .map(|e| (0.5, e.meta.clone()))
+            .collect();
+        for fc in form_chunks {
+            results.insert(1.min(results.len()), fc);
+        }
     }
 
     let context_parts: Vec<String> = results
@@ -1114,7 +1155,7 @@ pub async fn remove_file(
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
 ) -> Result<(), String> {
     let mut s = state.lock().await;
-    let item_ids: Vec<String> = s.doc_chunk_ids.get(&file_id).cloned().unwrap_or_default();
+    let item_ids: std::collections::HashSet<String> = s.doc_chunk_ids.get(&file_id).cloned().unwrap_or_default().into_iter().collect();
     for id in &item_ids {
         s.chunk_registry.remove(id);
     }
@@ -1128,7 +1169,29 @@ pub async fn remove_file(
 // ── Document Viewer ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn get_file_data(file_path: String) -> Result<String, String> {
+pub async fn get_file_data(
+    file_path: String,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<String, String> {
+    // Validate the requested path is in the file registry.
+    // Compare both raw paths and canonicalized paths to handle macOS symlinks
+    // (e.g. /var → /private/var) without failing on missing files.
+    {
+        let s = state.lock().await;
+        let registered = s.file_registry.values().any(|f| {
+            if f.file_path == file_path {
+                return true;
+            }
+            // Fall back to canonicalize for symlink resolution
+            match (std::fs::canonicalize(&file_path), std::fs::canonicalize(&f.file_path)) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => false,
+            }
+        });
+        if !registered {
+            return Err("Access denied: file not in registry".to_string());
+        }
+    }
     let bytes = tokio::fs::read(&file_path)
         .await
         .map_err(|e| format!("Could not read file {}: {}", file_path, e))?;
@@ -1262,7 +1325,7 @@ pub async fn delete_case(
             .map(|(id, _)| id.clone())
             .collect();
         for file_id in &file_ids {
-            let item_ids: Vec<String> = s.doc_chunk_ids.get(file_id).cloned().unwrap_or_default();
+            let item_ids: std::collections::HashSet<String> = s.doc_chunk_ids.get(file_id).cloned().unwrap_or_default().into_iter().collect();
             for id in &item_ids {
                 s.chunk_registry.remove(id);
             }

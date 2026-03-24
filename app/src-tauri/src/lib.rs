@@ -57,7 +57,9 @@ fn url_path_to_fs_path(raw_url_path: &str) -> String {
 /// Start a minimal Tokio HTTP server on a random loopback port.
 /// The server serves files from the filesystem by path — used by the document
 /// viewer iframe. WKWebView reliably renders PDFs from http://127.0.0.1 URLs.
-async fn start_file_server() -> u16 {
+/// Only files registered in the RagState file_registry are served (path validated
+/// via canonicalize comparison).
+async fn start_file_server(rag_state: Arc<Mutex<state::RagState>>) -> u16 {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -72,6 +74,7 @@ async fn start_file_server() -> u16 {
             let Ok((mut stream, _)) = listener.accept().await else {
                 continue;
             };
+            let state_clone = Arc::clone(&rag_state);
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 8192];
                 let Ok(n) = stream.read(&mut buf).await else {
@@ -89,6 +92,33 @@ async fn start_file_server() -> u16 {
                 // Decode percent-encoded chars and normalize for the current platform.
                 // On Windows `/C:/Users/foo/file.pdf` → `C:\Users\foo\file.pdf`.
                 let file_path = url_path_to_fs_path(raw_path);
+
+                // Security: validate the requested path is in the file registry.
+                // Compare raw paths first (fast path), then canonicalize for symlinks
+                // (macOS: /var → /private/var).
+                let is_registered = {
+                    let s = state_clone.lock().await;
+                    s.file_registry.values().any(|f| {
+                        if f.file_path == file_path {
+                            return true;
+                        }
+                        match (std::fs::canonicalize(&file_path), std::fs::canonicalize(&f.file_path)) {
+                            (Ok(a), Ok(b)) => a == b,
+                            _ => false,
+                        }
+                    })
+                };
+
+                if !is_registered {
+                    let body = "Forbidden: file not in registry";
+                    let header = format!(
+                        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes()).await;
+                    let _ = stream.write_all(body.as_bytes()).await;
+                    return;
+                }
 
                 match tokio::fs::read(&file_path).await {
                     Ok(bytes) => {
@@ -178,10 +208,6 @@ pub fn run() {
 
             // Load persisted data synchronously before the window opens so
             // the first IPC calls from the renderer always see a fully loaded state.
-            // Start the local PDF file server before the window opens.
-            let port = tauri::async_runtime::block_on(start_file_server());
-            FILE_SERVER_PORT.set(port).ok();
-
             let mut rag = state::RagState::new(data_dir.clone());
             tauri::async_runtime::block_on(async {
                 rag.load_from_disk().await;
@@ -200,7 +226,14 @@ pub fn run() {
                 }
             });
 
-            app.manage(Arc::new(Mutex::new(rag)));
+            // Wrap in Arc<tokio::sync::Mutex> — shared between Tauri commands and file server.
+            let rag_state = Arc::new(Mutex::new(rag));
+
+            // Start the local PDF file server (validates paths against file registry).
+            let port = tauri::async_runtime::block_on(start_file_server(Arc::clone(&rag_state)));
+            FILE_SERVER_PORT.set(port).ok();
+
+            app.manage(rag_state);
             // Register the close-permission flag used by on_window_event.
             app.manage(state::CloseAllowed(AtomicBool::new(false)));
             Ok(())

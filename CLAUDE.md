@@ -68,7 +68,7 @@ React app. State management lives in `App.tsx` (messages, files, sessions, setti
 
 All IPC contracts and domain models (`AppSettings`, `ChatSession`, `FileInfo`, `ModelStatus`, `DownloadProgress`, etc.) are defined here. **Always update this file when adding new Tauri commands.**
 
-Default settings: `chunkSize: 500`, `chunkOverlap: 50`, `topK: 5`.
+Default settings: `chunkSize: 1000`, `chunkOverlap: 150`, `topK: 6`.
 
 ## Styling
 

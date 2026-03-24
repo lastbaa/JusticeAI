@@ -78,6 +78,7 @@ export default function App(): JSX.Element {
   // Command palette
   const [showCommandPalette, setShowCommandPalette] = useState(false)
 
+  const queryAbortRef = useRef(false)
   const messagesRef = useRef(messages)
   const sessionIdRef = useRef(currentSessionId)
   const sessionCreatedAtRef = useRef(sessionCreatedAt)
@@ -331,6 +332,7 @@ export default function App(): JSX.Element {
   // Preserve previous citations until new results arrive to avoid flashing the empty context panel.
   // Citations are replaced when result lands, or preserved on error/cancel.
   async function handleQuery(question: string): Promise<void> {
+    queryAbortRef.current = false
     // Collect last 3 completed user→assistant pairs for conversation context
     const historyPairs: [string, string][] = []
     for (let i = 0; i + 1 < messages.length; i++) {
@@ -364,6 +366,7 @@ export default function App(): JSX.Element {
 
     try {
       unlistenToken = await window.api.onQueryToken((token: string) => {
+        if (queryAbortRef.current) return
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === streamingId)
           if (existing) {
@@ -385,6 +388,7 @@ export default function App(): JSX.Element {
 
       unlistenStatus = await window.api.onQueryStatus(
         (status: { phase: string; chunks?: number }) => {
+          if (queryAbortRef.current) return
           if (status.phase === 'embedding') {
             setQueryPhase('Embedding query')
           } else if (status.phase === 'searching') {
@@ -556,6 +560,7 @@ export default function App(): JSX.Element {
 
   // ── Navigation ────────────────────────────────────────────────
   function handleGoHome(): void {
+    queryAbortRef.current = true
     setChatMode(false)
     setMessages([])
     setCurrentSessionId(uuidv4())
@@ -567,19 +572,9 @@ export default function App(): JSX.Element {
     setView('main')
   }
 
-  // ── Greeting ────────────────────────────────────────────────────
-  function makeGreetingMessage(): ChatMessage {
-    return {
-      id: uuidv4(),
-      role: 'assistant',
-      content: `Welcome to **Justice AI** — your private legal research assistant.\n\nTo get started:\n- **Upload documents** using the sidebar or drag & drop\n- **Ask questions** about your documents in plain language\n- **Click citations** to jump to the exact source text\n\nSupported formats: PDF, DOCX, XLSX, TXT, CSV, HTML, EML, and images.\n\nAll processing runs locally on your device — nothing leaves your machine.`,
-      timestamp: Date.now(),
-      isGreeting: true,
-    }
-  }
-
   // ── Sessions ──────────────────────────────────────────────────
   function handleNewChat(): void {
+    queryAbortRef.current = true
     const newId = uuidv4()
     setMessages([])
     setCurrentSessionId(newId)
@@ -593,6 +588,7 @@ export default function App(): JSX.Element {
   }
 
   async function handleLoadSession(session: ChatSession): Promise<void> {
+    queryAbortRef.current = true
     setMessages(session.messages)
     setCurrentSessionId(session.id)
     setSessionCreatedAt(session.createdAt)
@@ -800,10 +796,9 @@ export default function App(): JSX.Element {
     }
     if (!userMsg) return
     const question = userMsg.content
-    // Remove the assistant message being retried
+    // Remove the assistant message being retried, then re-query after state settles
     setMessages((prev) => prev.filter((m) => m.id !== id))
-    // Re-query
-    handleQuery(question)
+    setTimeout(() => handleQuery(question), 0)
   }
 
   async function handleSaveSettings(newSettings: AppSettings): Promise<void> {
@@ -962,10 +957,8 @@ export default function App(): JSX.Element {
           sessionName={sessionCustomName ?? makeSessionName(messages.filter((m) => !m.isGreeting))}
           sessionId={currentSessionId}
           onQuery={handleQuery}
-          onNewChat={handleNewChat}
           onAddFiles={handleAddFiles}
           onAddFolder={handleAddFolder}
-          onRemoveFile={handleRemoveFile}
           onLoadPaths={handleLoadPaths}
           onViewCitation={setViewerCitation}
           onExportChat={messages.length > 0 ? handleExportChat : undefined}

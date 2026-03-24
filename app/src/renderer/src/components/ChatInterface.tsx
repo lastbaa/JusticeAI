@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, KeyboardEvent } from 'react'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { ChatMessage, Citation, FileInfo, InferenceMode, Theme } from '../../../../../shared/src/types'
 import MessageBubble from './MessageBubble'
 import QueryTemplates from './QueryTemplates'
@@ -14,10 +15,8 @@ interface Props {
   chatMode: boolean
   sessionName: string
   onQuery: (question: string) => void
-  onNewChat: () => void
   onAddFiles: () => void
   onAddFolder: () => void
-  onRemoveFile: (id: string) => void
   onLoadPaths: (paths: string[]) => void
   onViewCitation: (citation: Citation) => void
   onExportChat?: () => void
@@ -193,7 +192,7 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
   const displayKey = phase ? phase : phraseKey
 
   return (
-    <div className="flex gap-3 max-w-3xl mx-auto w-full" style={{ animation: 'fadeUp 0.3s ease both' }} role="status" aria-live="polite">
+    <div className="flex gap-3 max-w-4xl mx-auto w-full" style={{ animation: 'fadeUp 0.3s ease both' }} role="status" aria-live="polite">
       {/* Avatar */}
       <div
         className="flex h-7 w-7 shrink-0 mt-1 items-center justify-center rounded-full"
@@ -282,16 +281,6 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
   )
 }
 
-// ── Example questions ────────────────────────────────────────────────────────
-const EXAMPLES = [
-  'What are the key terms and obligations in this contract?',
-  'Summarize the liability limitations and indemnification clauses',
-  'Find all deadlines and notice requirements in the agreement',
-  'What damages or remedies does this document contemplate?',
-  'Identify any confidentiality or non-compete provisions',
-  'What conditions must be met for termination of this agreement?',
-]
-
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ChatInterface({
   messages,
@@ -362,26 +351,22 @@ export default function ChatInterface({
     }
   }
 
-  function handleDragOver(e: React.DragEvent<HTMLDivElement>): void {
-    e.preventDefault()
-    setIsDragging(true)
-  }
-
-  function handleDragLeave(e: React.DragEvent<HTMLDivElement>): void {
-    e.preventDefault()
-    setIsDragging(false)
-  }
-
-  function handleDrop(e: React.DragEvent<HTMLDivElement>): void {
-    e.preventDefault()
-    setIsDragging(false)
-    const paths: string[] = []
-    for (let i = 0; i < e.dataTransfer.files.length; i++) {
-      const f = e.dataTransfer.files[i] as File & { path?: string }
-      if (f.path) paths.push(f.path)
-    }
-    if (paths.length > 0) onLoadPaths(paths)
-  }
+  // Tauri drag-and-drop via native webview events
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === 'enter' || event.payload.type === 'over') {
+        setIsDragging(true)
+      } else if (event.payload.type === 'leave') {
+        setIsDragging(false)
+      } else if (event.payload.type === 'drop') {
+        setIsDragging(false)
+        const paths = event.payload.paths
+        if (paths.length > 0) onLoadPaths(paths)
+      }
+    }).then((fn) => { unlisten = fn })
+    return () => { unlisten?.() }
+  }, [onLoadPaths])
 
   // ── CHAT VIEW ───────────────────────────────────────────────────────────────
   const isEmpty = messages.filter((m) => !m.isGreeting).length === 0
@@ -390,9 +375,6 @@ export default function ChatInterface({
     <div
       className="flex flex-1 flex-col h-screen overflow-hidden relative"
       style={{ background: 'var(--bg)' }}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
     >
       {/* Full-screen drag overlay */}
       {isDragging && (
@@ -448,9 +430,10 @@ export default function ChatInterface({
         style={{ borderBottom: '1px solid rgb(var(--ov) / 0.05)' }}
       >
         <div className="no-drag flex items-center gap-3 min-w-0">
-          <span className="text-[13px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--text)' }}>Justice AI</span>
-          {onInferenceModeChange && (
+          {onInferenceModeChange ? (
             <InferenceModeDropdown value={inferenceMode} onChange={onInferenceModeChange} disabled={isQuerying} />
+          ) : (
+            <span className="text-[13px] font-semibold tracking-[-0.01em]" style={{ color: 'var(--text)' }}>Justice AI</span>
           )}
           {!isEmpty && (
             <span
@@ -713,7 +696,7 @@ export default function ChatInterface({
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-7 max-w-3xl mx-auto w-full px-6 py-8 pb-10">
+          <div className="flex flex-col gap-7 max-w-4xl mx-auto w-full px-6 py-8 pb-10">
             {messages.map((msg, idx) => {
               const isLastAssistant = msg.role === 'assistant' && !msg.isStreaming &&
                 !messages.slice(idx + 1).some((m) => m.role === 'assistant' && !m.isStreaming)
@@ -742,7 +725,7 @@ export default function ChatInterface({
         className="shrink-0 px-6 py-4"
         style={{ borderTop: '1px solid rgb(var(--ov) / 0.05)', background: 'var(--bg)' }}
       >
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           {loadError && (
             <div
               role="alert"
