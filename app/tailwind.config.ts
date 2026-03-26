@@ -6,10 +6,10 @@ const config: Config = {
     extend: {
       colors: {
         navy: {
-          DEFAULT: '#0d1117',
-          light: '#161b22',
-          surface: '#21262d',
-          border: '#30363d',
+          DEFAULT: '#1c1c1c',
+          light: '#2c2c2c',
+          surface: '#363636',
+          border: '#3a3a3a',
         },
         gold: {
           DEFAULT: '#c9a84c',

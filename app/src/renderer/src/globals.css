@@ -4,20 +4,20 @@
 
 /* ── CSS Variables — Dark (default) ───────────────────────────────────────── */
 :root {
-  --bg: #080808;
-  --bg-alt: #0d0d0d;
-  --surface: #0c0c0c;
-  --surface-hover: #121212;
-  --surface-active: #191919;
-  --surface-raised: #161616;
-  --surface-dark: #060606;
-  --panel: #050505;
-  --modal-bg: #0a0a0a;
+  --bg: #1c1c1c;
+  --bg-alt: #1a1a1a;
+  --surface: #2c2c2c;
+  --surface-hover: #363636;
+  --surface-active: #264f78;
+  --surface-raised: #282828;
+  --surface-dark: #141414;
+  --panel: #1a1a1a;
+  --modal-bg: #2c2c2c;
 
   /* Overlay channel: white in dark mode, black in light mode */
   --ov: 255 255 255;
 
-  --text: #ffffff;
+  --text: #ececec;
   --text-on-gold: #080808;
 
   --gold: #c9a84c;
@@ -27,14 +27,14 @@
   --gold-bg: rgba(201, 168, 76, 0.08);
   --gold-label: rgba(201, 168, 76, 0.6);
   --error: #f85149;
-  --success: #3fb950;
+  --success: #6a9955;
 
-  --placeholder: rgb(255 255 255 / 0.4);
+  --placeholder: #8c8c8c;
 
   /* Backdrop for modals */
-  --backdrop: rgba(0, 0, 0, 0.7);
-  --shadow: rgba(0, 0, 0, 0.25);
-  --shadow-heavy: rgba(0, 0, 0, 0.6);
+  --backdrop: rgba(0, 0, 0, 0.6);
+  --shadow: rgba(0, 0, 0, 0.2);
+  --shadow-heavy: rgba(0, 0, 0, 0.5);
   --shadow-gold: rgba(201, 168, 76, 0.22);
 }
 
@@ -121,7 +121,7 @@ body,
 
 /* ── Selection ─────────────────────────────────────────────────────────────── */
 ::selection {
-  background: rgba(201, 168, 76, 0.3);
+  background: #264f78;
   color: var(--text);
 }
 
