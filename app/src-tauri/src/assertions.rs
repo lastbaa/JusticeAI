@@ -165,7 +165,7 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
 
     // 1. Court names — "Superior Court of X", "District Court of X", etc.
     let court_re = Regex::new(
-        r"(?i)(Superior|District|Circuit|Supreme|Municipal|Family|Probate|Bankruptcy|Appellate|County)\s+Court\s+of\s+([A-Z][a-zA-Z\s,]+)"
+        r"(?i)(Superior|District|Circuit|Supreme|Municipal|Family|Probate|Bankruptcy|Appellate|County)\s+Court\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})"
     ).unwrap();
     for cap in court_re.captures_iter(answer) {
         let full = cap[0].trim();
@@ -181,7 +181,7 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
     }
 
     // 2. "County of X" — fabricated jurisdictions
-    let county_re = Regex::new(r"County\s+of\s+([A-Z][a-zA-Z\s]+)").unwrap();
+    let county_re = Regex::new(r"County\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})").unwrap();
     for cap in county_re.captures_iter(answer) {
         let full = cap[0].trim();
         let full_lower = full.to_lowercase();
