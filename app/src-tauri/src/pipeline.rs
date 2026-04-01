@@ -121,7 +121,7 @@ pub fn greeting_response(has_documents: bool) -> String {
             .to_string()
     } else {
         "Hello! I'm **Justice AI**, your private legal research assistant.\n\n\
-        To get started, upload your legal documents (PDFs, Word files, Excel, images, and more) \
+        To get started, add your legal documents (PDFs, Word files, Excel, images, and more) \
         using the sidebar or drag-and-drop. Once loaded, you can ask me questions and I'll provide \
         cited, page-level answers — all processed locally on your device.\n\n\
         Everything runs privately on your machine — nothing leaves your device."

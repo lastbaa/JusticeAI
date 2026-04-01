@@ -29,6 +29,7 @@ uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 lopdf = "0.32"
 pdf-extract = "0.10"
+pdf_oxide = "0.3"
 zip = "2"
 roxmltree = "0.19"
 log = "0.4"

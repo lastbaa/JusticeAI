@@ -583,14 +583,14 @@ export default function ChatInterface({
                   Justice <span style={{ color: 'var(--gold)' }}>AI</span>
                 </h3>
                 <p className="mb-6 text-[13px] leading-relaxed relative z-10" style={{ color: 'rgb(var(--ov) / 0.45)', maxWidth: 340 }}>
-                  Ask anything — or upload documents for cited, case-specific answers.
+                  Ask anything — or add documents for cited, case-specific answers.
                 </p>
 
                 {/* Suggestion chips */}
                 <div className="flex flex-wrap justify-center gap-2 mb-6 relative z-10" style={{ maxWidth: 440 }}>
                   {[
                     'What is Justice AI?',
-                    'How do I upload documents?',
+                    'How do I add documents?',
                     'What file types are supported?',
                   ].map((q) => (
                     <button
@@ -620,7 +620,7 @@ export default function ChatInterface({
                   ))}
                 </div>
 
-                {/* Upload prompt */}
+                {/* Add documents prompt */}
                 <button
                   onClick={onAddFiles}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[12.5px] font-semibold relative z-10 transition-all"
@@ -645,7 +645,7 @@ export default function ChatInterface({
                     <polyline points="17 8 12 3 7 8" />
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
-                  Upload documents for cited answers
+                  Add documents for cited answers
                 </button>
                 <p className="mt-2.5 text-[11px] relative z-10" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
                   Supports PDFs, Word, Excel, images,{' '}

@@ -65,7 +65,7 @@ describe('Feature 4 – Enhanced Not-Found State', () => {
 
     // New: 3 actionable tips
     expect(screen.getByText('Rephrase your question with different keywords')).toBeTruthy()
-    expect(screen.getByText('Check that the relevant documents are uploaded')).toBeTruthy()
+    expect(screen.getByText('Check that the relevant documents are loaded')).toBeTruthy()
     expect(screen.getByText('Try a broader or more specific question')).toBeTruthy()
 
     // New: gold left border styling (borderLeft: 3px solid var(--gold))

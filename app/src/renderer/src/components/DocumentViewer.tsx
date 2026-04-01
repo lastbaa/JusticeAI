@@ -6,13 +6,138 @@ interface Props {
   onClose: () => void
 }
 
-// ── Native PDF viewer ─────────────────────────────────────────────────────────
-// Uses a local HTTP server (127.0.0.1:PORT) started at app launch.
-// WKWebView reliably renders PDFs in iframes from http://127.0.0.1 URLs —
-// this is the only origin type that triggers WKWebView's built-in PDF renderer.
-// PDF.js Web Workers do NOT work in WKWebView under Tauri's tauri:// protocol.
+// ── Fuzzy text highlight matcher ──────────────────────────────────────────────
+// The excerpt from best_excerpt() is sanitized & re-joined differently from the
+// raw page text returned by get_page_text(), so exact regex matching is fragile.
+// This normalizes both sides, finds the match, and maps back to original positions.
+
+interface CharMap {
+  normalized: string
+  /** toOriginal[i] = index in original text for normalized char i */
+  toOriginal: number[]
+}
+
+function buildCharMap(text: string): CharMap {
+  const chars: string[] = []
+  const toOriginal: number[] = []
+  let lastWasSpace = false
+
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+
+    // Skip PUA (U+E000–F8FF), specials (U+FFF0+), and control chars
+    // (matching Rust best_excerpt sanitization)
+    if (code >= 0xe000 && code <= 0xf8ff) continue
+    if (code >= 0xfff0) continue
+    if (code < 0x20 && code !== 0x0a && code !== 0x09) continue
+
+    // Collapse all whitespace (space, tab, newline) to single space
+    if (/\s/.test(text[i])) {
+      if (!lastWasSpace && chars.length > 0) {
+        chars.push(' ')
+        toOriginal.push(i)
+        lastWasSpace = true
+      }
+      continue
+    }
+
+    chars.push(text[i])
+    toOriginal.push(i)
+    lastWasSpace = false
+  }
+
+  return { normalized: chars.join(''), toOriginal }
+}
+
+function findHighlightRange(
+  pageText: string,
+  excerpt: string,
+): { start: number; end: number } | null {
+  if (!excerpt || excerpt.length < 8) return null
+
+  const pageMap = buildCharMap(pageText)
+  const excMap = buildCharMap(excerpt)
+  const normPage = pageMap.normalized.toLowerCase()
+  const normExcerpt = excMap.normalized.toLowerCase()
+
+  if (normExcerpt.length < 8) return null
+
+  function mapRange(normStart: number, normLen: number): { start: number; end: number } {
+    const s = pageMap.toOriginal[normStart]
+    const eIdx = Math.min(normStart + normLen - 1, pageMap.toOriginal.length - 1)
+    const e = pageMap.toOriginal[eIdx] + 1
+    return { start: s, end: e }
+  }
+
+  // Strategy 1: Full normalized exact match
+  let idx = normPage.indexOf(normExcerpt)
+  if (idx !== -1) return mapRange(idx, normExcerpt.length)
+
+  // Strategy 2: Progressively shorter prefixes
+  for (
+    let len = Math.floor(normExcerpt.length * 0.7);
+    len >= Math.min(35, normExcerpt.length);
+    len = Math.floor(len * 0.75)
+  ) {
+    idx = normPage.indexOf(normExcerpt.slice(0, len))
+    if (idx !== -1) return mapRange(idx, len)
+  }
+
+  // Strategy 3: Try matching individual sentences from the excerpt
+  const sentences = normExcerpt
+    .split(/[.!?]+\s*/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 15)
+  if (sentences.length >= 2) {
+    const firstIdx = normPage.indexOf(sentences[0])
+    const lastSentence = sentences[sentences.length - 1]
+    const lastIdx = normPage.indexOf(lastSentence, firstIdx !== -1 ? firstIdx : 0)
+    if (firstIdx !== -1 && lastIdx !== -1 && lastIdx >= firstIdx) {
+      return mapRange(firstIdx, lastIdx - firstIdx + lastSentence.length)
+    }
+  }
+  for (const sentence of sentences) {
+    idx = normPage.indexOf(sentence)
+    if (idx !== -1) return mapRange(idx, sentence.length)
+  }
+
+  // Strategy 4: Word n-gram sliding window
+  const excerptWords = normExcerpt.split(/\s+/).filter((w) => w.length > 2)
+  if (excerptWords.length < 3) return null
+
+  const excerptWordSet = new Set(excerptWords)
+  const wordEntries: { word: string; start: number; end: number }[] = []
+  const wordRe = /\S+/g
+  let wm: RegExpExecArray | null
+  while ((wm = wordRe.exec(normPage)) !== null) {
+    wordEntries.push({ word: wm[0], start: wm.index, end: wm.index + wm[0].length })
+  }
+
+  const windowSize = Math.min(excerptWords.length, wordEntries.length)
+  let bestScore = 0
+  let bestStart = -1
+  let bestEnd = -1
+
+  for (let i = 0; i <= wordEntries.length - windowSize; i++) {
+    let score = 0
+    for (let j = i; j < i + windowSize; j++) {
+      if (excerptWordSet.has(wordEntries[j].word)) score++
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestStart = wordEntries[i].start
+      bestEnd = wordEntries[Math.min(i + windowSize - 1, wordEntries.length - 1)].end
+    }
+  }
+
+  if (bestScore >= excerptWords.length * 0.4 && bestStart !== -1) {
+    return mapRange(bestStart, bestEnd - bestStart)
+  }
+
+  return null
+}
+
 // ── Highlighted text panel ─────────────────────────────────────────────────────
-// Renders extracted page text with the cited excerpt highlighted in gold.
 function HighlightedText({ citation }: { citation: Citation }): JSX.Element | null {
   const [text, setText] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(true)
@@ -25,7 +150,6 @@ function HighlightedText({ citation }: { citation: Citation }): JSX.Element | nu
       .catch(() => setText(''))
   }, [citation.filePath, citation.pageNumber])
 
-  // Auto-scroll to highlighted text
   useEffect(() => {
     if (!text || !expanded || !hlRef.current) return
     const mark = hlRef.current.querySelector('mark')
@@ -36,21 +160,18 @@ function HighlightedText({ citation }: { citation: Citation }): JSX.Element | nu
     }
   }, [text, expanded])
 
-  if (text === null) return null // still loading
-  if (!text) return null // no text extracted
+  if (text === null) return null
+  if (!text) return null
 
-  const needle = citation.excerpt.replace(/\s+/g, ' ').trim().slice(0, 250)
-  const escapedNeedle = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const parts = escapedNeedle.length >= 8
-    ? text.split(new RegExp(`(${escapedNeedle})`, 'gi'))
-    : [text]
-  const hasMatch = parts.length > 1
+  const range = findHighlightRange(text, citation.excerpt)
+  if (!range) return null
 
-  if (!hasMatch) return null // excerpt not found in page text
+  const before = text.slice(0, range.start)
+  const match = text.slice(range.start, range.end)
+  const after = text.slice(range.end)
 
   return (
     <div style={{ borderBottom: '1px solid rgba(201,168,76,0.1)' }}>
-      {/* Toggle header */}
       <button
         onClick={() => setExpanded((e) => !e)}
         className="w-full flex items-center gap-2 px-4 py-2 text-left"
@@ -70,7 +191,6 @@ function HighlightedText({ citation }: { citation: Citation }): JSX.Element | nu
         </span>
       </button>
 
-      {/* Collapsible text body */}
       {expanded && (
         <div
           ref={hlRef}
@@ -81,24 +201,19 @@ function HighlightedText({ citation }: { citation: Citation }): JSX.Element | nu
             className="text-[11px] leading-[1.8] whitespace-pre-wrap"
             style={{ color: 'rgb(var(--ov) / 0.45)' }}
           >
-            {parts.map((part, i) =>
-              part.toLowerCase() === needle.toLowerCase() ? (
-                <mark
-                  key={i}
-                  style={{
-                    background: 'rgba(234,197,80,0.35)',
-                    color: 'rgb(var(--ov) / 0.9)',
-                    borderRadius: 3,
-                    padding: '1px 3px',
-                    boxShadow: '0 0 0 1px rgba(234,197,80,0.5), 0 1px 4px rgba(234,197,80,0.15)',
-                  }}
-                >
-                  {part}
-                </mark>
-              ) : (
-                part
-              )
-            )}
+            {before}
+            <mark
+              style={{
+                background: 'rgba(234,197,80,0.35)',
+                color: 'rgb(var(--ov) / 0.9)',
+                borderRadius: 3,
+                padding: '1px 3px',
+                boxShadow: '0 0 0 1px rgba(234,197,80,0.5), 0 1px 4px rgba(234,197,80,0.15)',
+              }}
+            >
+              {match}
+            </mark>
+            {after}
           </p>
         </div>
       )}
@@ -106,66 +221,103 @@ function HighlightedText({ citation }: { citation: Citation }): JSX.Element | nu
   )
 }
 
+// ── Cited text strip (compact highlight for PDFs) ────────────────────────────
+// Since we can't inject highlights into the iframe PDF renderer, this shows
+// the cited passage with surrounding context in a small collapsible strip.
+function CitedTextStrip({ citation }: { citation: Citation }): JSX.Element | null {
+  const [text, setText] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(true)
+  const hlRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    ;(window as any).api
+      .getPageText(citation.filePath, citation.pageNumber)
+      .then((t: string) => setText(t || ''))
+      .catch(() => setText(''))
+  }, [citation.filePath, citation.pageNumber])
+
+  useEffect(() => {
+    if (!text || !expanded || !hlRef.current) return
+    const mark = hlRef.current.querySelector('mark')
+    if (mark) {
+      requestAnimationFrame(() => {
+        mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    }
+  }, [text, expanded])
+
+  if (!text) return null
+
+  const range = findHighlightRange(text, citation.excerpt)
+  if (!range) return null
+
+  // Show ~120 chars of context around the match
+  const contextPad = 120
+  const ctxStart = Math.max(0, range.start - contextPad)
+  const ctxEnd = Math.min(text.length, range.end + contextPad)
+  const before = (ctxStart > 0 ? '…' : '') + text.slice(ctxStart, range.start)
+  const match = text.slice(range.start, range.end)
+  const after = text.slice(range.end, ctxEnd) + (ctxEnd < text.length ? '…' : '')
+
+  return (
+    <div style={{ borderBottom: '1px solid rgba(201,168,76,0.1)' }}>
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center gap-2 px-4 py-1.5 text-left"
+        style={{ background: 'rgba(234,197,80,0.03)' }}
+      >
+        <svg
+          width="7" height="7" viewBox="0 0 8 8" fill="rgba(201,168,76,0.5)"
+          style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}
+        >
+          <path d="M2 1l4 3-4 3V1z" />
+        </svg>
+        <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(201,168,76,0.5)' }}>
+          Cited passage
+        </span>
+      </button>
+
+      {expanded && (
+        <div
+          ref={hlRef}
+          className="px-4 pb-2.5"
+          style={{ maxHeight: 100, overflow: 'auto' }}
+        >
+          <p
+            className="text-[11px] leading-[1.7]"
+            style={{ color: 'rgb(var(--ov) / 0.4)' }}
+          >
+            {before}
+            <mark
+              style={{
+                background: 'rgba(234,197,80,0.30)',
+                color: 'rgb(var(--ov) / 0.85)',
+                borderRadius: 2,
+                padding: '1px 2px',
+              }}
+            >
+              {match}
+            </mark>
+            {after}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── PDF viewer ───────────────────────────────────────────────────────────────
 function PdfViewer({ citation }: { citation: Citation }): JSX.Element {
   const [port, setPort] = useState<number>(0)
-  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     ;(window as any).api.getFileServerPort().then(setPort).catch(() => setPort(0))
   }, [])
 
-  function copyExcerpt(): void {
-    navigator.clipboard.writeText(citation.excerpt).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }).catch(() => {})
-  }
-
   return (
     <div className="flex-1 flex flex-col" style={{ minHeight: 0 }}>
-      {/* Excerpt strip */}
-      <div
-        className="shrink-0 px-4 py-2.5 flex items-center gap-3"
-        style={{ background: 'rgba(201,168,76,0.04)', borderBottom: '1px solid rgba(201,168,76,0.1)', borderLeft: '2.5px solid rgba(201,168,76,0.35)' }}
-      >
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" className="shrink-0">
-          <circle cx="6" cy="6" r="4.5" stroke="rgba(201,168,76,0.5)" strokeWidth="1.4" />
-          <path d="M10 10l4 4" stroke="rgba(201,168,76,0.5)" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-        <p className="flex-1 text-[11px] italic truncate" style={{ color: 'rgb(var(--ov) / 0.38)' }}>
-          "{citation.excerpt.slice(0, 100)}{citation.excerpt.length > 100 ? '...' : ''}"
-        </p>
-        <button
-          onClick={copyExcerpt}
-          title="Copy excerpt"
-          aria-label="Copy excerpt"
-          className="shrink-0 flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-md transition-all"
-          style={{
-            background: copied ? 'rgba(63,185,80,0.1)' : 'rgba(201,168,76,0.08)',
-            border: `1px solid ${copied ? 'rgba(63,185,80,0.3)' : 'rgba(201,168,76,0.2)'}`,
-            color: copied ? '#3fb950' : 'rgba(201,168,76,0.7)',
-          }}
-        >
-          {copied ? (
-            <>
-              <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 5l2 2 4-4" />
-              </svg>
-              Copied
-            </>
-          ) : (
-            <>
-              <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25ZM5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
-              </svg>
-              Copy excerpt
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Highlighted text panel — shows page text with excerpt highlighted */}
-      <HighlightedText citation={citation} />
+      {/* Compact cited text highlight */}
+      <CitedTextStrip citation={citation} />
 
       {/* PDF iframe — WKWebView's native PDF renderer */}
       {!port ? (
@@ -199,7 +351,6 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
       .catch(() => setText('(Failed to load page text)'))
   }, [citation.filePath, citation.pageNumber])
 
-  // Auto-scroll to the first highlighted match after text renders
   useEffect(() => {
     if (!text || !containerRef.current) return
     const mark = containerRef.current.querySelector('mark')
@@ -221,11 +372,7 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
     )
   }
 
-  const needle = citation.excerpt.replace(/\s+/g, ' ').trim().slice(0, 200)
-  const escapedNeedle = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const parts = escapedNeedle.length >= 10
-    ? text.split(new RegExp(`(${escapedNeedle})`, 'gi'))
-    : [text]
+  const range = findHighlightRange(text, citation.excerpt)
 
   return (
     <div ref={containerRef} className="flex-1 overflow-auto" style={{ padding: '20px 24px' }}>
@@ -233,10 +380,10 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
         className="text-[13px] leading-[1.9] whitespace-pre-wrap"
         style={{ color: 'rgb(var(--ov) / 0.6)' }}
       >
-        {parts.map((part, i) =>
-          part.toLowerCase() === needle.toLowerCase() ? (
+        {range ? (
+          <>
+            {text.slice(0, range.start)}
             <mark
-              key={i}
               style={{
                 background: 'rgba(234,197,80,0.35)',
                 color: 'var(--text)',
@@ -245,11 +392,12 @@ function TextViewer({ citation }: { citation: Citation }): JSX.Element {
                 boxShadow: '0 0 0 1px rgba(234,197,80,0.5), 0 1px 4px rgba(234,197,80,0.15)',
               }}
             >
-              {part}
+              {text.slice(range.start, range.end)}
             </mark>
-          ) : (
-            part
-          )
+            {text.slice(range.end)}
+          </>
+        ) : (
+          text
         )}
       </p>
     </div>

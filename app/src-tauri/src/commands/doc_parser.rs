@@ -84,6 +84,21 @@ pub fn parse_by_extension(path: &str, ext: &str, model_dir: &std::path::Path) ->
 ///    coordinates and re-interleave filled values next to their template labels.
 /// 3. Fall back to plain lopdf extract_text as a last resort.
 pub fn parse_pdf(path: &str) -> Result<Vec<DocumentPage>, String> {
+    // --- Attempt 0: pdf_oxide (best font encoding support, handles Identity-H/CIDFonts) ---
+    if let Some(mut pages) = try_pdf_oxide(path) {
+        if !pages.is_empty() {
+            // Still use lopdf for AcroForm and form field re-interleaving
+            if let Ok(doc) = lopdf::Document::load(path) {
+                let improved = reinterleave_form_fields(&doc, &pages);
+                if !improved.is_empty() {
+                    pages = improved;
+                }
+                append_acroform_values(&doc, &mut pages);
+            }
+            return Ok(pages);
+        }
+    }
+
     // --- Attempt 1: pdf-extract (with optional coordinate re-interleave) ---
     if let Ok(raw) = pdf_extract::extract_text(path) {
         let mut pages = pdf_extract_pages(&raw);
@@ -121,6 +136,49 @@ pub fn parse_pdf(path: &str) -> Result<Vec<DocumentPage>, String> {
     let mut pages = extract_lopdf_pages(&doc);
     append_acroform_values(&doc, &mut pages);
     Ok(pages)
+}
+
+/// Try extracting text using pdf_oxide. Returns None on any error,
+/// or Some(empty vec) if extraction succeeds but produces no content.
+fn try_pdf_oxide(path: &str) -> Option<Vec<DocumentPage>> {
+    let mut doc = pdf_oxide::PdfDocument::open(path).ok()?;
+    let page_count = doc.page_count().ok()?;
+    if page_count == 0 {
+        return Some(Vec::new());
+    }
+
+    let mut pages = Vec::with_capacity(page_count);
+    let mut total_printable = 0usize;
+    let mut total_chars = 0usize;
+
+    for i in 0..page_count {
+        let text = doc.extract_text(i).unwrap_or_default();
+        let cleaned = clean_pdf_text(&text);
+        for ch in cleaned.chars() {
+            total_chars += 1;
+            if is_printable_pdf_char(ch) {
+                total_printable += 1;
+            }
+        }
+        pages.push(DocumentPage {
+            page_number: (i + 1) as u32,
+            text: cleaned,
+        });
+    }
+
+    // Quality gate: reject if <60% printable (same threshold as pdf-extract path)
+    if total_chars > 0 && (total_printable as f32 / total_chars as f32) < 0.60 {
+        log::warn!("pdf_oxide extraction rejected: only {total_printable}/{total_chars} printable chars");
+        return None;
+    }
+
+    // Reject if all pages are empty
+    if pages.iter().all(|p| p.text.trim().is_empty()) {
+        return None;
+    }
+
+    log::info!("pdf_oxide extracted {page_count} pages ({total_printable}/{total_chars} printable)");
+    Some(pages)
 }
 
 /// Extract text per-page using lopdf.

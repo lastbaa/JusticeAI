@@ -446,6 +446,132 @@ pub async fn migrate_embeddings(state: &mut crate::state::RagState) {
     log::info!("Embedding migration complete.");
 }
 
+/// Detect documents whose stored chunks contain garbled text (from old lopdf/
+/// pdf-extract extraction) and re-parse them with the improved pdf_oxide engine.
+/// Scans embedded_chunks directly (works even if file_registry/doc_chunk_ids are empty).
+pub async fn migrate_garbled_chunks(state: &mut RagState) {
+    use super::doc_parser;
+    use std::collections::{HashMap, HashSet};
+
+    if state.embedded_chunks.is_empty() {
+        return;
+    }
+
+    // 1. Group chunks by document_id, collecting file metadata.
+    struct DocInfo {
+        file_name: String,
+        file_path: String,
+        total_chars: usize,
+        alpha_chars: usize,
+    }
+    let mut docs: HashMap<String, DocInfo> = HashMap::new();
+    for entry in &state.embedded_chunks {
+        let m = &entry.meta;
+        let doc = docs.entry(m.document_id.clone()).or_insert_with(|| DocInfo {
+            file_name: m.file_name.clone(),
+            file_path: m.file_path.clone(),
+            total_chars: 0,
+            alpha_chars: 0,
+        });
+        for ch in m.text.chars() {
+            if ch.is_whitespace() { continue; }
+            doc.total_chars += 1;
+            if ch.is_alphabetic() { doc.alpha_chars += 1; }
+        }
+    }
+
+    // 2. Find garbled PDF documents (<40% alphabetic characters).
+    let mut garbled: Vec<(String, String, String)> = Vec::new(); // (doc_id, file_name, file_path)
+    for (doc_id, info) in &docs {
+        if !info.file_name.to_lowercase().ends_with(".pdf") { continue; }
+        if info.total_chars < 20 { continue; }
+        let ratio = info.alpha_chars as f32 / info.total_chars as f32;
+        if ratio < 0.40 {
+            log::info!(
+                "Garbled chunks for '{}' ({:.1}% alphabetic) — will re-parse with pdf_oxide",
+                info.file_name, ratio * 100.0
+            );
+            garbled.push((doc_id.clone(), info.file_name.clone(), info.file_path.clone()));
+        }
+    }
+
+    if garbled.is_empty() { return; }
+    log::info!("Re-parsing {} garbled PDF(s)…", garbled.len());
+
+    let settings = state.settings.clone();
+    let model_dir = state.model_dir.clone();
+
+    for (doc_id, file_name, file_path) in &garbled {
+        let pages = match doc_parser::parse_pdf(file_path) {
+            Ok(p) if !p.is_empty() => p,
+            Ok(_) => { log::warn!("Re-parse of '{}' returned empty — skipping", file_name); continue; }
+            Err(e) => { log::warn!("Re-parse of '{}' failed: {} — skipping", file_name, e); continue; }
+        };
+
+        // Remove old chunks for this document.
+        let old_ids: HashSet<String> = state.embedded_chunks.iter()
+            .filter(|e| &e.meta.document_id == doc_id)
+            .map(|e| e.id.clone())
+            .collect();
+        state.embedded_chunks.retain(|e| !old_ids.contains(&e.id));
+        for oid in &old_ids { state.chunk_registry.remove(oid); }
+        state.doc_chunk_ids.remove(doc_id);
+
+        // Re-chunk and re-embed.
+        let chunks = chunk_document(&pages, &settings);
+        let mut new_ids: Vec<String> = Vec::new();
+
+        for chunk in &chunks {
+            match embed_text(&chunk.text, false, &model_dir).await {
+                Ok(vector) => {
+                    let item_id = Uuid::new_v4().to_string();
+                    let entry = EmbeddedChunkEntry {
+                        id: item_id.clone(),
+                        vector,
+                        meta: ChunkMetadata {
+                            id: chunk.id.clone(),
+                            document_id: doc_id.clone(),
+                            file_name: file_name.clone(),
+                            file_path: file_path.clone(),
+                            page_number: chunk.page_number,
+                            chunk_index: chunk.chunk_index,
+                            text: chunk.text.clone(),
+                            token_count: chunk.token_count,
+                        },
+                    };
+                    state.chunk_registry.insert(item_id.clone(), entry.meta.clone());
+                    state.embedded_chunks.push(entry);
+                    new_ids.push(item_id);
+                }
+                Err(e) => log::error!("Re-embed error for chunk {}: {}", chunk.chunk_index, e),
+            }
+        }
+
+        // Rebuild registries for this document.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default().as_millis() as u64;
+        state.doc_chunk_ids.insert(doc_id.clone(), new_ids.clone());
+        state.file_registry.insert(doc_id.clone(), FileInfo {
+            id: doc_id.clone(),
+            file_name: file_name.clone(),
+            file_path: file_path.clone(),
+            total_pages: pages.len() as u32,
+            word_count: pages.iter().map(|p| p.text.split_whitespace().count() as u32).sum(),
+            loaded_at: now,
+            chunk_count: new_ids.len(),
+            case_id: None,
+            detected_jurisdiction: None,
+        });
+
+        log::info!("Re-parsed '{}': {} pages, {} chunks", file_name, pages.len(), new_ids.len());
+    }
+
+    state.save_chunks().await;
+    state.save_file_registry().await;
+    log::info!("Garbled chunk migration complete.");
+}
+
 // ── File Loading ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -831,7 +957,7 @@ pub async fn query(
                 "You are Justice AI, a legal research assistant running locally on the user's device. \
                 No documents are currently loaded. Answer the user's question naturally and concisely. \
                 You can answer general legal knowledge questions, but remind the user you are not a lawyer. \
-                Suggest they upload documents to get cited, page-level answers from their own files. \
+                Suggest they add documents to get cited, page-level answers from their own files. \
                 Do not fabricate case citations, statutes, or specific legal advice.".to_string(),
             );
             let general_answer = pipeline::ask_saul(
@@ -921,7 +1047,7 @@ pub async fn query(
         let not_found_msg = "I could not find relevant information in your loaded documents.\n\n\
             **Suggestions**\n\
             - Rephrase your question with different keywords\n\
-            - Check that the relevant documents are uploaded\n\
+            - Check that the relevant documents are loaded\n\
             - Try a broader or more specific question".to_string();
         for word in not_found_msg.split_inclusive(' ') {
             window.emit("query-token", word).ok();

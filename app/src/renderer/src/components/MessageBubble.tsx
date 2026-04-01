@@ -758,7 +758,7 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
               <ul className="flex flex-col gap-1.5" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                 {[
                   'Rephrase your question with different keywords',
-                  'Check that the relevant documents are uploaded',
+                  'Check that the relevant documents are loaded',
                   'Try a broader or more specific question',
                 ].map((tip, idx) => (
                   <li key={idx} className="flex items-center gap-2 text-[12px]" style={{ color: 'rgb(var(--ov) / 0.6)' }}>

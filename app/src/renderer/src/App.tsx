@@ -882,13 +882,13 @@ export default function App(): JSX.Element {
     },
     {
       id: 'upload-docs',
-      label: 'Upload Documents',
+      label: 'Add Documents',
       icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>,
       onAction: handleAddFiles,
     },
     {
       id: 'upload-folder',
-      label: 'Upload Folder',
+      label: 'Add Folder',
       icon: <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3H13.5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V3.87Z"/></svg>,
       onAction: handleAddFolder,
     },

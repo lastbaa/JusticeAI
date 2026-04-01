@@ -95,21 +95,29 @@ async fn start_file_server(rag_state: Arc<Mutex<state::RagState>>) -> u16 {
 
                 // Security: validate the requested path is in the file registry.
                 // Compare raw paths first (fast path), then canonicalize for symlinks
-                // (macOS: /var → /private/var).
-                let is_registered = {
+                // (macOS: /var → /private/var). Returns the resolved filesystem path
+                // so the subsequent read uses the real path, not the URL-decoded one.
+                let resolved_path: Option<String> = {
                     let s = state_clone.lock().await;
-                    s.file_registry.values().any(|f| {
+                    let mut found = None;
+                    for f in s.file_registry.values() {
                         if f.file_path == file_path {
-                            return true;
+                            found = Some(f.file_path.clone());
+                            break;
                         }
                         match (std::fs::canonicalize(&file_path), std::fs::canonicalize(&f.file_path)) {
-                            (Ok(a), Ok(b)) => a == b,
-                            _ => false,
+                            (Ok(a), Ok(b)) if a == b => {
+                                // Use the canonical path for reading (handles symlinks).
+                                found = Some(a.to_string_lossy().into_owned());
+                                break;
+                            }
+                            _ => {}
                         }
-                    })
+                    }
+                    found
                 };
 
-                if !is_registered {
+                let Some(read_path) = resolved_path else {
                     let body = "Forbidden: file not in registry";
                     let header = format!(
                         "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -118,11 +126,11 @@ async fn start_file_server(rag_state: Arc<Mutex<state::RagState>>) -> u16 {
                     let _ = stream.write_all(header.as_bytes()).await;
                     let _ = stream.write_all(body.as_bytes()).await;
                     return;
-                }
+                };
 
-                match tokio::fs::read(&file_path).await {
+                match tokio::fs::read(&read_path).await {
                     Ok(bytes) => {
-                        let mime = if file_path.to_lowercase().ends_with(".pdf") {
+                        let mime = if read_path.to_lowercase().ends_with(".pdf") {
                             "application/pdf"
                         } else {
                             "application/octet-stream"
@@ -224,6 +232,10 @@ pub fn run() {
                         rag.save_embed_model().await;
                     }
                 }
+
+                // Migration: re-parse PDFs whose stored chunks have garbled text
+                // (from old lopdf/pdf-extract that couldn't handle Identity-H fonts).
+                commands::rag::migrate_garbled_chunks(&mut rag).await;
             });
 
             // Wrap in Arc<tokio::sync::Mutex> — shared between Tauri commands and file server.
