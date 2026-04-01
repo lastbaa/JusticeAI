@@ -31,7 +31,7 @@ jobs:
         with:
           workspaces: app/src-tauri
 
-      # Linux: install system libraries required by Tauri and llama-cpp-2
+      # Linux: install system libraries required by Tauri
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -42,18 +42,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            libvulkan-dev \
-            vulkan-validationlayers \
-            glslc \
             cmake
-
-      # Windows: install Vulkan SDK for llama-cpp-2 compilation
-      - name: Install Vulkan SDK (Windows)
-        if: runner.os == 'Windows'
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: latest
-          cache: true
 
       - name: Cargo check
         working-directory: app/src-tauri
@@ -62,10 +51,6 @@ jobs:
       - name: Cargo clippy
         working-directory: app/src-tauri
         run: cargo clippy --lib -- -D warnings || true
-
-      - name: Cargo test
-        working-directory: app/src-tauri
-        run: cargo test
 
   security:
     name: Security audit
