@@ -27,7 +27,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2.7.7
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri
 
@@ -48,7 +48,7 @@ jobs:
       # Windows: install Vulkan SDK for llama-cpp-2 compilation
       - name: Install Vulkan SDK (Windows)
         if: runner.os == 'Windows'
-        uses: humbletim/install-vulkan-sdk@v1.1.1
+        uses: humbletim/install-vulkan-sdk@v1.2
         with:
           version: latest
           cache: true
