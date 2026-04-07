@@ -94,6 +94,8 @@ pub struct QueryResult {
     pub not_found: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assertions: Vec<crate::assertions::AssertionResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

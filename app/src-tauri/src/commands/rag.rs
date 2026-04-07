@@ -851,6 +851,7 @@ pub async fn query(
                 citations: vec![],
                 not_found: false,
                 assertions: vec![],
+                confidence: None,
             });
         }
 
@@ -881,6 +882,7 @@ pub async fn query(
             citations: vec![],
             not_found: false,
             assertions: vec![],
+            confidence: None,
         });
     }
 
@@ -891,6 +893,12 @@ pub async fn query(
 
     let retrieval_params = pipeline::RetrievalModeParams::from_mode(&settings.inference_mode);
     let inference_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
+    // Save inference param values before ask_saul consumes the struct (no Clone)
+    let saved_max_new_tokens = inference_params.max_new_tokens;
+    let saved_temperature = inference_params.temperature;
+    let saved_system_prompt_suffix = inference_params.system_prompt_suffix;
+    let saved_system_prompt_override = inference_params.system_prompt_override.clone();
+    let saved_timeout_secs = inference_params.timeout_secs;
     let candidate_k = retrieval_params.candidate_pool_k;
     let mut results = {
         let s = state.lock().await;
@@ -940,6 +948,7 @@ pub async fn query(
                     citations: vec![],
                     not_found: false,
                     assertions: vec![],
+                    confidence: None,
                 });
             }
 
@@ -978,6 +987,7 @@ pub async fn query(
                 citations: vec![],
                 not_found: false,
                 assertions: vec![],
+                confidence: None,
             });
         }
 
@@ -1057,6 +1067,7 @@ pub async fn query(
             citations: vec![],
             not_found: true,
             assertions: vec![],
+            confidence: None,
         });
     }
 
@@ -1226,6 +1237,17 @@ pub async fn query(
         })
         .collect();
 
+    // Helper: count assertion violations by type
+    fn count_violations(assertions: &[crate::assertions::AssertionResult]) -> (usize, usize) {
+        let hallucinations = assertions.iter().filter(|a| {
+            !a.passed && matches!(a.assertion_type, crate::assertions::AssertionType::Hallucination)
+        }).count();
+        let fabrications = assertions.iter().filter(|a| {
+            !a.passed && matches!(a.assertion_type, crate::assertions::AssertionType::FabricatedEntity)
+        }).count();
+        (hallucinations, fabrications)
+    }
+
     // Run answer quality assertions
     let known_files: Vec<&str> = results.iter().map(|(_, m)| m.file_name.as_str()).collect();
     let chunk_texts: Vec<&str> = results.iter().map(|(_, m)| m.text.as_str()).collect();
@@ -1233,35 +1255,133 @@ pub async fn query(
     assertions.extend(crate::assertions::check_no_hallucination(&answer, &chunk_texts));
     assertions.extend(crate::assertions::check_fabricated_entities(&answer, &chunk_texts));
 
-    // ── Layer 4: Hallucination failsafe ───────────────────────────────────────
-    // If any hallucination assertion FAILED, replace the answer with a safe error.
-    // This is the last line of defense — the model generated something, but it
-    // contains fabricated facts not grounded in the source documents.
-    let has_hallucination = assertions.iter().any(|a| {
-        !a.passed && matches!(a.assertion_type, crate::assertions::AssertionType::Hallucination)
-    });
-    let has_fabrication = assertions.iter().any(|a| {
-        !a.passed && matches!(a.assertion_type, crate::assertions::AssertionType::FabricatedEntity)
-    });
+    // ── Layer 4: Quality retry loop ──────────────────────────────────────────
+    // If hallucination or fabrication detected, retry ONCE with a tighter prompt
+    // and lower temperature. Use the retry only if it has fewer violations.
+    let (orig_hall, orig_fab) = count_violations(&assertions);
+    let has_hallucination = orig_hall > 0;
+    let has_fabrication = orig_fab > 0;
 
-    let (final_answer, final_not_found) = if has_fabrication {
-        log::warn!("Fabricated entity detected in answer — replacing with safe response.");
-        (
-            "I found some relevant excerpts in your documents, but I was unable to produce \
+    let (mut final_answer, mut final_not_found, mut final_assertions) =
+        (answer.clone(), not_found, assertions);
+
+    if has_hallucination || has_fabrication {
+        log::warn!(
+            "Quality check failed (hallucinations: {}, fabrications: {}). Attempting retry.",
+            orig_hall, orig_fab
+        );
+        window
+            .emit("query-status", serde_json::json!({"phase": "retrying"}))
+            .ok();
+
+        // Build retry prompt with stricter grounding instruction
+        let retry_question = format!(
+            "{}\n\nIMPORTANT: Your previous response contained claims not found in the \
+            provided documents. Answer again using ONLY facts explicitly stated in the \
+            context above. If a fact is not in the context, do not include it.",
+            question
+        );
+
+        // Retry with halved temperature (min 0.05)
+        let retry_temp = (saved_temperature / 2.0).max(0.05);
+        let retry_params = pipeline::InferenceParams {
+            max_new_tokens: saved_max_new_tokens,
+            temperature: retry_temp,
+            system_prompt_suffix: saved_system_prompt_suffix,
+            system_prompt_override: saved_system_prompt_override,
+            timeout_secs: saved_timeout_secs,
+        };
+
+        let model_cache_retry = {
+            let s = state.lock().await;
+            Arc::clone(&s.llama_model)
+        };
+        let window_retry = window.clone();
+        let retry_answer = pipeline::ask_saul(
+            &retry_question,
+            &context,
+            &history,
+            &model_dir,
+            model_cache_retry,
+            move |tok| {
+                window_retry.emit("query-token", tok.as_str()).ok();
+            },
+            resolved_jurisdiction.as_ref(),
+            retry_params,
+        )
+        .await;
+
+        match retry_answer {
+            Ok(retry_text) => {
+                // Re-run assertions on retry response
+                let mut retry_assertions =
+                    crate::assertions::check_citations(&retry_text, Some(&known_files));
+                retry_assertions.extend(crate::assertions::check_no_hallucination(
+                    &retry_text,
+                    &chunk_texts,
+                ));
+                retry_assertions.extend(crate::assertions::check_fabricated_entities(
+                    &retry_text,
+                    &chunk_texts,
+                ));
+
+                let (retry_hall, retry_fab) = count_violations(&retry_assertions);
+                let orig_total = orig_hall + orig_fab;
+                let retry_total = retry_hall + retry_fab;
+
+                if retry_total < orig_total {
+                    log::info!(
+                        "Retry improved quality: violations {} -> {}. Using retry response.",
+                        orig_total, retry_total
+                    );
+                    let retry_lower = retry_text.to_lowercase();
+                    let retry_not_found = retry_text.is_empty()
+                        || retry_lower.contains("i could not find information")
+                        || retry_lower.contains("could not find information about this")
+                        || retry_lower.contains("documents do not contain");
+                    final_answer = retry_text;
+                    final_not_found = retry_not_found;
+                    final_assertions = retry_assertions;
+                } else {
+                    log::info!(
+                        "Retry did not improve quality: violations {} -> {}. Keeping original.",
+                        orig_total, retry_total
+                    );
+                }
+            }
+            Err(e) => {
+                log::warn!("Retry inference failed: {}. Keeping original response.", e);
+            }
+        }
+    }
+
+    // ── Layer 5: Strip ungrounded claims ─────────────────────────────────────
+    // Last-resort cleanup: remove individual sentences with ungrounded proper
+    // nouns or numbers, rather than failing the whole response.
+    let chunk_strings: Vec<String> = chunk_texts.iter().map(|s| s.to_string()).collect();
+    final_answer = crate::assertions::strip_ungrounded_claims(&final_answer, &chunk_strings);
+
+    // ── Layer 6: Fabrication failsafe ────────────────────────────────────────
+    // If fabrication STILL present after retry + stripping, replace with safe error.
+    let (_, still_fabricated) = count_violations(&final_assertions);
+    if still_fabricated > 0 {
+        log::warn!("Fabricated entity still present after retry — replacing with safe response.");
+        final_answer = "I found some relevant excerpts in your documents, but I was unable to produce \
             a fully grounded answer. Some details may not be supported by your documents.\n\n\
             Please try rephrasing your question more specifically, or review the source \
-            excerpts below to find the information you need.".to_string(),
-            true,
-        )
-    } else {
-        (answer, not_found)
-    };
+            excerpts below to find the information you need.".to_string();
+        final_not_found = true;
+    }
+
+    // ── Confidence scoring ───────────────────────────────────────────────────
+    let confidence = crate::assertions::compute_confidence(&final_answer, &chunk_strings);
 
     Ok(QueryResult {
         answer: final_answer,
         citations,
         not_found: final_not_found,
-        assertions,
+        assertions: final_assertions,
+        confidence: Some(confidence),
     })
 }
 
@@ -1769,8 +1889,9 @@ mod tests {
 
     #[test]
     fn chunk_numbered_content_not_orphaned() {
-        // Fix 1: "1. The Employee shall receive..." must NOT be treated as orphan header
-        let text = "Preamble text here.\n\n1. The Employee shall receive five weeks of paid vacation per year.\n\n2. The Employee is entitled to full medical coverage.";
+        // Fix 1: "1. The Employee shall receive..." must NOT be treated as orphan header.
+        // Use longer text to avoid small-chunk merging (<100 bytes).
+        let text = "Preamble text here with additional context to ensure this chunk exceeds the minimum size threshold for standalone chunks.\n\n1. The Employee shall receive five weeks of paid vacation per year, subject to the terms and conditions of the employment agreement herein.\n\n2. The Employee is entitled to full medical coverage including dental and vision benefits as outlined in the company benefits package.";
         let pages = vec![make_page(text)];
         let chunks = chunk_document(&pages, &default_settings());
         // Each numbered clause should be its own chunk (paragraph break), NOT prepended to the next
@@ -1816,8 +1937,9 @@ mod tests {
     fn chunk_no_overlap_across_paragraph_breaks() {
         // Paragraph breaks should flush without carrying overlap into the next chunk.
         // Sentences from paragraph A must not appear in paragraph B's chunk.
+        // Use longer text to exceed 100-byte small-chunk merge threshold.
         let text =
-            "Alpha sentence one. Alpha sentence two.\n\nBeta sentence one. Beta sentence two.";
+            "Alpha sentence one with enough detail to exceed the minimum chunk size. Alpha sentence two continues with more substantive content here.\n\nBeta sentence one starts a new paragraph with different content entirely. Beta sentence two also has enough text to stand alone as a chunk.";
         let pages = vec![make_page(text)];
         let chunks = chunk_document(&pages, &default_settings());
         for c in &chunks {
@@ -1845,16 +1967,16 @@ mod tests {
     // ── format_history ─────────────────────────────────────────────────────
 
     #[test]
-    fn format_history_capped_at_4_turns() {
-        // Fix 8: only the last 4 turns should appear in the formatted history
+    fn format_history_capped_at_2_turns() {
+        // Only the last 2 turns should appear in the formatted history
         let history: Vec<(String, String)> = (0..8)
             .map(|i| (format!("user{i}"), format!("assistant{i}")))
             .collect();
         let result = format_history(&history);
-        // Turns 0-3 should be absent; turns 4-7 should be present
+        // Turns 0-5 should be absent; turns 6-7 should be present
         assert!(!result.contains("user0"), "Turn 0 should be excluded");
-        assert!(!result.contains("user3"), "Turn 3 should be excluded");
-        assert!(result.contains("user4"), "Turn 4 should be included");
+        assert!(!result.contains("user5"), "Turn 5 should be excluded");
+        assert!(result.contains("user6"), "Turn 6 should be included");
         assert!(result.contains("user7"), "Turn 7 should be included");
     }
 

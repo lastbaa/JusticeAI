@@ -241,6 +241,111 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
     results
 }
 
+/// Compute a confidence score (0.0–1.0) for an answer based on grounding signals.
+/// Starts at 1.0 and deducts for hedging language, missing citations, short answers,
+/// and "not found" disclaimers. Boosts for multiple citations (good grounding).
+pub fn compute_confidence(answer: &str, _chunks: &[String]) -> f64 {
+    let mut confidence: f64 = 1.0;
+
+    // Deduct for hedging language
+    let hedges = [
+        "may be", "possibly", "it appears", "it seems", "might",
+        "could be", "perhaps", "unclear", "uncertain",
+    ];
+    let lower = answer.to_lowercase();
+    for hedge in &hedges {
+        if lower.contains(hedge) {
+            confidence -= 0.05;
+        }
+    }
+
+    // Deduct if no citations found
+    if !answer.contains('[') || !answer.contains(", p.") {
+        confidence -= 0.2;
+    }
+
+    // Deduct if answer is very short (< 50 chars) for non-simple queries
+    if answer.len() < 50 {
+        confidence -= 0.1;
+    }
+
+    // Deduct if answer contains "not present" or "not found" disclaimers
+    if lower.contains("not present in the provided") || lower.contains("not found in the") {
+        confidence -= 0.15;
+    }
+
+    // Boost if multiple citations found (good grounding)
+    let citation_count = answer.matches(", p.").count();
+    if citation_count >= 3 {
+        confidence += 0.1;
+    }
+
+    confidence.clamp(0.0, 1.0)
+}
+
+/// Strip sentences from the answer that contain proper nouns or numbers not
+/// grounded in any source chunk. This is a last-resort cleanup that removes
+/// individual ungrounded sentences rather than failing the whole response.
+/// If all sentences would be removed, returns the original answer unchanged.
+pub fn strip_ungrounded_claims(answer: &str, chunks: &[String]) -> String {
+    let all_sources = chunks.join(" ");
+    let sources_lower = all_sources.to_lowercase();
+
+    // Split into sentences (rough: split on `. `, `! `, `? `, or newline)
+    let sentence_re = Regex::new(r"(?s)([^.!?\n]+[.!?])").unwrap();
+    let sentences: Vec<&str> = sentence_re
+        .find_iter(answer)
+        .map(|m| m.as_str())
+        .collect();
+
+    if sentences.is_empty() {
+        return answer.to_string();
+    }
+
+    // Regex for proper nouns (capitalized multi-char words) and numbers
+    let key_token_re = Regex::new(r"\b[A-Z][a-z]{2,}\b|\b\d[\d,./%$]+\b").unwrap();
+    // Regex to strip inline citations before checking
+    let cite_strip_re = Regex::new(r"\s*\[[^\]]*\]").unwrap();
+
+    let mut kept: Vec<&str> = Vec::new();
+    for sentence in &sentences {
+        let clean = cite_strip_re.replace_all(sentence, "");
+        let tokens: Vec<&str> = key_token_re.find_iter(&clean).map(|m| m.as_str()).collect();
+
+        // If no key tokens, keep the sentence (it's generic/connective text)
+        if tokens.is_empty() {
+            kept.push(sentence);
+            continue;
+        }
+
+        // Check if all key tokens are grounded in sources
+        let grounded = tokens.iter().all(|tok| {
+            sources_lower.contains(&tok.to_lowercase())
+        });
+
+        if grounded {
+            kept.push(sentence);
+        } else {
+            log::info!(
+                "Stripping ungrounded sentence: \"{}\"",
+                if sentence.len() > 80 { &sentence[..80] } else { sentence }
+            );
+        }
+    }
+
+    // If all sentences removed, return original (don't make it worse)
+    if kept.is_empty() {
+        return answer.to_string();
+    }
+
+    // If nothing was stripped, return original to preserve formatting
+    if kept.len() == sentences.len() {
+        return answer.to_string();
+    }
+
+    kept.join(" ")
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()

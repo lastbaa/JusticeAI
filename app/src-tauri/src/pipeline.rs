@@ -9,6 +9,7 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use regex::Regex;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 use uuid::Uuid;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -136,26 +137,12 @@ pub const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instr
 /// Rules-only system prompt — document context goes in the user turn so Llama 2
 /// pays full attention to it (system-prompt content is under-weighted by the model).
 pub const RULES_PROMPT: &str = "\
-You are Justice AI, a legal research assistant specializing in US federal and state law.\n\n\
-Rules (follow exactly):\n\
-- Cite every factual claim inline as [filename, p. N] immediately after the claim — never group citations at the end.\n\
-- State all numbers, dates, dollar amounts, and figures EXACTLY as written in the source — never round or paraphrase.\n\
-- Form fields: PDFs may store template labels (e.g. \"Event Date: ______\") and filled values in separate SOURCE chunks. \
-Match each value to its nearest field label across all SOURCE chunks before answering. \
-Never report a bare value without identifying which label it belongs to.\n\
-- Multiple dates: when several dates appear, use the field label (e.g. \"Event Date\", \"Signature Date\", \"Date of Birth\") \
-to determine which date answers the question. Prefer the labeled match over proximity in the text.\n\
-- State each fact once only. Do not restart or repeat a list you have already written.\n\
-- If the answer is not present in the excerpts, say exactly: \"I could not find information about this in your loaded documents.\"\n\
-- When no excerpts are provided, answer from your knowledge of US law; note when answers may vary by state or when a licensed attorney should be consulted.\n\
-- Never fabricate case citations, statutes, or facts. Do not give specific legal advice.\n\n\
-Format:\n\
-- Begin with a direct one-sentence answer, then elaborate.\n\
-- Use **bold** for key legal terms, parties, dates, and dollar amounts.\n\
-- Use bullet points (- ) for lists of multiple items or findings.\n\
-- Use ### headers only to separate distinct topics in longer answers.\n\
-- Keep paragraphs to 2-3 sentences.\n\
-- No pleasantries, preambles, or sign-offs.";
+You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\n\n\
+1. GROUNDING: If the answer is not in the context, state: \"This information is not present in the provided documents.\" Never speculate or use outside knowledge.\n\
+2. CITATIONS: Cite every claim as [filename, p. N]. Example: The lease runs 12 months [lease.pdf, p. 3].\n\
+3. EXACTNESS: Reproduce numbers, dates, dollar amounts, and names EXACTLY as written. Never round or approximate.\n\
+4. NO FABRICATION: Never invent case numbers, court names, statutes, party names, or amounts not in the context.\n\
+5. FORMAT: Be direct. No preambles or sign-offs. Bold key terms. Bullets for multiple facts.";
 
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
@@ -165,35 +152,37 @@ pub struct InferenceParams {
     pub system_prompt_suffix: &'static str,
     /// When set, replaces RULES_PROMPT entirely (used for no-document chat mode).
     pub system_prompt_override: Option<String>,
+    /// Maximum wall-clock seconds for the generation loop before breaking.
+    pub timeout_secs: u64,
 }
 
 impl InferenceParams {
-    /// Context window budget notes (Saul-7B: n_ctx = 4096):
+    /// Context window budget notes (Saul-7B: n_ctx = 8192):
     ///   prompt_tokens ≈ (sys_prompt + context + question + overhead) / 2.5
-    ///   gen_tokens = 4096 - prompt_tokens
-    /// Quick:    ~2000 prompt → ~2000 gen headroom (256 used)
-    /// Balanced: ~2900 prompt → ~1200 gen headroom (1024 used)
-    /// Extended: ~2900 prompt → ~1200 gen headroom (1024 used, but 10 sources)
+    ///   gen_tokens = 8192 - prompt_tokens
     /// A runtime cap in ask_saul ensures we never overshoot.
     pub fn from_mode(mode: &InferenceMode) -> Self {
         match mode {
             InferenceMode::Quick => Self {
                 max_new_tokens: 256,
-                temperature: 0.3,
-                system_prompt_suffix: "\nAnswer in 2-3 concise bullet points. Focus on the single most relevant fact. Be brief.",
+                temperature: 0.15,
+                system_prompt_suffix: "\nAnswer in 1-3 sentences. Extract only the specific fact requested. Cite the source.",
                 system_prompt_override: None,
+                timeout_secs: 30,
             },
             InferenceMode::Balanced => Self {
                 max_new_tokens: 1024,
-                temperature: 0.35,
-                system_prompt_suffix: "",
+                temperature: 0.15,
+                system_prompt_suffix: "\nProvide a complete answer with all relevant details. Use bullet points for multiple facts. Cite every claim.",
                 system_prompt_override: None,
+                timeout_secs: 60,
             },
             InferenceMode::Extended => Self {
                 max_new_tokens: 1024,
-                temperature: 0.2,
-                system_prompt_suffix: "\nStructure your response with these markdown section headers:\n### Direct Answer\n### Key Findings\n### Relevant Provisions\n### Caveats\nCite each claim with page number. Be thorough.",
+                temperature: 0.10,
+                system_prompt_suffix: "\nStructure your response as:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim.",
                 system_prompt_override: None,
+                timeout_secs: 120,
             },
         }
     }
@@ -207,29 +196,29 @@ pub struct RetrievalModeParams {
 }
 
 impl RetrievalModeParams {
-    /// Budget = (4096 - max_new_tokens - ~600 sys/overhead) * 2.5 chars/token.
-    /// Quick:    (4096-256-600)*2.5 ≈ 8100 → use 3200/3500 (fast, intentionally small)
-    /// Balanced: (4096-1024-600)*2.5 ≈ 6180 → use 5800/6200
-    /// Extended: (4096-1024-600)*2.5 ≈ 6180 → use 5800/6200 (same gen budget, more sources)
+    /// Budget = (8192 - max_new_tokens - ~600 sys/overhead) * 2.5 chars/token.
+    /// Quick:    use 5000/5500 (fast, smaller context)
+    /// Balanced: use 10000/11000
+    /// Extended: use 10000/11000 (same gen budget, more sources)
     pub fn from_mode(mode: &InferenceMode) -> Self {
         match mode {
             InferenceMode::Quick => Self {
                 top_k: 3,
                 candidate_pool_k: 30,
-                max_context_chars_jur: 3_200,
-                max_context_chars_no_jur: 3_500,
+                max_context_chars_jur: 5_000,
+                max_context_chars_no_jur: 5_500,
             },
             InferenceMode::Balanced => Self {
                 top_k: 6,
                 candidate_pool_k: 60,
-                max_context_chars_jur: 5_800,
-                max_context_chars_no_jur: 6_200,
+                max_context_chars_jur: 10_000,
+                max_context_chars_no_jur: 11_000,
             },
             InferenceMode::Extended => Self {
                 top_k: 10,
                 candidate_pool_k: 80,
-                max_context_chars_jur: 5_800,
-                max_context_chars_no_jur: 6_200,
+                max_context_chars_jur: 10_000,
+                max_context_chars_no_jur: 11_000,
             },
         }
     }
@@ -477,57 +466,22 @@ pub fn detect_jurisdiction(text: &str) -> Option<DetectionResult> {
 pub fn jurisdiction_prompt_fragment(j: &Jurisdiction) -> String {
     match j.level {
         JurisdictionLevel::Federal => {
-            "Jurisdiction: Federal law applies.\n\
-             - Federal courts apply federal procedural law. In diversity cases, apply state substantive law (Erie doctrine).\n\
-             - Cite federal statutes as [Title] U.S.C. § [Section] and regulations as [Title] C.F.R. § [Section].\n\
-             - If documents reference both federal and state law, explain which applies and why.".to_string()
+            "Federal law: cite as [Title] U.S.C. § [Section]. Note Erie doctrine for state claims.".to_string()
         }
         JurisdictionLevel::State => {
             let state_name = j.state.as_deref().unwrap_or("the relevant state");
-            let state_specific = match state_name {
-                "California" => "\n- California can be MORE restrictive than federal in: minimum wage, environmental rules, consumer protection, data privacy (CCPA/CPRA), tenant rights.\n\
-                                 - Cite California statutes as Cal. [Code Name] Code § [Section].",
-                "New York" => "\n- New York can be MORE restrictive than federal in: consumer protection, employment law, rent stabilization, financial regulation.\n\
-                               - Cite New York statutes as N.Y. [Law Name] Law § [Section].",
-                "Texas" => "\n- Texas follows federal minimum standards in most areas. Notable exceptions: strong property rights, community property rules, specific oil & gas law.\n\
-                            - Cite Texas statutes as Tex. [Code Name] Code § [Section].",
-                "Florida" => "\n- Florida has no state income tax. Notably stronger homestead protections than most states.\n\
-                              - Cite Florida statutes as Fla. Stat. § [Section].",
-                "Illinois" => "\n- Illinois can be MORE restrictive than federal in: biometric privacy (BIPA), consumer fraud, employment law.\n\
-                               - Cite Illinois statutes as [Chapter] ILCS [Act]/[Section].",
-                "Pennsylvania" => "\n- Cite Pennsylvania statutes as [Title] Pa. Cons. Stat. § [Section].",
-                "Ohio" => "\n- Cite Ohio statutes as Ohio Rev. Code § [Section].",
-                "Georgia" => "\n- Cite Georgia statutes as Ga. Code Ann. § [Section].",
-                "New Jersey" => "\n- New Jersey has strong consumer protection and employment laws (LAD, CEPA).\n\
-                                 - Cite New Jersey statutes as N.J. Stat. Ann. § [Section].",
-                "Virginia" => "\n- Cite Virginia statutes as Va. Code Ann. § [Section].",
-                "Massachusetts" => "\n- Massachusetts can be MORE restrictive in: employment law, consumer protection (Chapter 93A), healthcare.\n\
-                                    - Cite Massachusetts statutes as Mass. Gen. Laws ch. [Chapter], § [Section].",
-                "Washington" => "\n- Washington has no state income tax. Strong employee protections and consumer privacy laws.\n\
-                                 - Cite Washington statutes as Wash. Rev. Code § [Section].",
-                "Colorado" => "\n- Cite Colorado statutes as Colo. Rev. Stat. § [Section].",
-                "Michigan" => "\n- Cite Michigan statutes as Mich. Comp. Laws § [Section].",
-                "Arizona" => "\n- Cite Arizona statutes as Ariz. Rev. Stat. § [Section].",
-                "Maryland" => "\n- Cite Maryland statutes as Md. Code Ann., [Article] § [Section].",
-                "North Carolina" => "\n- Cite North Carolina statutes as N.C. Gen. Stat. § [Section].",
-                _ => "",
-            };
-            format!(
-                "Jurisdiction: {state_name} state law applies.\n\
-                 - Federal law overrides conflicting {state_name} law (Supremacy Clause).\n\
-                 - {state_name} can add requirements beyond federal minimums unless federally preempted.\n\
-                 - If both federal and {state_name} law apply, state which governs and why.{state_specific}"
-            )
+            match state_name {
+                "California" => "California: note CCPA/CPRA, tenant protections (Civ. Code §1940+).".to_string(),
+                "New York" => "New York: note rent stabilization, General Business Law §349.".to_string(),
+                "Texas" => "Texas: community property state, DTPA consumer claims.".to_string(),
+                "Illinois" => "Illinois: note BIPA biometric privacy.".to_string(),
+                _ => format!("{state_name}: apply state-specific law."),
+            }
         }
         JurisdictionLevel::County => {
             let county = j.county.as_deref().unwrap_or("the local county");
             let state_name = j.state.as_deref().unwrap_or("the state");
-            format!(
-                "Jurisdiction: {county}, {state_name} local law applies.\n\
-                 - Federal law > state law > county ordinances in case of conflict.\n\
-                 - {county} can add requirements beyond {state_name} state minimums unless the state has expressly preempted the area.\n\
-                 - Cite local ordinances by name and number when available."
-            )
+            format!("{county}, {state_name}: apply local and state law.")
         }
     }
 }
@@ -630,12 +584,12 @@ pub async fn embed_text(text: &str, is_query: bool, model_dir: &Path) -> Result<
 /// Format prior conversation turns as labeled text for the model.
 pub fn format_history(history: &[(String, String)]) -> String {
     let mut s = String::from("[Prior conversation — for follow-up context only:]\n");
-    // Cap to the last 4 turns so long conversations don't exhaust the context window.
-    let recent = if history.len() > 4 { &history[history.len() - 4..] } else { history };
+    // Cap to the last 2 turns so long conversations don't exhaust the context window.
+    let recent = if history.len() > 2 { &history[history.len() - 2..] } else { history };
     for (user, assistant) in recent {
         // Trim each side to avoid bloating the prompt with long prior answers
-        let u = safe_truncate(user, 400);
-        let a = safe_truncate(assistant, 600);
+        let u = safe_truncate(user, 200);
+        let a = safe_truncate(assistant, 300);
         s.push_str(&format!("User: {u}\nAssistant: {a}\n\n"));
     }
     s
@@ -681,15 +635,21 @@ pub async fn ask_saul(
     } else if history_prefix.is_empty() {
         format!(
             "Below are excerpts from the user's loaded legal documents. \
-Answer the question using ONLY these excerpts.\n\n\
-{context}\n\n---\n\nQuestion: {user_question}"
+Answer the question using ONLY these excerpts.\n\
+\n=== DOCUMENT CONTEXT ===\n\
+{context}\n\
+=== END CONTEXT ===\n\
+\nQUESTION: {user_question}"
         )
     } else {
         format!(
             "{history_prefix}\
 Below are excerpts from the user's loaded legal documents. \
-Answer the current question using ONLY these excerpts.\n\n\
-{context}\n\n---\n\nCurrent question: {user_question}"
+Answer the current question using ONLY these excerpts.\n\
+\n=== DOCUMENT CONTEXT ===\n\
+{context}\n\
+=== END CONTEXT ===\n\
+\nQUESTION: {user_question}"
         )
     };
 
@@ -745,7 +705,7 @@ Answer the current question using ONLY these excerpts.\n\n\
         let model = model_guard.as_ref()
             .ok_or_else(|| "Saul model unavailable after initialization".to_string())?;
 
-        let n_ctx_size: u32 = 4096;
+        let n_ctx_size: u32 = 8192;
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(n_ctx_size));
         let mut ctx = model
@@ -796,10 +756,8 @@ Answer the current question using ONLY these excerpts.\n\n\
         }
 
         let mut sampler = LlamaSampler::chain_simple([
-            // repeat_penalty lowered from 1.3→1.05: high penalty was discouraging
-            // the model from repeating terms from context, hurting factual extraction.
-            LlamaSampler::penalties(256, 1.05, 0.0, 0.0),
-            LlamaSampler::min_p(0.05, 1),
+            LlamaSampler::penalties(256, 1.15, 0.3, 0.0),
+            LlamaSampler::min_p(0.10, 1),
             LlamaSampler::top_p(0.92, 1),
             LlamaSampler::temp(inference_params.temperature),
             LlamaSampler::dist(42),
@@ -816,9 +774,17 @@ Answer the current question using ONLY these excerpts.\n\n\
             );
         }
 
+        let gen_start = Instant::now();
+        let timeout_secs = inference_params.timeout_secs;
+
         for _ in 0..max_new_tokens {
             if pos >= n_ctx_size as usize {
                 log::warn!("Generation stopped: reached context window limit ({n_ctx_size} tokens).");
+                break;
+            }
+
+            if gen_start.elapsed().as_secs() > timeout_secs {
+                log::warn!("Generation stopped: timeout after {timeout_secs}s.");
                 break;
             }
 
@@ -1122,17 +1088,64 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
         }
     }
 
-    chunks
+    // B1: Merge any chunk < 100 bytes into the previous chunk.
+    let mut merged: Vec<TempChunk> = Vec::with_capacity(chunks.len());
+    for chunk in chunks {
+        if chunk.text.len() < 100 && !merged.is_empty() {
+            let last = merged.last_mut().unwrap();
+            last.text.push(' ');
+            last.text.push_str(&chunk.text);
+            last.token_count = (last.text.len() / 3).max(1);
+        } else {
+            merged.push(chunk);
+        }
+    }
+
+    merged
+}
+
+/// Returns true if a line starts with a list-item marker like (a), (i), 1., a., etc.
+pub fn is_list_item_start(line: &str) -> bool {
+    let t = line.trim();
+    // (a), (b), (i), (ii), (1), (2), etc.
+    if t.starts_with('(') {
+        if let Some(close) = t.find(')') {
+            let inner = &t[1..close];
+            if !inner.is_empty()
+                && (inner.chars().all(|c| c.is_ascii_lowercase())
+                    || inner.chars().all(|c| c.is_ascii_digit()))
+            {
+                return true;
+            }
+        }
+    }
+    // 1., 2., a., b., etc.
+    if let Some(dot_pos) = t.find('.') {
+        let before = &t[..dot_pos];
+        if !before.is_empty()
+            && before.len() <= 4
+            && (before.chars().all(|c| c.is_ascii_digit())
+                || (before.len() <= 2 && before.chars().all(|c| c.is_ascii_lowercase())))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Heuristic check whether a line looks like a section header (e.g. numbered headings, ALL-CAPS titles).
 pub fn is_section_header(line: &str) -> bool {
     let t = line.trim();
     if t.is_empty() || t.len() >= 80 { return false; }
+    // Numbered heading: "1. Title", "12.3 Subsection"
     if t.chars().next().map_or(false, |c| c.is_ascii_digit()) {
         if let Some(dot_pos) = t.find('.') {
             if t[..dot_pos].chars().all(|c| c.is_ascii_digit()) {
                 let after = t[dot_pos + 1..].trim();
+                // Also match "1.2" subsection numbering
+                if after.starts_with(|c: char| c.is_ascii_digit()) {
+                    return true;
+                }
                 if after.len() <= 40
                     && !after.ends_with('.')
                     && !after.ends_with('!')
@@ -1144,11 +1157,13 @@ pub fn is_section_header(line: &str) -> bool {
     }
     if t.ends_with('.') || t.ends_with('!') || t.ends_with('?') { return false; }
     let u = t.to_uppercase();
+    // "Section N", "Article N" patterns
     if u.starts_with("SECTION") || u.starts_with("ARTICLE") || u.starts_with("WHEREAS")
         || u.starts_with("NOW THEREFORE") || u.starts_with("SCHEDULE")
         || u.starts_with("EXHIBIT") || u.starts_with("ANNEX") {
         return true;
     }
+    // ALL-CAPS titles (at least 6 chars, up to 8 words)
     if t.len() >= 6
         && t.chars().any(|c| c.is_alphabetic())
         && t.chars().all(|c| !c.is_alphabetic() || c.is_uppercase())
@@ -1440,9 +1455,84 @@ pub fn rrf_scores(
     // get a small score bump that decays with chunk index. This helps surface
     // caption/header chunks that contain party names but have low BM25 IDF
     // because the query term (e.g. "plaintiff") appears in nearly every chunk.
+    // B3: Only apply if chunk's base score >= median of all fused scores.
     if !chunk_indices.is_empty() && intro_boost > 0.0 {
+        let mut sorted_scores: Vec<f32> = fused.clone();
+        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = if sorted_scores.is_empty() {
+            0.0
+        } else {
+            let mid = sorted_scores.len() / 2;
+            if sorted_scores.len() % 2 == 0 {
+                (sorted_scores[mid - 1] + sorted_scores[mid]) / 2.0
+            } else {
+                sorted_scores[mid]
+            }
+        };
+
         for (i, &ci) in chunk_indices.iter().enumerate() {
-            if ci <= intro_max_index {
+            if ci <= intro_max_index && fused[i] >= median {
+                let positional = intro_boost - (ci as f32 * intro_decay);
+                if positional > 0.0 {
+                    let factor = if has_caption_pattern(chunk_texts[i]) { 1.5 } else { 1.0 };
+                    fused[i] += positional * factor;
+                }
+            }
+        }
+    }
+
+    fused
+}
+
+/// RRF with per-list k values — allows weighting different scorers differently.
+/// `k_values` must be the same length as `score_lists`.
+pub fn rrf_scores_with_k(
+    score_lists: &[Vec<f32>],
+    k_values: &[f32],
+    chunk_texts: &[&str],
+    form_boost: f32,
+    chunk_indices: &[usize],
+    intro_boost: f32,
+    intro_decay: f32,
+    intro_max_index: usize,
+) -> Vec<f32> {
+    let n = score_lists[0].len();
+    let mut fused = vec![0.0f32; n];
+
+    for (list_idx, scores) in score_lists.iter().enumerate() {
+        let k = k_values.get(list_idx).copied().unwrap_or(60.0);
+        let mut ranked: Vec<(usize, f32)> = scores.iter().cloned().enumerate().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        for (rank, &(idx, _)) in ranked.iter().enumerate() {
+            fused[idx] += 1.0 / (k + rank as f32 + 1.0);
+        }
+    }
+
+    // Apply form-data boost on top of fused scores.
+    for (i, &text) in chunk_texts.iter().enumerate() {
+        if text.starts_with("FILLED FORM DATA") {
+            fused[i] += form_boost;
+        }
+    }
+
+    // Apply intro-chunk positional boost (same logic as rrf_scores, with median gating).
+    if !chunk_indices.is_empty() && intro_boost > 0.0 {
+        let mut sorted_scores: Vec<f32> = fused.clone();
+        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = if sorted_scores.is_empty() {
+            0.0
+        } else {
+            let mid = sorted_scores.len() / 2;
+            if sorted_scores.len() % 2 == 0 {
+                (sorted_scores[mid - 1] + sorted_scores[mid]) / 2.0
+            } else {
+                sorted_scores[mid]
+            }
+        };
+
+        for (i, &ci) in chunk_indices.iter().enumerate() {
+            if ci <= intro_max_index && fused[i] >= median {
                 let positional = intro_boost - (ci as f32 * intro_decay);
                 if positional > 0.0 {
                     let factor = if has_caption_pattern(chunk_texts[i]) { 1.5 } else { 1.0 };
@@ -1483,6 +1573,17 @@ pub fn has_caption_pattern(text: &str) -> bool {
             && clean.chars().all(|c| c.is_uppercase())
             && !BOILERPLATE.contains(&clean.as_str())
     })
+}
+
+/// Returns true when the query is about form fields, filled data, or tax forms.
+/// Used to gate form-data boosting so it only applies to relevant queries.
+pub fn is_form_related_query(query: &str) -> bool {
+    let lower = query.to_lowercase();
+    const FORM_TERMS: &[&str] = &[
+        "form", "field", "fill", "entry", "ssn", "ein", "name", "address",
+        "sign", "signature", "tax", "w-9", "w9", "1099",
+    ];
+    FORM_TERMS.iter().any(|t| lower.contains(t))
 }
 
 /// Returns true when the query is asking to identify a party by role
@@ -1756,6 +1857,10 @@ const STOP_WORDS: &[&str] = &[
     "about","as","into","to","from","and","but","or","not","any","all","some",
     "how","when","where","why","there","find","show","tell","explain","give",
     "please","provide","describe",
+    // Legal stopwords — high-frequency legalese that adds noise to BM25
+    "shall","hereby","herein","hereof","thereof","therein","whereas","pursuant",
+    "notwithstanding","aforementioned","hereinafter","witnesseth","thereunder",
+    "hereto","hereunder","thereto",
 ];
 
 /// Extract meaningful keywords from query text, optionally expanding with synonyms.
@@ -1768,6 +1873,30 @@ pub fn extract_query_keywords(query: &str, expand: bool) -> std::collections::Ha
         .map(|w| w.to_string())
         .collect();
     if expand { expand_keywords(&base) } else { base }
+}
+
+/// Jaccard similarity between two text strings (based on word-level tokens).
+/// Returns a value in [0.0, 1.0] where 1.0 means identical word sets.
+fn jaccard_similarity(a: &str, b: &str) -> f32 {
+    let set_a: std::collections::HashSet<&str> = a.split_whitespace().collect();
+    let set_b: std::collections::HashSet<&str> = b.split_whitespace().collect();
+    let intersection = set_a.intersection(&set_b).count();
+    let union = set_a.union(&set_b).count();
+    if union == 0 { 0.0 } else { intersection as f32 / union as f32 }
+}
+
+/// Remove near-duplicate chunks (Jaccard > 0.80), keeping the higher-scored one.
+fn deduplicate_by_jaccard(candidates: &mut Vec<(usize, f32)>, texts: &[&str]) {
+    let mut keep = Vec::with_capacity(candidates.len());
+    for &(idx, score) in candidates.iter() {
+        let is_dup = keep.iter().any(|&(kept_idx, _kept_score): &(usize, f32)| {
+            jaccard_similarity(texts[idx], texts[kept_idx]) > 0.80
+        });
+        if !is_dup {
+            keep.push((idx, score));
+        }
+    }
+    *candidates = keep;
 }
 
 impl RetrievalBackend for HybridBm25Cosine {
@@ -1801,22 +1930,62 @@ impl RetrievalBackend for HybridBm25Cosine {
             .map(|v| RagState::cosine_similarity(query_vector, v))
             .collect();
 
+        // B5: Only apply form boost for form-related queries.
+        let effective_form_boost = if is_form_related_query(query_text) {
+            self.form_boost
+        } else {
+            0.0
+        };
+
         // 3. Reciprocal Rank Fusion — merge BM25 and cosine by rank position.
-        // RRF is more robust than linear blending because it doesn't require
-        // score normalization and handles heterogeneous score distributions well.
-        let hybrid = rrf_scores(
-            &[cosine_scores, bm25_scores],
-            &corpus.texts,
-            self.form_boost,
-            &corpus.chunk_indices,
-            if is_party_identity_query(query_text) { self.intro_boost } else { 0.0 },
-            self.intro_decay,
-            self.intro_max_index,
-        );
+        // B6: Query-aware RRF — short queries (<=5 words) use k=40 for BM25
+        // to weight keyword matches more heavily.
+        let query_word_count = query_text.split_whitespace().count();
+        let hybrid = if query_word_count <= 5 {
+            // Short query: BM25 uses k=40 (keyword-heavy), cosine uses k=60
+            rrf_scores_with_k(
+                &[cosine_scores, bm25_scores],
+                &[60.0, 40.0],
+                &corpus.texts,
+                effective_form_boost,
+                &corpus.chunk_indices,
+                if is_party_identity_query(query_text) { self.intro_boost } else { 0.0 },
+                self.intro_decay,
+                self.intro_max_index,
+            )
+        } else {
+            rrf_scores(
+                &[cosine_scores, bm25_scores],
+                &corpus.texts,
+                effective_form_boost,
+                &corpus.chunk_indices,
+                if is_party_identity_query(query_text) { self.intro_boost } else { 0.0 },
+                self.intro_decay,
+                self.intro_max_index,
+            )
+        };
 
         // 4. Sort by fused score descending
         let mut indexed: Vec<(usize, f32)> = hybrid.into_iter().enumerate().collect();
         indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // B7: Duplicate chunk suppression — drop near-duplicate chunks (Jaccard > 0.80)
+        deduplicate_by_jaccard(&mut indexed, &corpus.texts);
+
+        // B4: Adaptive top-K — find largest score gap > 0.08 before top_k, cut there.
+        let adaptive_k = {
+            let max_k = config.top_k.min(indexed.len());
+            let mut cut = max_k;
+            let mut largest_gap = 0.0f32;
+            for i in 0..max_k.saturating_sub(1) {
+                let gap = indexed[i].1 - indexed[i + 1].1;
+                if gap > 0.08 && gap > largest_gap {
+                    largest_gap = gap;
+                    cut = i + 1; // cut after this element
+                }
+            }
+            cut.max(2).min(max_k) // min 2, max top_k
+        };
 
         // 5. Threshold filter — if nothing passes, return empty (do NOT fall back
         //    to unfiltered results, which caused hallucination on irrelevant queries).
@@ -1859,14 +2028,14 @@ impl RetrievalBackend for HybridBm25Cosine {
                 })
                 .collect();
 
-            let mmr = mmr_select(pool, config.top_k, config.mmr_lambda);
+            let mmr = mmr_select(pool, adaptive_k, config.mmr_lambda);
             mmr.into_iter()
                 .map(|(score, meta)| ScoredResult { score, chunk_index: meta.chunk_index })
                 .collect()
         } else {
-            // No MMR — raw top-k
+            // No MMR — raw adaptive top-k
             above.into_iter()
-                .take(config.top_k)
+                .take(adaptive_k)
                 .map(|(idx, score)| ScoredResult { score, chunk_index: idx })
                 .collect()
         }
@@ -2024,24 +2193,27 @@ mod tests {
     fn inference_params_quick() {
         let p = InferenceParams::from_mode(&InferenceMode::Quick);
         assert_eq!(p.max_new_tokens, 256);
-        assert!((p.temperature - 0.3).abs() < 0.01);
+        assert!((p.temperature - 0.15).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
+        assert_eq!(p.timeout_secs, 30);
     }
 
     #[test]
     fn inference_params_balanced() {
         let p = InferenceParams::from_mode(&InferenceMode::Balanced);
         assert_eq!(p.max_new_tokens, 1024);
-        assert!((p.temperature - 0.35).abs() < 0.01);
-        assert!(p.system_prompt_suffix.is_empty());
+        assert!((p.temperature - 0.15).abs() < 0.01);
+        assert!(!p.system_prompt_suffix.is_empty());
+        assert_eq!(p.timeout_secs, 60);
     }
 
     #[test]
     fn inference_params_extended() {
         let p = InferenceParams::from_mode(&InferenceMode::Extended);
         assert_eq!(p.max_new_tokens, 1024);
-        assert!((p.temperature - 0.2).abs() < 0.01);
+        assert!((p.temperature - 0.10).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
+        assert_eq!(p.timeout_secs, 120);
     }
 
     #[test]
@@ -2537,14 +2709,14 @@ mod tests {
     // ── format_history ─────────────────────────────────────────────────────
 
     #[test]
-    fn format_history_capped_at_4_turns() {
+    fn format_history_capped_at_2_turns() {
         let history: Vec<(String, String)> = (0..8)
             .map(|i| (format!("user{i}"), format!("assistant{i}")))
             .collect();
         let result = format_history(&history);
         assert!(!result.contains("user0"), "Turn 0 should be excluded");
-        assert!(!result.contains("user3"), "Turn 3 should be excluded");
-        assert!(result.contains("user4"), "Turn 4 should be included");
+        assert!(!result.contains("user5"), "Turn 5 should be excluded");
+        assert!(result.contains("user6"), "Turn 6 should be included");
         assert!(result.contains("user7"), "Turn 7 should be included");
     }
 
@@ -2869,10 +3041,9 @@ mod tests {
     fn prompt_fragment_federal() {
         let j = Jurisdiction { level: JurisdictionLevel::Federal, state: None, county: None };
         let frag = jurisdiction_prompt_fragment(&j);
-        assert!(frag.contains("Federal law applies"), "Federal fragment should declare federal law");
+        assert!(frag.contains("Federal law"), "Federal fragment should declare federal law");
         assert!(frag.contains("Erie doctrine"), "Federal fragment should mention Erie");
         assert!(frag.contains("U.S.C."), "Federal fragment should mention U.S.C. citation format");
-        assert!(frag.contains("C.F.R."), "Federal fragment should mention C.F.R. citation format");
     }
 
     #[test]
@@ -2883,10 +3054,8 @@ mod tests {
             county: None,
         };
         let frag = jurisdiction_prompt_fragment(&j);
-        assert!(frag.contains("California state law applies"), "Should declare California");
-        assert!(frag.contains("Supremacy Clause"), "Should mention Supremacy Clause");
+        assert!(frag.contains("California"), "Should declare California");
         assert!(frag.contains("CCPA"), "California fragment should mention CCPA");
-        assert!(frag.contains("Cal."), "Should include California citation format");
     }
 
     #[test]
@@ -2897,8 +3066,7 @@ mod tests {
             county: None,
         };
         let frag = jurisdiction_prompt_fragment(&j);
-        assert!(frag.contains("New York state law applies"));
-        assert!(frag.contains("N.Y."), "Should include NY citation format");
+        assert!(frag.contains("New York"));
         assert!(frag.contains("rent stabilization"), "Should mention NY-specific areas");
     }
 
@@ -2910,8 +3078,7 @@ mod tests {
             county: None,
         };
         let frag = jurisdiction_prompt_fragment(&j);
-        assert!(frag.contains("Texas state law applies"));
-        assert!(frag.contains("Tex."), "Should include Texas citation format");
+        assert!(frag.contains("Texas"));
         assert!(frag.contains("community property"), "Should mention TX-specific areas");
     }
 
@@ -2923,9 +3090,8 @@ mod tests {
             county: None,
         };
         let frag = jurisdiction_prompt_fragment(&j);
-        assert!(frag.contains("Illinois state law applies"));
+        assert!(frag.contains("Illinois"));
         assert!(frag.contains("BIPA"), "Should mention IL biometric privacy");
-        assert!(frag.contains("ILCS"), "Should include Illinois citation format");
     }
 
     #[test]
@@ -2936,10 +3102,8 @@ mod tests {
             county: None,
         };
         let frag = jurisdiction_prompt_fragment(&j);
-        assert!(frag.contains("Wyoming state law applies"));
-        assert!(frag.contains("Supremacy Clause"));
-        // No Wyoming-specific notes, so fragment should still have the generic rules
-        assert!(frag.contains("which governs and why"));
+        assert!(frag.contains("Wyoming"));
+        assert!(frag.contains("state-specific law"));
     }
 
     #[test]
@@ -2950,9 +3114,8 @@ mod tests {
             county: Some("Los Angeles County".to_string()),
         };
         let frag = jurisdiction_prompt_fragment(&j);
-        assert!(frag.contains("Los Angeles County, California"));
-        assert!(frag.contains("Federal law > state law > county ordinances"));
-        assert!(frag.contains("preempted"));
+        assert!(frag.contains("Los Angeles County"));
+        assert!(frag.contains("California"));
     }
 
     #[test]
