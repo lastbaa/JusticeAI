@@ -705,7 +705,9 @@ Answer the current question using ONLY these excerpts.\n\n\
     };
 
     // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
-    let prompt = format!("[INST] <<SYS>>\n{sys_prompt}\n<</SYS>>\n\n{user_content} [/INST]");
+    // Saul-Instruct-v1 is fine-tuned from Mistral-7B — use Mistral chat format.
+    // System instructions go at the start of the user turn (no <<SYS>> wrapper).
+    let prompt = format!("[INST] {sys_prompt}\n\n{user_content} [/INST]");
 
     tokio::task::spawn_blocking(move || {
         // Get (or lazily initialize) the global llama.cpp backend.
@@ -794,9 +796,11 @@ Answer the current question using ONLY these excerpts.\n\n\
         }
 
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(256, 1.3, 0.0, 0.0),
+            // repeat_penalty lowered from 1.3→1.05: high penalty was discouraging
+            // the model from repeating terms from context, hurting factual extraction.
+            LlamaSampler::penalties(256, 1.05, 0.0, 0.0),
             LlamaSampler::min_p(0.05, 1),
-            LlamaSampler::top_p(0.95, 1),
+            LlamaSampler::top_p(0.92, 1),
             LlamaSampler::temp(inference_params.temperature),
             LlamaSampler::dist(42),
         ]);
@@ -1525,6 +1529,7 @@ pub fn expand_keywords(keywords: &std::collections::HashSet<String>) -> std::col
         ("annual",          &["yearly", "per year", "per annum"]),
         ("breach",          &["violation", "default", "failure", "infringement", "non-performance"]),
         ("damages",         &["liability", "remedy", "award", "loss", "penalty", "compensation"]),
+        ("penalty",         &["damages", "liability", "fine", "sanction", "limitation", "cap", "exposure"]),
         ("covenant",        &["agreement", "clause", "promise", "obligation", "undertaking"]),
         ("warranty",        &["representation", "guarantee", "assurance", "certification"]),
         ("jurisdiction",    &["venue", "court", "forum", "governing law", "choice of law"]),

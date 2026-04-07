@@ -215,6 +215,7 @@ fn append_acroform_values(doc: &lopdf::Document, pages: &mut [DocumentPage]) {
     // XFA-based PDFs (like IRS forms) may store field annotations in the
     // document catalog's AcroForm rather than in individual page /Annots.
     let global_fields = extract_global_acroform_fields(doc);
+    log::info!("AcroForm global extraction found {} fields", global_fields.len());
     if !global_fields.is_empty() && !pages.is_empty() {
         prepend_form_summary(&global_fields, pages);
         return;
@@ -267,11 +268,25 @@ fn append_acroform_values(doc: &lopdf::Document, pages: &mut [DocumentPage]) {
                 continue;
             }
 
-            let is_text = annot_dict
+            // Check /FT on this widget; if absent, check /Parent's /FT (inherited).
+            let local_ft = annot_dict
                 .get(b"FT")
                 .ok()
                 .and_then(|o| o.as_name().ok())
-                .map_or(false, |n| n == b"Tx");
+                .map(|n| n.to_vec());
+            let effective_ft = local_ft.or_else(|| {
+                annot_dict
+                    .get(b"Parent")
+                    .ok()
+                    .and_then(|p| match p {
+                        lopdf::Object::Reference(pid) => doc.get_dictionary(*pid).ok(),
+                        _ => None,
+                    })
+                    .and_then(|pd| pd.get(b"FT").ok())
+                    .and_then(|o| o.as_name().ok())
+                    .map(|n| n.to_vec())
+            });
+            let is_text = effective_ft.as_deref().map_or(false, |ft| ft == b"Tx" || ft == b"Ch");
             if !is_text {
                 continue;
             }
@@ -402,13 +417,27 @@ fn prepend_form_summary(fields: &[(String, String)], pages: &mut [DocumentPage])
         return;
     }
 
-    let page_text = &pages[0].text;
     let mut lines = Vec::new();
 
     for (label, value) in fields {
-        if page_text.contains(value.as_str()) {
-            continue; // Already in the text
+        // Always include in form summary — even if value is in page text,
+        // it may be buried in boilerplate and won't surface during retrieval
+        // without a dedicated dense form-data chunk.
+
+        // Quality filter: skip garbage form fields (checkbox states, short fragments)
+        let v = value.trim();
+        if v.is_empty() || v.len() < 2 {
+            continue;
         }
+        let v_lower = v.to_lowercase();
+        if matches!(v_lower.as_str(), "check" | "checked" | "off" | "yes" | "no" | "x" | "true" | "false") {
+            continue;
+        }
+        // Skip standalone 1-2 digit numbers (date fragments, toggle values)
+        if v.len() <= 2 && v.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+
         let clean_label = label.replace("[0]", "").replace("[1]", "");
         // For generic field names (f1_01, etc.), infer a descriptive label from the value
         if clean_label.is_empty()
@@ -476,19 +505,22 @@ fn extract_global_acroform_fields(doc: &lopdf::Document) -> Vec<(String, String)
         Err(_) => return results,
     };
 
-    // Walk field tree
+    // Walk field tree (no inherited /FT at the root level)
     for field_ref in &fields {
-        collect_acroform_field(doc, field_ref, &mut results);
+        collect_acroform_field(doc, field_ref, &mut results, None);
     }
 
     results
 }
 
 /// Recursively collect text field values from an AcroForm field node.
+/// `inherited_ft` carries the parent's /FT down the tree — many PDF forms
+/// (IRS W-9, etc.) only set /FT on the parent node and children inherit it.
 fn collect_acroform_field(
     doc: &lopdf::Document,
     obj: &lopdf::Object,
     results: &mut Vec<(String, String)>,
+    inherited_ft: Option<&[u8]>,
 ) {
     let dict = match obj {
         lopdf::Object::Reference(id) => match doc.get_dictionary(*id) {
@@ -499,29 +531,35 @@ fn collect_acroform_field(
         _ => return,
     };
 
-    // Check for /Kids (intermediate node in field tree)
-    if let Ok(lopdf::Object::Array(kids)) = dict.get(b"Kids") {
-        for kid in kids {
-            // Dereference the kid
-            match doc.dereference(kid) {
-                Ok((_, lopdf::Object::Dictionary(_))) => {
-                    collect_acroform_field(doc, kid, results);
-                }
-                _ => {
-                    collect_acroform_field(doc, kid, results);
-                }
-            }
-        }
-        return;
-    }
-
-    // Leaf node — check for /V value on text fields
-    let is_text = dict
+    // Resolve this node's /FT (field type), falling back to inherited.
+    let local_ft = dict
         .get(b"FT")
         .ok()
         .and_then(|o| o.as_name().ok())
-        .map_or(false, |n| n == b"Tx");
-    if !is_text {
+        .map(|n| n.to_vec());
+    let effective_ft: Option<&[u8]> = local_ft.as_deref().or(inherited_ft);
+
+    // Check for /Kids (intermediate node in field tree)
+    if let Ok(kids_obj) = dict.get(b"Kids") {
+        let kids_arr = match doc.dereference(kids_obj) {
+            Ok((_, lopdf::Object::Array(arr))) => Some(arr.clone()),
+            _ => match kids_obj {
+                lopdf::Object::Array(arr) => Some(arr.clone()),
+                _ => None,
+            },
+        };
+        if let Some(kids) = kids_arr {
+            for kid in &kids {
+                collect_acroform_field(doc, kid, results, effective_ft);
+            }
+            // Don't return yet — some parent nodes with /Kids also have /V
+        }
+    }
+
+    // Check for /V value — accept text fields (Tx) or choice fields (Ch),
+    // and also accept when no /FT is set (some forms omit it entirely).
+    let is_acceptable = effective_ft.map_or(true, |ft| ft == b"Tx" || ft == b"Ch");
+    if !is_acceptable {
         return;
     }
 
@@ -747,7 +785,31 @@ fn reinterleave_form_fields(
         }
 
         let cleaned = clean_pdf_text(&interleaved);
-        if !cleaned.trim().is_empty() {
+        // Quality gate: if reinterleaved text is >30% shorter than original,
+        // the split point was wrong and we lost content. Fall back to original
+        // text, but prepend extracted field values as a FILLED FORM DATA block
+        // so they get retrieval boosting.
+        let orig_len = original_text.len();
+        if cleaned.len() < orig_len * 7 / 10 {
+            log::warn!(
+                "reinterleave_form_fields: result ({} chars) is much shorter than original ({} chars), keeping original with form summary",
+                cleaned.len(), orig_len,
+            );
+            if fallback {
+                // Build a mini form summary from the extracted field values
+                let form_lines: Vec<String> = field_values
+                    .iter()
+                    .filter(|v| v.trim().len() >= 2)
+                    .map(|v| format!("Form Field: {v}"))
+                    .collect();
+                let mut page = original_pages[page_idx].clone();
+                if !form_lines.is_empty() {
+                    let summary = format!("FILLED FORM DATA:\n{}\n\n", form_lines.join("\n"));
+                    page.text = format!("{}{}", summary, page.text);
+                }
+                result_pages.push(page);
+            }
+        } else if !cleaned.trim().is_empty() {
             result_pages.push(DocumentPage {
                 page_number: page_num,
                 text: cleaned,
