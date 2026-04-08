@@ -188,7 +188,7 @@ export default function Download() {
                     background: 'rgba(255,255,255,0.02)',
                   }}
                 >
-                  v1.4.0 · Open Source
+                  v1.5.0 · Open Source
                 </span>
               </div>
 

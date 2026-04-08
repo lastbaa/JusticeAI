@@ -15,6 +15,7 @@ interface Props {
   chatMode: boolean
   sessionName: string
   onQuery: (question: string) => void
+  onStopQuery?: () => void
   onAddFiles: () => void
   onAddFolder: () => void
   onLoadPaths: (paths: string[]) => void
@@ -292,6 +293,7 @@ export default function ChatInterface({
   chatMode,
   sessionName,
   onQuery,
+  onStopQuery,
   onAddFiles,
   onAddFolder,
   onLoadPaths,
@@ -760,36 +762,46 @@ export default function ChatInterface({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={isQuerying}
-                placeholder="Ask a question about your documents…"
+                placeholder={isQuerying ? 'Generating… click stop to cancel' : 'Ask a question about your documents…'}
                 rows={1}
                 className="flex-1 bg-transparent text-[13.5px] leading-6 outline-none placeholder:text-[var(--placeholder)] disabled:opacity-50"
                 style={{ maxHeight: 128, overflowY: 'auto', color: 'var(--text)' }}
               />
-              <button
-                onClick={handleSend}
-                disabled={isQuerying || !input.trim()}
-                title="Send message"
-                aria-label="Send message"
-                className="flex shrink-0 h-8 w-8 items-center justify-center rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
-                style={{
-                  background: input.trim() && !isQuerying ? 'var(--gold)' : 'rgb(var(--ov) / 0.06)',
-                  color: input.trim() && !isQuerying ? 'var(--text-on-gold)' : 'rgb(var(--ov) / 0.3)',
-                  transition: 'background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease',
-                  boxShadow: input.trim() && !isQuerying ? 'var(--shadow)' : 'none',
-                }}
-              >
-                {isQuerying ? (
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.2" />
-                    <path d="M12 2a10 10 0 0110 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              {isQuerying ? (
+                <button
+                  onClick={onStopQuery}
+                  title="Stop generating"
+                  aria-label="Stop generating"
+                  className="flex shrink-0 h-8 w-8 items-center justify-center rounded-xl transition-all"
+                  style={{
+                    background: 'rgba(248,81,73,0.12)',
+                    border: '1px solid rgba(248,81,73,0.25)',
+                    color: '#f85149',
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="3" y="3" width="10" height="10" rx="1.5" />
                   </svg>
-                ) : (
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  title="Send message"
+                  aria-label="Send message"
+                  className="flex shrink-0 h-8 w-8 items-center justify-center rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{
+                    background: input.trim() ? 'var(--gold)' : 'rgb(var(--ov) / 0.06)',
+                    color: input.trim() ? 'var(--text-on-gold)' : 'rgb(var(--ov) / 0.3)',
+                    transition: 'background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease',
+                    boxShadow: input.trim() ? 'var(--shadow)' : 'none',
+                  }}
+                >
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M.989 8 .064 2.68a1.342 1.342 0 0 1 1.85-1.462l13.402 5.744a1.13 1.13 0 0 1 0 2.076L1.913 14.782a1.342 1.342 0 0 1-1.85-1.463L.99 8zm.603-5.135.024.12L2.15 7.25h6.848a.75.75 0 0 1 0 1.5H2.15l-.534 4.265-.024.12 13.016-5.577z" />
                   </svg>
-                )}
-              </button>
+                </button>
+              )}
             </div>
           </div>
           <div className="mt-2 flex items-center justify-center gap-1.5">

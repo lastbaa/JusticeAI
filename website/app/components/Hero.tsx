@@ -4,7 +4,7 @@ import { Typewriter } from './Typewriter'
 
 const stats = [
   { value: '100%', label: 'On-Device Processing' },
-  { value: '0', label: 'Cloud Connections Required' },
+  { value: '17', label: 'File Formats Supported' },
   { value: '7B', label: 'Parameter Legal AI Model' },
 ]
 

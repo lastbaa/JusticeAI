@@ -1,6 +1,6 @@
 'use client'
 
-import { Shield, Zap, BookOpenCheck, Cpu, Layers } from 'lucide-react'
+import { Shield, Zap, BookOpenCheck, Cpu, Layers, FolderOpen, FileSearch, SlidersHorizontal } from 'lucide-react'
 import { GlowingEffect } from '@/components/ui/glowing-effect'
 import { cn } from '@/lib/utils'
 import { Reveal } from './Reveal'
@@ -181,25 +181,82 @@ export default function BentoCapabilities() {
               }
             />
 
+            {/* ── Case Management (5 cols × 1 row) ── */}
+            <BentoCard
+              className="md:col-span-5"
+              icon={<FolderOpen className="h-5 w-5" style={{ color: '#c9a84c' }} />}
+              name="Case Management"
+              description="Organize documents, chat sessions, and notes by legal matter. Set case context that automatically injects into every query. Cross-session summaries carry knowledge across conversations within the same case."
+              cta="Organize your matters"
+              background={
+                <div className="absolute top-5 right-5 flex flex-col gap-1.5 opacity-[0.06] pointer-events-none">
+                  {['Smith v. Jones', 'Contract Review', 'Due Diligence'].map((label, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded" style={{ background: '#c9a84c' }} />
+                      <span className="text-xs font-medium" style={{ color: '#c9a84c' }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              }
+            />
+
+            {/* ── Document Intelligence (7 cols × 1 row) ── */}
+            <BentoCard
+              className="md:col-span-7"
+              icon={<FileSearch className="h-5 w-5" style={{ color: '#c9a84c' }} />}
+              name="Auto-Generated Fact Sheets"
+              description="Every document is automatically analyzed on load — extracting parties, dates, dollar amounts, and key clauses. Tag documents as Client Documents, Legal Authority, Evidence, or Reference to shape how the AI weighs each source."
+              cta="See document intelligence"
+              background={
+                <div className="absolute top-5 right-8 flex flex-col gap-2 opacity-[0.06] pointer-events-none">
+                  {['$125,000', 'Jan 15, 2024', 'Sec. 4.2'].map((val, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs font-mono" style={{ color: '#c9a84c' }}>
+                      <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#c9a84c' }} />
+                      {val}
+                    </div>
+                  ))}
+                </div>
+              }
+            />
+
             {/* ── Multi-document (full width, 12 cols × 1 row) ── */}
             <BentoCard
-              className="md:col-span-12"
+              className="md:col-span-5"
               icon={<Layers className="h-5 w-5" style={{ color: '#c9a84c' }} />}
               name="Search Your Entire Case at Once"
               description="Load a whole matter folder — contracts, depositions, briefs, correspondence — and ask one question. Justice AI retrieves the most relevant passages from every document simultaneously, ranked by semantic relevance, with full page citations."
               cta="Start a search"
               background={
-                <div className="absolute top-1/2 -translate-y-1/2 right-14 flex items-end gap-3 pointer-events-none" style={{ opacity: 0.055 }}>
+                <div className="absolute top-1/2 -translate-y-1/2 right-8 flex items-end gap-2 pointer-events-none" style={{ opacity: 0.055 }}>
                   {[72, 88, 64, 80].map((h, i) => (
                     <div
                       key={i}
-                      className="w-12 rounded-lg shrink-0"
+                      className="w-8 rounded-lg shrink-0"
                       style={{
                         height: h,
                         background: 'rgba(201,168,76,0.9)',
                         transform: `translateY(${i % 2 === 0 ? -6 : 6}px)`,
                       }}
                     />
+                  ))}
+                </div>
+              }
+            />
+
+            {/* ── Inference Modes (7 cols × 1 row) ── */}
+            <BentoCard
+              className="md:col-span-7"
+              icon={<SlidersHorizontal className="h-5 w-5" style={{ color: '#c9a84c' }} />}
+              name="Three Inference Modes"
+              description="Brief for quick lookups, Standard for balanced analysis, and Discovery for comprehensive deep-dive research. Each mode adjusts token limits, temperature, and retrieval depth — so you control the speed-vs-thoroughness tradeoff per query."
+              cta="Choose your depth"
+              background={
+                <div className="absolute top-5 right-8 flex gap-3 opacity-[0.06] pointer-events-none">
+                  {['Brief', 'Standard', 'Discovery'].map((mode, i) => (
+                    <div key={i} className="flex flex-col items-center gap-1">
+                      <div className="rounded-full" style={{ width: 12 + i * 8, height: 12 + i * 8, background: '#c9a84c' }} />
+                      <span className="text-[10px] font-medium" style={{ color: '#c9a84c' }}>{mode}</span>
+                    </div>
                   ))}
                 </div>
               }

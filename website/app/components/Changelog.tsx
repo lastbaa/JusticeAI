@@ -2,6 +2,27 @@
 
 const releases = [
   {
+    version: '1.5.0',
+    date: 'April 2026',
+    items: [
+      'Case management with scoped context — organize files, sessions, and notes by legal matter',
+      'Document roles (Client Document, Legal Authority, Evidence, Reference) with one-click cycling',
+      'Three inference modes: Brief, Standard, and Discovery for speed-vs-depth control',
+      'Auto-generated fact sheets per document — parties, dates, amounts, and key clauses extracted on load',
+      'Entity registry with automatic party and role extraction across case documents',
+      'Export chat as formatted legal memo (Markdown) and export citations as CSV',
+      'Command palette (Cmd+K) with fuzzy search for quick actions',
+      'Smart session naming from document names, case parties, and legal concepts',
+      'Key Figures card — auto-detects and highlights dollar amounts, percentages, and dates in responses',
+      'Clickable Key Facts panel with follow-up question triggers for extracted dates, amounts, and terms',
+      'Practice area query templates with context-aware suggested questions',
+      'Hallucination detection and citation quality assertions with visual badges',
+      'Expanded file format support: PDF, DOCX, TXT, MD, CSV, EML, HTML, MHTML, XML, XLSX, and image OCR (PNG, JPG, TIFF)',
+      'Per-case jurisdiction detection with state-specific prompt context',
+      'Cross-session case summaries automatically injected into new queries',
+    ],
+  },
+  {
     version: '1.4.0',
     date: 'March 2026',
     items: [

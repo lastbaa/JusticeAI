@@ -1927,13 +1927,41 @@ fn collapse_repetitions(answer: &str) -> String {
 
     let result = deduped_lines.join("\n");
 
-    // Phase 2: Within remaining text, collapse exact repeated sentences (". " split)
+    // Phase 2: Within remaining text, collapse near-duplicate sentences.
+    // Split on sentence boundaries (". " and ".\n") and use Jaccard similarity.
     let sentences: Vec<&str> = result.split(". ").collect();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen_norms: Vec<String> = Vec::new();
     let mut unique = Vec::new();
     for sentence in &sentences {
-        let norm = sentence.trim().to_lowercase();
-        if norm.len() < 10 || seen.insert(norm) {
+        let norm: String = sentence.trim().to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if norm.len() < 10 {
+            unique.push(*sentence);
+            continue;
+        }
+
+        let is_dup = seen_norms.iter().any(|prev| {
+            // Exact substring match
+            if prev.contains(&norm) || norm.contains(prev.as_str()) {
+                return true;
+            }
+            // Jaccard similarity
+            let prev_words: std::collections::HashSet<&str> = prev.split_whitespace().collect();
+            let cur_words: std::collections::HashSet<&str> = norm.split_whitespace().collect();
+            let intersection = prev_words.intersection(&cur_words).count();
+            let union = prev_words.union(&cur_words).count();
+            if union == 0 { return false; }
+            (intersection as f64 / union as f64) > 0.75
+        });
+
+        if !is_dup {
+            seen_norms.push(norm);
             unique.push(*sentence);
         }
     }

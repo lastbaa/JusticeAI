@@ -7,7 +7,7 @@ const steps = [
   {
     number: '01',
     title: 'Load Your Documents',
-    body: 'Drag in a folder of case files, contracts, or briefs. Justice AI accepts PDF and Word documents. All parsing happens locally — nothing is transmitted.',
+    body: 'Drag in a folder of case files, contracts, or briefs. Justice AI accepts PDFs, Word documents, spreadsheets, emails, HTML, and even scanned images via OCR — 17 formats total. All parsing happens locally.',
     icon: (
       <svg width="20" height="20" viewBox="0 0 28 28" fill="none">
         <path d="M3 8a2 2 0 012-2h5l2 2h11a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"

@@ -25,7 +25,8 @@ const categories = [
       'MMR reranking for diverse, non-redundant results',
       'On-device LLM inference (Saul-7B) — zero cloud dependency',
       'Legal synonym expansion for domain-aware keyword search',
-      'Practice area presets tuning RAG parameters per domain',
+      'Three inference modes (Brief, Standard, Discovery) with per-query depth control',
+      'Auto-generated fact sheets, entity registry, and hallucination detection',
     ],
   },
   {
@@ -37,7 +38,8 @@ const categories = [
       'Responsive layout: sidebar, context panel, chat, and document viewer',
       'Inline document viewer with citation-linked page navigation',
       'Smooth streaming token display with loading indicators',
-      'Case folders for organizing sessions by matter',
+      'Case management with document roles, fact sheets, and cross-session context',
+      'Command palette (Cmd+K), export to legal memo, and citation CSV export',
     ],
   },
   {
@@ -70,7 +72,7 @@ const categories = [
     score: '5/5',
     details: [
       'GitHub Actions CI: Rust checks (macOS) + frontend builds (3 platforms)',
-      '22 unit tests covering chunking, BM25, RRF, MMR, and retrieval',
+      '50+ unit tests covering chunking, BM25, RRF, MMR, assertions, and jurisdiction detection',
       '77-case eval harness with MRR, P@1, and recall metrics',
       'Pluggable RetrievalBackend trait for extensibility',
       'Open-source MIT license for community contribution',

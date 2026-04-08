@@ -1057,7 +1057,7 @@ Answer the current question using ONLY these excerpts.\n\
         }
 
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(512, 1.3, 0.5, 0.0),
+            LlamaSampler::penalties(768, 1.35, 0.6, 0.0),
             LlamaSampler::top_k(40),
             LlamaSampler::min_p(0.10, 1),
             LlamaSampler::top_p(0.90, 1),
@@ -1117,15 +1117,38 @@ Answer the current question using ONLY these excerpts.\n\
                     log::warn!("Stop sequence detected in output — halting generation.");
                     break;
                 }
-                // Detect phrase-level repetition: if the last 80 chars appear
-                // earlier in the response, the model is looping.
-                if response.len() > 200 {
-                    let check_len = 80.min(response.len() / 3);
-                    let last_chunk = &response[response.len() - check_len..];
-                    let earlier = &response[..response.len() - check_len];
-                    if earlier.contains(last_chunk) {
+                // Detect phrase-level repetition at multiple window sizes.
+                // Check 40, 60, and 80 char windows to catch repetition early.
+                if response.len() > 120 {
+                    let caught = [40_usize, 60, 80].iter().any(|&window| {
+                        let check_len = window.min(response.len() / 3);
+                        if check_len < 30 { return false; }
+                        let last_chunk = &response[response.len() - check_len..];
+                        let earlier = &response[..response.len() - check_len];
+                        earlier.contains(last_chunk)
+                    });
+                    if caught {
                         log::warn!("Repetition loop detected — halting generation.");
                         break;
+                    }
+                }
+                // Sentence-level duplicate detection: if a completed sentence
+                // has already appeared in the response, halt immediately.
+                if response.len() > 100 && response.ends_with('.') {
+                    // Find the start of the last sentence
+                    let trimmed = response.trim_end_matches('.');
+                    if let Some(prev_dot) = trimmed.rfind(". ") {
+                        let last_sentence = &response[prev_dot + 2..];
+                        let earlier_part = &response[..prev_dot + 2];
+                        // Normalize for comparison
+                        let norm_last: String = last_sentence.to_lowercase()
+                            .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+                        let norm_earlier: String = earlier_part.to_lowercase()
+                            .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+                        if norm_last.len() > 40 && norm_earlier.contains(&norm_last) {
+                            log::warn!("Duplicate sentence detected — halting generation.");
+                            break;
+                        }
                     }
                 }
             }

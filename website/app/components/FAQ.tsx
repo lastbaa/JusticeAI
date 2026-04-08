@@ -11,7 +11,7 @@ const faqs = [
   },
   {
     q: 'What file types are supported?',
-    a: 'PDF and DOCX are supported. You can load individual files or entire folders. The app will automatically find and index all supported files in a folder.',
+    a: 'Justice AI supports 17 file types: PDF, DOCX, TXT, Markdown, CSV, XLSX, HTML, MHTML, XML, EML (email), and images (PNG, JPG, JPEG, TIFF) via built-in OCR. You can load individual files or entire folders. The app will automatically find and index all supported files in a folder.',
   },
   {
     q: 'How big is the model download?',
@@ -27,7 +27,7 @@ const faqs = [
   },
   {
     q: 'What hardware does Justice AI require?',
-    a: 'macOS 12+ with at least 8 GB RAM. Apple Silicon Macs (M1/M2/M3/M4) get the best performance via Metal GPU acceleration. Intel Macs work via Rosetta 2. Windows and Linux support is coming soon.',
+    a: 'macOS 12+ (Apple Silicon native, Intel via Rosetta 2), Windows 10+ (x64, Vulkan GPU recommended), or Linux (Ubuntu 22.04+ / Fedora 38+, x64 AppImage). 8 GB RAM minimum, 16 GB recommended. Apple Silicon Macs get the best performance via Metal GPU acceleration.',
   },
 ]
 

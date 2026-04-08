@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Citation, DocumentRole, FileInfo } from '../../../../../shared/src/types'
 
-const ROLE_LABELS: Record<DocumentRole, { label: string; color: string }> = {
-  ClientDocument: { label: 'Client', color: 'text-blue-400 bg-blue-400/10' },
-  LegalAuthority: { label: 'Legal', color: 'text-amber-400 bg-amber-400/10' },
-  Evidence: { label: 'Evidence', color: 'text-emerald-400 bg-emerald-400/10' },
-  Reference: { label: 'Ref', color: 'text-gray-400 bg-gray-400/10' },
+const ROLE_META: Record<DocumentRole, { label: string; plural: string; color: string; hex: string; icon: string }> = {
+  ClientDocument: { label: 'Client', plural: 'Client Documents', color: 'text-blue-400 bg-blue-400/10', hex: '#58a6ff', icon: 'M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25z' },
+  LegalAuthority: { label: 'Legal', plural: 'Legal Authority', color: 'text-amber-400 bg-amber-400/10', hex: '#c9a84c', icon: 'M8.75.75V2h.985c.304 0 .603.08.867.231l1.29.736c.038.022.08.033.124.033h2.234a.75.75 0 0 1 0 1.5h-.427l2.111 4.692a.75.75 0 0 1-.154.838l-.53-.53.53.53-.001.002-.002.002-.006.006-.016.015a1.3 1.3 0 0 1-.071.058 3.5 3.5 0 0 1-.39.262c-.323.183-.818.398-1.465.398-.647 0-1.142-.215-1.465-.398a3.5 3.5 0 0 1-.46-.32l-.017-.015-.006-.006-.002-.002h-.001L12 9.5l-.53.53a.75.75 0 0 1-.154-.838L13.427 4.5h-.927a.98.98 0 0 1-.482-.133l-1.29-.736a.25.25 0 0 0-.124-.031H8.75V13h2.5a.75.75 0 0 1 0 1.5h-6.5a.75.75 0 0 1 0-1.5h2.5V3.6h-.984a.25.25 0 0 0-.124.031l-1.29.736A.98.98 0 0 1 4.427 4.5H3.5l2.111 4.692a.75.75 0 0 1-.154.838l-.53-.53.53.53-.002.002-.002.002-.006.006-.016.015a2.6 2.6 0 0 1-.071.058 3.5 3.5 0 0 1-.39.262C4.647 10.215 4.152 10.5 3.5 10.5c-.652 0-1.147-.285-1.47-.468a3.5 3.5 0 0 1-.39-.262 2.4 2.4 0 0 1-.088-.073l-.016-.015-.006-.006-.002-.002H1.527L1 10.19l.53-.53a.75.75 0 0 1-.154-.838L3.487 4.13a.25.25 0 0 0-.237-.13H2.75a.75.75 0 0 1 0-1.5H5a.25.25 0 0 0 .124-.033l1.29-.736A1.75 1.75 0 0 1 7.282 1.5h.968V.75a.75.75 0 0 1 1.5 0z' },
+  Evidence: { label: 'Evidence', plural: 'Evidence', color: 'text-emerald-400 bg-emerald-400/10', hex: '#3fb950', icon: 'M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm3.78-9.72a.751.751 0 0 0-1.06-1.06L7.25 8.69 5.28 6.72a.751.751 0 0 0-1.06 1.06l2.5 2.5a.75.75 0 0 0 1.06 0l4-4z' },
+  Reference: { label: 'Ref', plural: 'Reference', color: 'text-gray-400 bg-gray-400/10', hex: '#8b949e', icon: 'M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.744 3.744 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.623-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75zm7.251 10.324.004-.001 3.803-3.438A2.25 2.25 0 0 1 7.25 5.5V2.5H.75v9h4.508c.71 0 1.4.201 1.993.574zm1.502 0A3.744 3.744 0 0 1 10.742 11.5h4.508v-9H11.75a2.25 2.25 0 0 0-2.25 2.25v5.083z' },
 }
+
+const ROLE_ORDER: DocumentRole[] = ['ClientDocument', 'LegalAuthority', 'Evidence', 'Reference']
 
 interface Props {
   files: FileInfo[]
@@ -150,7 +152,7 @@ function FileRow({
   const [showFacts, setShowFacts] = useState(false)
   const ext = file.fileName.split('.').pop()?.toUpperCase() ?? 'DOC'
   const exhibitLabel = index < 26 ? `Ex. ${String.fromCharCode(65 + index)}` : `Ex. ${index + 1}`
-  const roleInfo = ROLE_LABELS[file.role || 'ClientDocument']
+  const roleInfo = ROLE_META[file.role || 'ClientDocument']
 
   return (
     <div
@@ -226,40 +228,52 @@ function FileRow({
         <>
           <button
             onClick={() => setShowFacts((v) => !v)}
-            className="mt-1 text-[9px] font-medium transition-colors"
+            className="mt-1.5 flex items-center gap-1 text-[9px] font-medium transition-colors"
             style={{ color: 'rgba(201,168,76,0.5)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#c9a84c' }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.5)' }}
           >
-            {showFacts ? 'Hide facts' : 'Show facts'}
+            <svg
+              width="8" height="8" viewBox="0 0 16 16" fill="currentColor"
+              style={{ transform: showFacts ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform 0.15s ease' }}
+            >
+              <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/>
+            </svg>
+            {showFacts ? 'Hide facts' : 'View facts'}
           </button>
           {showFacts && (
             <div
-              className="mt-1.5 px-2 py-1.5 rounded text-[10px]"
+              className="mt-1.5 px-2.5 py-2 rounded-lg text-[10px] flex flex-col gap-1.5"
               style={{ background: 'var(--bg-alt)', border: '1px solid rgb(var(--ov) / 0.06)' }}
             >
               {file.factSheet.amounts.length > 0 && (
-                <div className="mb-1">
-                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Amounts:</span>{' '}
+                <div className="flex items-start gap-1.5">
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.25)', minWidth: 52 }}>Amounts</span>
                   <span style={{ color: '#c9a84c' }}>{file.factSheet.amounts.slice(0, 4).join(' \u2022 ')}</span>
                 </div>
               )}
               {file.factSheet.dates.length > 0 && (
-                <div className="mb-1">
-                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Dates:</span>{' '}
-                  <span style={{ color: 'var(--text)' }}>{file.factSheet.dates.slice(0, 4).join(' \u2022 ')}</span>
+                <div className="flex items-start gap-1.5">
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.25)', minWidth: 52 }}>Dates</span>
+                  <span style={{ color: 'rgb(var(--ov) / 0.55)' }}>{file.factSheet.dates.slice(0, 4).join(' \u2022 ')}</span>
                 </div>
               )}
               {file.factSheet.keyClauses.length > 0 && (
-                <div className="mb-1">
-                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Key Clauses:</span>{' '}
-                  <span style={{ color: 'var(--text)' }}>{file.factSheet.keyClauses.slice(0, 3).join(' \u2022 ')}</span>
+                <div className="flex items-start gap-1.5">
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.25)', minWidth: 52 }}>Clauses</span>
+                  <span style={{ color: 'rgb(var(--ov) / 0.55)' }}>
+                    {file.factSheet.keyClauses.slice(0, 3).map(c =>
+                      c.replace(/\b\w/g, l => l.toUpperCase())
+                    ).join(' \u2022 ')}
+                  </span>
                 </div>
               )}
               {file.factSheet.summary && (
-                <div>
-                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Summary:</span>{' '}
-                  <span style={{ color: 'var(--text)' }}>{file.factSheet.summary}</span>
+                <div className="flex items-start gap-1.5">
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.25)', minWidth: 52 }}>Summary</span>
+                  <span className="leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
+                    {file.factSheet.summary.length > 150 ? file.factSheet.summary.slice(0, 150) + '…' : file.factSheet.summary}
+                  </span>
                 </div>
               )}
             </div>
@@ -539,16 +553,46 @@ export default function ContextPanel({
                 </button>
               </div>
               <div className="overflow-y-auto px-4 pb-3 flex-1 min-h-0">
-                <div className="flex flex-col gap-0.5">
-                  {files.map((file, i) => (
-                    <FileRow
-                      key={file.id}
-                      file={file}
-                      index={i}
-                      onRemove={() => onRemoveFile(file.id)}
-                      onSetRole={onSetDocumentRole}
-                    />
-                  ))}
+                <div className="flex flex-col gap-3">
+                  {ROLE_ORDER.map((role) => {
+                    const roleFiles = files.filter((f) => (f.role || 'ClientDocument') === role)
+                    if (roleFiles.length === 0) return null
+                    const meta = ROLE_META[role]
+                    // Compute global exhibit index for files in this group
+                    const globalIndex = (file: FileInfo) => files.indexOf(file)
+                    return (
+                      <div key={role}>
+                        <div className="flex items-center gap-1.5 mb-1 px-1">
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill={meta.hex} opacity={0.5}>
+                            <path d={meta.icon} />
+                          </svg>
+                          <span
+                            className="text-[9px] font-semibold uppercase tracking-[0.12em]"
+                            style={{ color: `${meta.hex}88` }}
+                          >
+                            {meta.plural}
+                          </span>
+                          <span
+                            className="text-[8px] font-bold px-1 rounded-full"
+                            style={{ background: `${meta.hex}15`, color: `${meta.hex}88` }}
+                          >
+                            {roleFiles.length}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          {roleFiles.map((file) => (
+                            <FileRow
+                              key={file.id}
+                              file={file}
+                              index={globalIndex(file)}
+                              onRemove={() => onRemoveFile(file.id)}
+                              onSetRole={onSetDocumentRole}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             </>

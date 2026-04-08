@@ -399,6 +399,17 @@ export default function App(): JSX.Element {
     }
   }
 
+  // ── Stop query ───────────────────────────────────────────────
+  function handleStopQuery(): void {
+    queryAbortRef.current = true
+    setIsQuerying(false)
+    setQueryPhase('')
+    // Mark any streaming message as done
+    setMessages((prev) => prev.map((m) =>
+      m.isStreaming ? { ...m, isStreaming: false, content: m.content || '(Stopped by user)' } : m
+    ))
+  }
+
   // ── Chat ──────────────────────────────────────────────────────
   // NOTE: Do NOT call setLastCitations([]) at query start.
   // Preserve previous citations until new results arrive to avoid flashing the empty context panel.
@@ -494,7 +505,18 @@ export default function App(): JSX.Element {
         }
       }
 
-      const result = await window.api.query(question, recentHistory, currentCaseId ?? undefined, queryCaseContext)
+      // Safety timeout: if the backend hangs, don't block the UI forever.
+      // 180s is generous — the Rust-side timeout is 30-120s depending on mode.
+      const FRONTEND_TIMEOUT_MS = 180_000
+      const result = await Promise.race([
+        window.api.query(question, recentHistory, currentCaseId ?? undefined, queryCaseContext),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timed out. Please try again.')), FRONTEND_TIMEOUT_MS)
+        ),
+      ])
+
+      // If user cancelled while we were waiting, don't overwrite current state
+      if (queryAbortRef.current) return
 
       const finalMessage: ChatMessage = {
         id: streamingId,
@@ -517,6 +539,7 @@ export default function App(): JSX.Element {
       })
       setLastCitations(result.citations)
     } catch (err) {
+      if (queryAbortRef.current) return
       const errorMessage: ChatMessage = {
         id: streamingId,
         role: 'assistant',
@@ -642,6 +665,8 @@ export default function App(): JSX.Element {
   // ── Navigation ────────────────────────────────────────────────
   function handleGoHome(): void {
     queryAbortRef.current = true
+    setIsQuerying(false)
+    setQueryPhase('')
     setChatMode(false)
     setMessages([])
     setCurrentSessionId(uuidv4())
@@ -656,6 +681,8 @@ export default function App(): JSX.Element {
   // ── Sessions ──────────────────────────────────────────────────
   function handleNewChat(): void {
     queryAbortRef.current = true
+    setIsQuerying(false)
+    setQueryPhase('')
     const newId = uuidv4()
     setMessages([])
     setCurrentSessionId(newId)
@@ -670,6 +697,8 @@ export default function App(): JSX.Element {
 
   async function handleLoadSession(session: ChatSession): Promise<void> {
     queryAbortRef.current = true
+    setIsQuerying(false)
+    setQueryPhase('')
     setMessages(session.messages)
     setCurrentSessionId(session.id)
     setSessionCreatedAt(session.createdAt)
@@ -1042,6 +1071,7 @@ export default function App(): JSX.Element {
           sessionName={sessionCustomName ?? makeSessionName(messages.filter((m) => !m.isGreeting))}
           sessionId={currentSessionId}
           onQuery={handleQuery}
+          onStopQuery={handleStopQuery}
           onAddFiles={handleAddFiles}
           onAddFolder={handleAddFolder}
           onLoadPaths={handleLoadPaths}
