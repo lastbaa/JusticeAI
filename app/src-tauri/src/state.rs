@@ -194,6 +194,38 @@ pub struct OllamaStatus {
     pub embed_model_name: String,
 }
 
+// ── BM25 Cache ───────────────────────────────────────────────────────────────
+
+/// Cached BM25 index — rebuilt only when chunks change.
+/// Avoids O(corpus_size) tokenization + doc-frequency computation on every query.
+pub struct CachedBm25 {
+    /// Number of documents when this index was built.
+    pub doc_count: usize,
+    /// Pre-tokenized documents (lowercase words, filtered).
+    pub doc_tokens: Vec<Vec<String>>,
+    /// Document lengths (token count per doc).
+    pub doc_lens: Vec<usize>,
+    /// Average document length.
+    pub avg_dl: f32,
+    /// Document frequency per term.
+    pub doc_freq: HashMap<String, usize>,
+    /// Whether the cache is valid.
+    pub valid: bool,
+}
+
+impl Default for CachedBm25 {
+    fn default() -> Self {
+        Self {
+            doc_count: 0,
+            doc_tokens: Vec::new(),
+            doc_lens: Vec::new(),
+            avg_dl: 1.0,
+            doc_freq: HashMap::new(),
+            valid: false,
+        }
+    }
+}
+
 // ── RAG State ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,6 +262,8 @@ pub struct RagState {
     pub embed_model: String,
     /// Cached llama model — loaded once on first query, reused thereafter.
     pub llama_model: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>>,
+    /// Cached BM25 index — rebuilt only when chunks change.
+    pub bm25_cache: CachedBm25,
 }
 
 impl RagState {
@@ -247,7 +281,14 @@ impl RagState {
             cases: Vec::new(),
             embed_model: String::new(),
             llama_model: Arc::new(Mutex::new(None)),
+            bm25_cache: CachedBm25::default(),
         }
+    }
+
+    /// Mark the BM25 cache as stale. Must be called whenever chunks are
+    /// added, removed, or replaced so the next query rebuilds the index.
+    pub fn invalidate_bm25_cache(&mut self) {
+        self.bm25_cache.valid = false;
     }
 
     fn chunks_path(&self) -> PathBuf {

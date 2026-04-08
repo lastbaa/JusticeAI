@@ -297,6 +297,7 @@ async fn embed_and_retrieve(
         texts: chunks.iter().map(|c| c.text.as_str()).collect(),
         vectors: chunk_vecs.iter().map(|v| v.as_slice()).collect(),
         chunk_indices: chunks.iter().map(|c| c.chunk_index).collect(),
+        bm25_index: None,
     };
 
     let mut ranked = backend.retrieve(query, &query_vec, &corpus, config);
@@ -340,6 +341,7 @@ fn retrieve_with_cached_embeddings(
         texts: chunks.iter().map(|c| c.text.as_str()).collect(),
         vectors: chunk_vecs.iter().map(|v| v.as_slice()).collect(),
         chunk_indices: chunks.iter().map(|c| c.chunk_index).collect(),
+        bm25_index: None,
     };
 
     let mut ranked = backend.retrieve(query, query_vec, &corpus, config);

@@ -514,6 +514,7 @@ pub async fn migrate_garbled_chunks(state: &mut RagState) {
             .map(|e| e.id.clone())
             .collect();
         state.embedded_chunks.retain(|e| !old_ids.contains(&e.id));
+        state.invalidate_bm25_cache();
         for oid in &old_ids { state.chunk_registry.remove(oid); }
         state.doc_chunk_ids.remove(doc_id);
 
@@ -695,17 +696,19 @@ async fn process_file(
 
     // Embed all chunks first without holding the state lock, then insert atomically.
     // This prevents partial-write state if the process is interrupted mid-embedding.
-    let mut new_entries: Vec<(String, EmbeddedChunkEntry)> = Vec::new();
-    for chunk in &chunks {
-        // Quality gate: skip chunks that are mostly private-use-area or control
-        // characters — real encoding garbage from bad PDF fonts.
-        // IMPORTANT: use the same definition as is_printable_pdf_char() in the
-        // parser, NOT is_ascii_punctuation(). The ASCII-only variant incorrectly
-        // rejects em-dashes, smart quotes, §, ©, •, accented letters and other
-        // chars that are perfectly valid in real legal documents, causing the entire
-        // chunk to be silently dropped and leaving the LLM with no context.
-        let total_chars = chunk.text.chars().count();
-        if total_chars > 0 {
+
+    // Quality gate: filter out chunks that are mostly private-use-area or control
+    // characters — real encoding garbage from bad PDF fonts.
+    // IMPORTANT: use the same definition as is_printable_pdf_char() in the
+    // parser, NOT is_ascii_punctuation(). The ASCII-only variant incorrectly
+    // rejects em-dashes, smart quotes, etc. that are perfectly valid.
+    let good_chunks: Vec<&pipeline::TempChunk> = chunks
+        .iter()
+        .filter(|chunk| {
+            let total_chars = chunk.text.chars().count();
+            if total_chars == 0 {
+                return true;
+            }
             let printable = chunk
                 .text
                 .chars()
@@ -723,31 +726,34 @@ async fn process_file(
                     chunk.chunk_index,
                     ratio * 100.0
                 );
-                continue;
+                return false;
             }
-        }
+            true
+        })
+        .collect();
 
-        match embed_text(&chunk.text, false, model_dir).await {
-            Ok(vector) => {
-                let item_id = Uuid::new_v4().to_string();
-                let entry = EmbeddedChunkEntry {
-                    id: item_id.clone(),
-                    vector,
-                    meta: ChunkMetadata {
-                        id: chunk.id.clone(),
-                        document_id: doc_id.clone(),
-                        file_name: file_name.clone(),
-                        file_path: file_path.to_string(),
-                        page_number: chunk.page_number,
-                        chunk_index: chunk.chunk_index,
-                        text: chunk.text.clone(),
-                        token_count: chunk.token_count,
-                    },
-                };
-                new_entries.push((item_id, entry));
-            }
-            Err(e) => log::error!("Embed error for chunk {}: {}", chunk.chunk_index, e),
-        }
+    // Batch-embed all surviving chunks in a single call for efficiency.
+    let texts: Vec<&str> = good_chunks.iter().map(|c| c.text.as_str()).collect();
+    let embeddings = pipeline::embed_texts_batch(&texts, false, model_dir).await?;
+
+    let mut new_entries: Vec<(String, EmbeddedChunkEntry)> = Vec::new();
+    for (chunk, vector) in good_chunks.iter().zip(embeddings) {
+        let item_id = Uuid::new_v4().to_string();
+        let entry = EmbeddedChunkEntry {
+            id: item_id.clone(),
+            vector,
+            meta: ChunkMetadata {
+                id: chunk.id.clone(),
+                document_id: doc_id.clone(),
+                file_name: file_name.clone(),
+                file_path: file_path.to_string(),
+                page_number: chunk.page_number,
+                chunk_index: chunk.chunk_index,
+                text: chunk.text.clone(),
+                token_count: chunk.token_count,
+            },
+        };
+        new_entries.push((item_id, entry));
     }
 
     let item_ids: Vec<String> = new_entries.iter().map(|(id, _)| id.clone()).collect();
@@ -770,6 +776,7 @@ async fn process_file(
             s.chunk_registry.insert(item_id.clone(), entry.meta.clone());
             s.embedded_chunks.push(entry);
         }
+        s.invalidate_bm25_cache();
         s.doc_chunk_ids.insert(doc_id.clone(), item_ids);
         s.file_registry.insert(doc_id.clone(), file_info.clone());
         s.save_chunks().await;
@@ -783,6 +790,88 @@ async fn process_file(
 // chunk_document, is_section_header, split_sentences, expand_keywords, mmr_select
 // are all defined in pipeline.rs and re-exported via the use statement at the top.
 
+// ── Context Assembly Helpers ───────────────────────────────────────────────────
+
+/// Allocate context budget proportionally to chunk scores.
+/// Higher-scored chunks get more characters, lower-scored get fewer.
+fn allocate_chunk_budgets(
+    scores: &[f32],
+    total_budget: usize,
+    min_per_chunk: usize, // minimum 200 chars per chunk
+) -> Vec<usize> {
+    if scores.is_empty() {
+        return vec![];
+    }
+
+    let total_score: f64 = scores.iter().map(|s| *s as f64).sum();
+    if total_score <= 0.0 {
+        // Equal allocation
+        let per = total_budget / scores.len();
+        return vec![per.max(min_per_chunk); scores.len()];
+    }
+
+    let mut budgets: Vec<usize> = scores
+        .iter()
+        .map(|s| {
+            let ratio = *s as f64 / total_score;
+            let budget = (ratio * total_budget as f64) as usize;
+            budget.max(min_per_chunk)
+        })
+        .collect();
+
+    // Adjust to not exceed total — remove from lowest-scored chunks first
+    let sum: usize = budgets.iter().sum();
+    if sum > total_budget {
+        let mut excess = sum - total_budget;
+        for i in (0..budgets.len()).rev() {
+            if excess == 0 {
+                break;
+            }
+            let reduction = excess.min(budgets[i].saturating_sub(min_per_chunk));
+            budgets[i] -= reduction;
+            excess -= reduction;
+        }
+    }
+
+    budgets
+}
+
+/// Build a map of chunk neighbors in one pass over the registry.
+/// Key: (file_path, chunk_index) → registry index.
+/// Also builds a page map: (file_path) → sorted list of chunk_indices on that path.
+fn build_neighbor_map(
+    chunks: &[EmbeddedChunkEntry],
+) -> std::collections::HashMap<(String, usize), usize> {
+    let mut map: std::collections::HashMap<(String, usize), usize> =
+        std::collections::HashMap::with_capacity(chunks.len());
+
+    for (idx, chunk) in chunks.iter().enumerate() {
+        let key = (chunk.meta.file_path.clone(), chunk.meta.chunk_index);
+        map.insert(key, idx);
+    }
+
+    map
+}
+
+/// Truncate text to a budget without cutting mid-word or mid-sentence.
+/// Prefers sentence boundaries (`. `), falls back to word boundaries.
+fn truncate_to_budget(text: &str, budget: usize) -> String {
+    if text.len() <= budget {
+        return text.to_string();
+    }
+
+    let truncated = &text[..budget];
+    // Find last sentence boundary
+    if let Some(pos) = truncated.rfind(". ") {
+        return format!("{}.", &truncated[..pos]);
+    }
+    // Find last word boundary
+    if let Some(pos) = truncated.rfind(' ') {
+        return format!("{}...", &truncated[..pos]);
+    }
+    format!("{}...", truncated)
+}
+
 #[tauri::command]
 pub async fn query(
     question: String,
@@ -792,7 +881,7 @@ pub async fn query(
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
     window: tauri::Window,
 ) -> Result<QueryResult, String> {
-    let (settings, model_dir, model_cache, resolved_jurisdiction) = {
+    let (settings, model_dir, model_cache, resolved_jurisdiction, has_chunks) = {
         let s = state.lock().await;
 
         // Resolve jurisdiction: case override > file consensus > global default > None
@@ -819,21 +908,20 @@ pub async fn query(
             s.settings.jurisdiction.clone()
         };
 
+        let has_chunks = !s.embedded_chunks.is_empty();
+
         (
             s.settings.clone(),
             s.model_dir.clone(),
             Arc::clone(&s.llama_model),
             jurisdiction,
+            has_chunks,
         )
     };
 
     // ── Layer 1: Query intent classification ─────────────────────────────────
     // Detect greetings, chitchat, and off-topic queries BEFORE any retrieval.
     // Route them to the general chat prompt to prevent hallucination.
-    let has_chunks = {
-        let s = state.lock().await;
-        !s.embedded_chunks.is_empty()
-    };
     if has_chunks && is_non_document_query(&question) {
         log::info!("Non-document query detected ('{}'); routing to general chat.", &question);
 
@@ -900,8 +988,10 @@ pub async fn query(
     let saved_system_prompt_override = inference_params.system_prompt_override.clone();
     let saved_timeout_secs = inference_params.timeout_secs;
     let candidate_k = retrieval_params.candidate_pool_k;
-    let mut results = {
-        let s = state.lock().await;
+
+    // ── Single consolidated state lock for retrieval + cosine check + form injection + neighbor map ──
+    let (mut results, best_cosine, form_chunks_to_inject, neighbor_context_parts) = {
+        let mut s = state.lock().await;
 
         // When case_id is set, filter to only chunks belonging to that case's files.
         // Build a mapping from filtered index → global index so we can map results back.
@@ -993,10 +1083,36 @@ pub async fn query(
 
         // Use the pluggable retrieval backend.
         let backend = pipeline::default_backend();
+
+        // Eagerly collect corpus data from filtered_chunks to release the immutable
+        // borrow on `s.embedded_chunks` before we need `&mut s.bm25_cache`.
+        let corpus_texts: Vec<String> = filtered_chunks.iter().map(|e| e.meta.text.clone()).collect();
+        let corpus_vectors: Vec<Vec<f32>> = filtered_chunks.iter().map(|e| e.vector.clone()).collect();
+        let corpus_chunk_indices: Vec<usize> = filtered_chunks.iter().map(|e| e.meta.chunk_index).collect();
+        let filtered_count = filtered_chunks.len();
+        // Drop the immutable borrow on s.embedded_chunks
+        drop(filtered_chunks);
+
+        // Build or reuse the BM25 index from cache (full corpus only; case-filtered
+        // queries build a fresh index since the corpus subset differs).
+        let text_refs: Vec<&str> = corpus_texts.iter().map(|t| t.as_str()).collect();
+        let cached_bm25 = if case_id.is_none() {
+            if !s.bm25_cache.valid || s.bm25_cache.doc_count != filtered_count {
+                let fresh = pipeline::Bm25Index::build(&text_refs);
+                fresh.write_to_cache(&mut s.bm25_cache);
+                Some(pipeline::Bm25Index::from_cache(&s.bm25_cache))
+            } else {
+                Some(pipeline::Bm25Index::from_cache(&s.bm25_cache))
+            }
+        } else {
+            None
+        };
+        let vector_refs: Vec<&[f32]> = corpus_vectors.iter().map(|v| v.as_slice()).collect();
         let corpus = pipeline::RetrievalCorpus {
-            texts: filtered_chunks.iter().map(|e| e.meta.text.as_str()).collect(),
-            vectors: filtered_chunks.iter().map(|e| e.vector.as_slice()).collect(),
-            chunk_indices: filtered_chunks.iter().map(|e| e.meta.chunk_index).collect(),
+            texts: text_refs,
+            vectors: vector_refs,
+            chunk_indices: corpus_chunk_indices,
+            bm25_index: cached_bm25,
         };
         let config = pipeline::RetrievalConfig {
             top_k: retrieval_params.top_k,
@@ -1008,14 +1124,74 @@ pub async fn query(
         let ranked = backend.retrieve(&question, &query_vec, &corpus, &config);
 
         // Map ScoredResult indices back via global_indices to (score, ChunkMetadata).
-        ranked
+        let results: Vec<(f32, ChunkMetadata)> = ranked
             .into_iter()
             .map(|r| {
                 let global_idx = global_indices[r.chunk_index];
                 (r.score, s.embedded_chunks[global_idx].meta.clone())
             })
-            .collect::<Vec<(f32, ChunkMetadata)>>()
+            .collect();
+
+        // ── Cosine floor check (inside same lock) ────────────────────────────
+        let best_cosine = if results.is_empty() {
+            0.0f32
+        } else {
+            let mut best = 0.0f32;
+            for (_, meta) in &results {
+                if let Some(entry) = s.embedded_chunks.iter().find(|e| e.meta.id == meta.id) {
+                    let cos = crate::state::RagState::cosine_similarity(&query_vec, &entry.vector);
+                    if cos > best { best = cos; }
+                }
+            }
+            best
+        };
+
+        // ── Form data injection (inside same lock) ───────────────────────────
+        let form_chunks: Vec<(f32, ChunkMetadata)> = s
+            .embedded_chunks
+            .iter()
+            .filter(|e| e.meta.text.starts_with("FILLED FORM DATA"))
+            .filter(|e| !results.iter().any(|(_, m)| m.id == e.meta.id))
+            .take(2)
+            .map(|e| (0.5, e.meta.clone()))
+            .collect();
+
+        // ── Single-pass neighbor map (inside same lock) ──────────────────────
+        // Build O(1) lookup map, then find neighbors without scanning the registry.
+        let neighbor_parts = if settings.inference_mode == crate::state::InferenceMode::Quick {
+            Vec::new()
+        } else {
+            let selected_ids: std::collections::HashSet<&str> =
+                results.iter().map(|(_, m)| m.id.as_str()).collect();
+            let neighbor_map = build_neighbor_map(&s.embedded_chunks);
+            let mut parts: Vec<String> = Vec::new();
+            let mut seen_neighbors: std::collections::HashSet<(String, usize)> =
+                std::collections::HashSet::new();
+            for (_, meta) in &results {
+                for delta in [-1i64, 1i64] {
+                    let nbr_idx = meta.chunk_index as i64 + delta;
+                    if nbr_idx < 0 {
+                        continue;
+                    }
+                    let key = (meta.file_path.clone(), nbr_idx as usize);
+                    if seen_neighbors.contains(&key) {
+                        continue;
+                    }
+                    if let Some(&global_idx) = neighbor_map.get(&key) {
+                        let nbr = &s.embedded_chunks[global_idx];
+                        if !selected_ids.contains(nbr.meta.id.as_str()) {
+                            parts.push(nbr.meta.text.clone());
+                            seen_neighbors.insert(key);
+                        }
+                    }
+                }
+            }
+            parts
+        };
+
+        (results, best_cosine, form_chunks, neighbor_parts)
     };
+    // ── State lock released ──────────────────────────────────────────────────
 
     // ── Layer 2: Cosine floor check ───────────────────────────────────────────
     // If retrieval returned nothing (all below threshold) OR the raw cosine
@@ -1024,29 +1200,14 @@ pub async fn query(
     let route_to_general = if results.is_empty() {
         log::info!("Retrieval returned no results above threshold; routing to general chat.");
         true
+    } else if best_cosine < COSINE_FLOOR {
+        log::info!(
+            "Best cosine similarity ({:.3}) below floor ({:.2}); routing to general chat.",
+            best_cosine, COSINE_FLOOR
+        );
+        true
     } else {
-        // Check raw cosine of best chunk against the query
-        let best_cosine = {
-            let s = state.lock().await;
-            let mut best = 0.0f32;
-            for (_, meta) in &results {
-                // Find the embedded chunk to get its vector
-                if let Some(entry) = s.embedded_chunks.iter().find(|e| e.meta.id == meta.id) {
-                    let cos = crate::state::RagState::cosine_similarity(&query_vec, &entry.vector);
-                    if cos > best { best = cos; }
-                }
-            }
-            best
-        };
-        if best_cosine < COSINE_FLOOR {
-            log::info!(
-                "Best cosine similarity ({:.3}) below floor ({:.2}); routing to general chat.",
-                best_cosine, COSINE_FLOOR
-            );
-            true
-        } else {
-            false
-        }
+        false
     };
 
     if route_to_general {
@@ -1072,74 +1233,11 @@ pub async fn query(
     }
 
     // Inject filled form data chunks AFTER cosine floor check passes.
-    // These are tiny and contain actual filled values that help ground the answer.
-    {
-        let s = state.lock().await;
-        let form_chunks: Vec<(f32, ChunkMetadata)> = s
-            .embedded_chunks
-            .iter()
-            .filter(|e| e.meta.text.starts_with("FILLED FORM DATA"))
-            .filter(|e| !results.iter().any(|(_, m)| m.id == e.meta.id))
-            .take(2)
-            .map(|e| (0.5, e.meta.clone()))
-            .collect();
-        for fc in form_chunks {
-            results.insert(1.min(results.len()), fc);
-        }
+    for fc in form_chunks_to_inject {
+        results.insert(1.min(results.len()), fc);
     }
 
-    let context_parts: Vec<String> = results
-        .iter()
-        .enumerate()
-        .map(|(i, (_, meta))| {
-            let section = extract_section_header(&meta.text);
-            let source_label = match section {
-                Some(ref hdr) => format!(
-                    "[Source: {}, p. {}, Section: {}]",
-                    meta.file_name, meta.page_number, hdr
-                ),
-                None => format!(
-                    "[Source: {}, p. {}]",
-                    meta.file_name, meta.page_number
-                ),
-            };
-            format!(
-                "SOURCE {} — {}\n{}\n---",
-                i + 1,
-                source_label,
-                meta.text
-            )
-        })
-        .collect();
-
-    // Neighbor chunk expansion: include adjacent chunks (same file + page) for surrounding context.
-    // Skip for Quick mode — tight context budget makes neighbors wasteful.
-    let selected_ids: std::collections::HashSet<&str> =
-        results.iter().map(|(_, m)| m.id.as_str()).collect();
-    let neighbor_context_parts = if settings.inference_mode == crate::state::InferenceMode::Quick {
-        Vec::new()
-    } else {
-        let s = state.lock().await;
-        let mut parts: Vec<String> = Vec::new();
-        for (_, meta) in &results {
-            for delta in [-1i64, 1i64] {
-                let nbr_idx = meta.chunk_index as i64 + delta;
-                if nbr_idx < 0 {
-                    continue;
-                }
-                if let Some(nbr) = s.chunk_registry.values().find(|c| {
-                    c.file_path == meta.file_path
-                        && c.chunk_index == nbr_idx as usize
-                        && !selected_ids.contains(c.id.as_str())
-                }) {
-                    parts.push(nbr.text.clone());
-                }
-            }
-        }
-        parts
-    };
-
-    // Assemble context with per-chunk budget so no chunk is cut mid-sentence.
+    // ── Priority-weighted context assembly ────────────────────────────────────
     // Saul-7B has a 4096-token context. Budget is mode-dependent (see RetrievalModeParams).
     // When jurisdiction is active, reduce budget to account for extra prompt tokens.
     let max_context_chars: usize = if resolved_jurisdiction.is_some() {
@@ -1160,15 +1258,59 @@ pub async fn query(
         }
     }
 
-    // Add primary context chunks (each stays complete)
+    // Calculate remaining budget after case context prefix
+    let remaining_budget = max_context_chars.saturating_sub(context.len());
+
+    // Reserve ~20% of remaining budget for neighbor expansion (non-Quick modes)
+    let neighbor_budget = if settings.inference_mode == crate::state::InferenceMode::Quick {
+        0
+    } else {
+        remaining_budget / 5
+    };
+    let primary_budget = remaining_budget.saturating_sub(neighbor_budget);
+
+    // Allocate primary budget proportionally to chunk scores
+    let scores: Vec<f32> = results.iter().map(|(s, _)| *s).collect();
+    let chunk_budgets = allocate_chunk_budgets(&scores, primary_budget, 200);
+
+    // Build context parts with per-chunk budget-aware truncation
+    let context_parts: Vec<String> = results
+        .iter()
+        .enumerate()
+        .map(|(i, (_, meta))| {
+            let section = extract_section_header(&meta.text);
+            let source_label = match section {
+                Some(ref hdr) => format!(
+                    "[Source: {}, p. {}, Section: {}]",
+                    meta.file_name, meta.page_number, hdr
+                ),
+                None => format!(
+                    "[Source: {}, p. {}]",
+                    meta.file_name, meta.page_number
+                ),
+            };
+            let header = format!("SOURCE {} — {}\n", i + 1, source_label);
+            let footer = "\n---";
+            // Budget for this chunk's text = allocated budget minus header/footer overhead
+            let overhead = header.len() + footer.len();
+            let text_budget = chunk_budgets.get(i).copied().unwrap_or(200).saturating_sub(overhead);
+            let truncated_text = truncate_to_budget(&meta.text, text_budget);
+            format!("{}{}{}", header, truncated_text, footer)
+        })
+        .collect();
+
+    // Add primary context chunks with budget enforcement
     for part in &context_parts {
         let addition = if context.is_empty() { part.len() } else { part.len() + separator.len() };
-        if context.len() + addition > max_context_chars {
-            log::warn!(
-                "Context budget exhausted at {} chars; skipping remaining chunks.",
-                context.len()
-            );
-            break;
+        if context.len() + addition > context.len() + primary_budget.saturating_sub(context.len()) + separator.len() {
+            // Double-check against absolute max
+            if context.len() + addition > max_context_chars {
+                log::warn!(
+                    "Context budget exhausted at {} chars; skipping remaining chunks.",
+                    context.len()
+                );
+                break;
+            }
         }
         if !context.is_empty() {
             context.push_str(separator);
@@ -1208,6 +1350,7 @@ pub async fn query(
         .emit("query-status", serde_json::json!({"phase": "generating"}))
         .ok();
     let window_clone = window.clone();
+    let model_cache_for_retry = Arc::clone(&model_cache);
     let answer: String = pipeline::ask_saul(
         &question,
         &context,
@@ -1302,10 +1445,8 @@ pub async fn query(
             timeout_secs: saved_timeout_secs,
         };
 
-        let model_cache_retry = {
-            let s = state.lock().await;
-            Arc::clone(&s.llama_model)
-        };
+        // Reuse the model_cache Arc cloned before the first ask_saul call.
+        let model_cache_retry = model_cache_for_retry;
         let window_retry = window.clone();
         let retry_answer = pipeline::ask_saul(
             &retry_question,
@@ -1536,6 +1677,7 @@ pub async fn remove_file(
         s.chunk_registry.remove(id);
     }
     s.embedded_chunks.retain(|e| !item_ids.contains(&e.id));
+    s.invalidate_bm25_cache();
     s.doc_chunk_ids.remove(&file_id);
     s.file_registry.remove(&file_id);
     s.save_chunks().await;
@@ -1709,6 +1851,7 @@ pub async fn delete_case(
             s.doc_chunk_ids.remove(file_id);
             s.file_registry.remove(file_id);
         }
+        s.invalidate_bm25_cache();
         s.save_chunks().await;
     } else {
         // Orphan sessions and files belonging to this case

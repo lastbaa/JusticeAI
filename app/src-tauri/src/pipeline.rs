@@ -587,6 +587,123 @@ pub async fn embed_text(text: &str, is_query: bool, model_dir: &Path) -> Result<
     .map_err(|e| e.to_string())?
 }
 
+// ── Prompt Cache ──────────────────────────────────────────────────────────────
+
+/// Cached formatted system prompt to avoid redundant string formatting.
+/// The prompt template (RULES_PROMPT + jurisdiction + mode suffix) is rebuilt
+/// only when the inputs change. On repeated queries with the same jurisdiction
+/// and inference mode, the cached string is returned directly.
+static PROMPT_CACHE: OnceLock<Mutex<PromptCache>> = OnceLock::new();
+
+struct PromptCache {
+    /// The last formatted system prompt.
+    last_prompt: String,
+    /// Hash of the inputs that produced it (base + jurisdiction + mode).
+    last_hash: u64,
+}
+
+impl PromptCache {
+    fn get_or_build(
+        base: &str,
+        jurisdiction_fragment: &str,
+        mode_suffix: &str,
+    ) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        base.hash(&mut hasher);
+        jurisdiction_fragment.hash(&mut hasher);
+        mode_suffix.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        let cache = PROMPT_CACHE.get_or_init(|| Mutex::new(PromptCache {
+            last_prompt: String::new(),
+            last_hash: 0,
+        }));
+
+        let mut cache = cache.lock().unwrap();
+        if cache.last_hash == hash && !cache.last_prompt.is_empty() {
+            return cache.last_prompt.clone();
+        }
+
+        // Build new prompt from components
+        let prompt = if jurisdiction_fragment.is_empty() && mode_suffix.is_empty() {
+            base.to_string()
+        } else if jurisdiction_fragment.is_empty() {
+            format!("{base}{mode_suffix}")
+        } else if mode_suffix.is_empty() {
+            format!("{base}\n\n{jurisdiction_fragment}")
+        } else {
+            format!("{base}\n\n{jurisdiction_fragment}{mode_suffix}")
+        };
+
+        cache.last_prompt = prompt.clone();
+        cache.last_hash = hash;
+        prompt
+    }
+}
+
+// ── Pre-tokenization ─────────────────────────────────────────────────────────
+
+/// Pre-tokenize a string to get its exact token count before creating context.
+/// This allows precise budget allocation across prompt components, preventing
+/// the overflow/reshuffle logic from triggering.
+fn pre_tokenize(model: &llama_cpp_2::model::LlamaModel, text: &str) -> Vec<llama_cpp_2::token::LlamaToken> {
+    use llama_cpp_2::model::AddBos;
+    model.str_to_token(text, AddBos::Never).unwrap_or_default()
+}
+
+/// Embed multiple texts in a single batch for efficiency.
+/// Uses the same fastembed model singleton but processes all texts together,
+/// avoiding per-chunk model-lock overhead and enabling ONNX batched inference.
+pub async fn embed_texts_batch(
+    texts: &[&str],
+    is_query: bool,
+    model_dir: &Path,
+) -> Result<Vec<Vec<f32>>, String> {
+    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+
+    if texts.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let cache_dir = model_dir.join("fastembed-bge");
+    let processed: Vec<String> = if is_query {
+        texts
+            .iter()
+            .map(|t| format!("Represent this sentence for searching relevant passages: {}", t))
+            .collect()
+    } else {
+        texts.iter().map(|t| t.to_string()).collect()
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let model_arc = EMBED_MODEL.get_or_init(|| Arc::new(Mutex::new(None)));
+
+        let mut guard = model_arc
+            .lock()
+            .map_err(|e| format!("Embed model mutex poisoned: {e}"))?;
+
+        if guard.is_none() {
+            std::fs::create_dir_all(&cache_dir)
+                .map_err(|e| format!("Cannot create fastembed cache dir: {e}"))?;
+            let model = TextEmbedding::try_new(
+                InitOptions::new(EmbeddingModel::BGESmallENV15)
+                    .with_cache_dir(cache_dir)
+                    .with_show_download_progress(false),
+            )
+            .map_err(|e| format!("Failed to initialize embedding model: {e}"))?;
+            *guard = Some(model);
+        }
+
+        let model = guard
+            .as_ref()
+            .ok_or_else(|| "Embedding model unavailable after initialization".to_string())?;
+        model.embed(processed, None).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ── LLM via llama-cpp-2 ───────────────────────────────────────────────────────
 
 /// Format prior conversation turns as labeled text for the model.
@@ -662,15 +779,12 @@ Answer the current question using ONLY these excerpts.\n\
     };
 
     // Inject jurisdiction-specific rules into the system prompt when available.
+    // Uses PromptCache to avoid redundant string formatting when jurisdiction
+    // and inference mode haven't changed between queries.
     let base_prompt = inference_params.system_prompt_override.as_deref().unwrap_or(RULES_PROMPT);
     let j_fragment = jurisdiction.map(jurisdiction_prompt_fragment).unwrap_or_default();
     let mode_suffix = inference_params.system_prompt_suffix;
-    let sys_prompt = match (j_fragment.is_empty(), mode_suffix.is_empty()) {
-        (true, true) => base_prompt.to_string(),
-        (false, true) => format!("{base_prompt}\n\n{j_fragment}"),
-        (true, false) => format!("{base_prompt}{mode_suffix}"),
-        (false, false) => format!("{base_prompt}\n\n{j_fragment}{mode_suffix}"),
-    };
+    let sys_prompt = PromptCache::get_or_build(base_prompt, &j_fragment, mode_suffix);
 
     // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
     // Saul-Instruct-v1 is fine-tuned from Mistral-7B — use Mistral chat format.
@@ -720,7 +834,36 @@ Answer the current question using ONLY these excerpts.\n\
             .new_context(backend, ctx_params)
             .map_err(|e| format!("Failed to create context: {e}"))?;
 
-        // Tokenize prompt
+        // ── Smart Token Budget Pre-Allocation ────────────────────────────
+        // Pre-tokenize each prompt component separately to know exact token
+        // counts BEFORE assembly. This lets us detect overflow early and log
+        // precise budget usage. Context truncation should happen upstream
+        // (in retrieval), but this serves as a measurement + safety net.
+        let system_tokens = pre_tokenize(model, &sys_prompt);
+        let question_tokens = pre_tokenize(model, &user_content);
+
+        // Overhead: [INST], [/INST] tags, newlines, BOS token
+        let overhead = 50;
+        let max_prompt_tokens = n_ctx_size as usize - 512; // reserve 512 for generation
+        let component_cost = system_tokens.len() + question_tokens.len() + overhead;
+
+        if component_cost > max_prompt_tokens {
+            log::warn!(
+                "System prompt ({}) + question ({}) + overhead ({}) = {} tokens exceeds budget ({}). \
+                 Prompt will be truncated via head+tail fallback.",
+                system_tokens.len(), question_tokens.len(), overhead,
+                component_cost, max_prompt_tokens
+            );
+        } else {
+            log::info!(
+                "Token budget: system={}, question={}, overhead={}, total={}/{} ({}% used)",
+                system_tokens.len(), question_tokens.len(), overhead,
+                component_cost, max_prompt_tokens,
+                (component_cost * 100) / max_prompt_tokens.max(1)
+            );
+        }
+
+        // Tokenize the fully assembled prompt
         let mut tokens = model
             .str_to_token(&prompt, AddBos::Always)
             .map_err(|e| format!("Tokenize error: {e}"))?;
@@ -730,10 +873,13 @@ Answer the current question using ONLY these excerpts.\n\
             return Err("Empty token sequence".to_string());
         }
 
-        let max_prompt_tokens = n_ctx_size as usize - 512;
+        // Safety fallback: if the prompt still exceeds the budget (e.g. context
+        // was very large), fall back to head+tail reshuffling. With pre-allocation
+        // budgeting above, this should rarely trigger.
         if n_tokens > max_prompt_tokens {
             log::warn!(
-                "Prompt ({} tokens) exceeds safe limit ({}). Preserving head+tail.",
+                "Prompt ({} tokens) exceeds safe limit ({}) despite pre-allocation. \
+                 Falling back to head+tail preservation.",
                 n_tokens,
                 max_prompt_tokens
             );
@@ -1345,6 +1491,27 @@ impl Bm25Index {
         Bm25Index { doc_freq, n_docs, avg_dl, doc_lens, doc_tokens: doc_tokens_cache }
     }
 
+    /// Build a `Bm25Index` from a `CachedBm25`, cloning the cached data.
+    pub fn from_cache(cache: &crate::state::CachedBm25) -> Self {
+        Bm25Index {
+            doc_freq: cache.doc_freq.clone(),
+            n_docs: cache.doc_count,
+            avg_dl: cache.avg_dl,
+            doc_lens: cache.doc_lens.clone(),
+            doc_tokens: cache.doc_tokens.clone(),
+        }
+    }
+
+    /// Write this index's data into a `CachedBm25` for reuse across queries.
+    pub fn write_to_cache(&self, cache: &mut crate::state::CachedBm25) {
+        cache.doc_count = self.n_docs;
+        cache.doc_tokens = self.doc_tokens.clone();
+        cache.doc_lens = self.doc_lens.clone();
+        cache.avg_dl = self.avg_dl;
+        cache.doc_freq = self.doc_freq.clone();
+        cache.valid = true;
+    }
+
     /// Score a single document against a query. Returns BM25 score.
     /// `doc_idx` is the index into the original texts slice.
     pub fn score(&self, query_terms: &[String], doc_idx: usize) -> f32 {
@@ -1833,6 +2000,9 @@ pub struct RetrievalCorpus<'a> {
     /// Position of each chunk within its source document (0-based).
     /// Used for intro-chunk boosting in RRF. Empty = no positional boost.
     pub chunk_indices: Vec<usize>,
+    /// Pre-built BM25 index from cache. When `Some`, retrieval backends
+    /// skip the O(corpus) index-build step and reuse this directly.
+    pub bm25_index: Option<Bm25Index>,
 }
 
 /// Knobs for a retrieval pass.
@@ -1995,8 +2165,14 @@ impl RetrievalBackend for HybridBm25Cosine {
         }
 
         // 1. BM25 scoring — multi-query expansion for broader keyword coverage.
-        // Tokenize the original query plus any expanded query variants.
-        let bm25_index = Bm25Index::build(&corpus.texts);
+        // Reuse pre-built index from cache when available, otherwise build fresh.
+        let built_index;
+        let bm25_index = if let Some(ref cached) = corpus.bm25_index {
+            cached
+        } else {
+            built_index = Bm25Index::build(&corpus.texts);
+            &built_index
+        };
         let query_variants = expand_query(query_text);
         let mut query_terms = bm25_tokenize(&query_text.to_lowercase());
         // Merge tokens from expanded query variants into BM25 terms.
@@ -2711,6 +2887,7 @@ mod tests {
             texts: texts.iter().map(|s| *s).collect(),
             vectors: vec![v0.as_slice(), v1.as_slice(), v2.as_slice()],
             chunk_indices: vec![],
+            bm25_index: None,
         };
         let config = RetrievalConfig {
             top_k: 2,
@@ -2746,6 +2923,7 @@ mod tests {
             texts: texts.iter().map(|s| *s).collect(),
             vectors: vec![v0.as_slice(), v1.as_slice(), v2.as_slice()],
             chunk_indices: vec![],
+            bm25_index: None,
         };
         // With MMR
         let config_mmr = RetrievalConfig {

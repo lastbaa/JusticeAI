@@ -83,6 +83,7 @@ async fn retrieve_top_chunks(
         texts: chunks.iter().map(|c| c.text.as_str()).collect(),
         vectors: chunk_vecs.iter().map(|v| v.as_slice()).collect(),
         chunk_indices: chunks.iter().map(|c| c.chunk_index).collect(),
+        bm25_index: None,
     };
     let config = RetrievalConfig {
         top_k,

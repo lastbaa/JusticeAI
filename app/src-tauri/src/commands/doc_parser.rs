@@ -76,62 +76,173 @@ pub fn parse_by_extension(path: &str, ext: &str, model_dir: &std::path::Path) ->
     }
 }
 
+/// Score the quality of extracted text to decide if OCR fallback is needed.
+/// Returns a value between 0.0 (garbage) and 1.0 (clean text).
+fn text_quality_score(text: &str) -> f64 {
+    if text.is_empty() {
+        return 0.0;
+    }
+
+    let total_chars = text.len() as f64;
+    let printable = text
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace() || c.is_ascii_punctuation())
+        .count() as f64;
+
+    let ratio = printable / total_chars;
+
+    // Also check for reasonable word patterns
+    let words = text.split_whitespace().count();
+    let avg_word_len = if words > 0 {
+        total_chars / words as f64
+    } else {
+        0.0
+    };
+
+    // Good text: >90% printable, 3-15 avg word length
+    let word_score = if avg_word_len > 3.0 && avg_word_len < 15.0 {
+        1.0
+    } else {
+        0.5
+    };
+
+    ratio * word_score
+}
+
+/// Filter out form fields whose values already appear in the page text.
+fn deduplicate_form_fields(
+    fields: &[(String, String)],
+    page_text: &str,
+) -> Vec<(String, String)> {
+    fields
+        .iter()
+        .filter(|(_, value)| {
+            let trimmed = value.trim();
+            // Keep if value is non-trivial and NOT already in page text
+            trimmed.len() > 1 && !page_text.contains(trimmed)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Detect and format table-like content in extracted text.
+/// Looks for tab-delimited or consistent-spacing patterns.
+fn format_tables(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut result = Vec::new();
+
+    for line in &lines {
+        // Detect tab-delimited lines (common in PDF table extraction)
+        if line.matches('\t').count() >= 2 {
+            // Format as pipe-delimited table row
+            let cells: Vec<&str> = line.split('\t').map(|s| s.trim()).collect();
+            result.push(format!("| {} |", cells.join(" | ")));
+        } else {
+            result.push(line.to_string());
+        }
+    }
+
+    result.join("\n")
+}
+
 /// Parse a PDF file into pages of text.
 ///
 /// Pipeline:
-/// 1. pdf-extract for font-decoded text (handles ToUnicode CMaps correctly).
-/// 2. If the PDF has Form XObjects (filled forms), use lopdf to get XObject
+/// 1. Race pdf_oxide and pdf-extract in parallel threads.
+/// 2. Accept whichever returns first with good quality results.
+/// 3. If the PDF has Form XObjects (filled forms), use lopdf to get XObject
 ///    coordinates and re-interleave filled values next to their template labels.
-/// 3. Fall back to plain lopdf extract_text as a last resort.
+/// 4. Fall back to plain lopdf extract_text as a last resort.
 pub fn parse_pdf(path: &str) -> Result<Vec<DocumentPage>, String> {
-    // --- Attempt 0: pdf_oxide (best font encoding support, handles Identity-H/CIDFonts) ---
-    if let Some(mut pages) = try_pdf_oxide(path) {
-        if !pages.is_empty() {
-            // Still use lopdf for AcroForm and form field re-interleaving
-            if let Ok(doc) = lopdf::Document::load(path) {
-                let improved = reinterleave_form_fields(&doc, &pages);
-                if !improved.is_empty() {
-                    pages = improved;
-                }
-                append_acroform_values(&doc, &mut pages);
-            }
-            return Ok(pages);
-        }
+    let mut pages = parse_pdf_parallel(path)?;
+
+    // Post-process: format table-like content
+    for page in &mut pages {
+        page.text = format_tables(&page.text);
     }
 
-    // --- Attempt 1: pdf-extract (with optional coordinate re-interleave) ---
-    if let Ok(raw) = pdf_extract::extract_text(path) {
-        let mut pages = pdf_extract_pages(&raw);
-        if !pages.is_empty() {
-            if let Ok(doc) = lopdf::Document::load(path) {
-                // If pdf-extract collapsed multiple pages into one (no form-feeds),
-                // try lopdf per-page extraction to get proper page boundaries.
-                let lopdf_page_count = doc.get_pages().len();
-                if pages.len() == 1 && lopdf_page_count > 1 {
-                    let lopdf_pages = extract_lopdf_pages(&doc);
-                    let has_content = lopdf_pages.iter().any(|p| !p.text.trim().is_empty());
-                    if lopdf_pages.len() > 1 && has_content {
-                        pages = lopdf_pages;
+    Ok(pages)
+}
+
+/// Try pdf_oxide and pdf-extract in parallel, take whichever succeeds first
+/// with good results. Falls back to lopdf synchronously.
+fn parse_pdf_parallel(path: &str) -> Result<Vec<DocumentPage>, String> {
+    use std::thread;
+
+    let path1 = path.to_string();
+    let path2 = path.to_string();
+
+    // Launch both parsers in threads
+    let handle1 = thread::spawn(move || try_pdf_oxide(&path1));
+    let handle2 = thread::spawn(move || pdf_extract::extract_text(&path2));
+
+    // Try pdf_oxide first (usually better)
+    if let Ok(result) = handle1.join() {
+        if let Some(ref pages) = result {
+            if !pages.is_empty() && pages.iter().any(|p| !p.text.trim().is_empty()) {
+                // Quality check using text_quality_score
+                let quality = pages
+                    .iter()
+                    .map(|p| text_quality_score(&p.text))
+                    .sum::<f64>()
+                    / pages.len().max(1) as f64;
+
+                if quality >= 0.5 {
+                    let mut pages = result.unwrap();
+                    // Still use lopdf for AcroForm and form field re-interleaving
+                    if let Ok(doc) = lopdf::Document::load(path) {
+                        let improved = reinterleave_form_fields(&doc, &pages);
+                        if !improved.is_empty() {
+                            pages = improved;
+                        }
+                        append_acroform_values(&doc, &mut pages);
                     }
+                    return Ok(pages);
+                } else {
+                    log::warn!("pdf_oxide quality score {quality:.2} < 0.5, trying alternatives");
                 }
-
-                // Try to improve form-field extraction by re-interleaving with coordinates
-                let improved = reinterleave_form_fields(&doc, &pages);
-                if !improved.is_empty() {
-                    pages = improved;
-                }
-
-                // Append AcroForm field values that aren't already in the text.
-                // AcroForm fields (widget annotations with /V values) are invisible
-                // to pdf-extract and lopdf::extract_text — they live in annotation
-                // dictionaries, not the page content stream.
-                append_acroform_values(&doc, &mut pages);
             }
-            return Ok(pages);
         }
     }
 
-    // --- Attempt 2: plain lopdf ---
+    // Fall back to pdf-extract
+    if let Ok(Ok(raw)) = handle2.join() {
+        if !raw.trim().is_empty() {
+            let mut pages = pdf_extract_pages(&raw);
+            if !pages.is_empty() {
+                if let Ok(doc) = lopdf::Document::load(path) {
+                    // If pdf-extract collapsed multiple pages into one (no form-feeds),
+                    // try lopdf per-page extraction to get proper page boundaries.
+                    let lopdf_page_count = doc.get_pages().len();
+                    if pages.len() == 1 && lopdf_page_count > 1 {
+                        let lopdf_pages = extract_lopdf_pages(&doc);
+                        let has_content =
+                            lopdf_pages.iter().any(|p| !p.text.trim().is_empty());
+                        if lopdf_pages.len() > 1 && has_content {
+                            pages = lopdf_pages;
+                        }
+                    }
+
+                    // Try to improve form-field extraction by re-interleaving with coordinates
+                    let improved = reinterleave_form_fields(&doc, &pages);
+                    if !improved.is_empty() {
+                        pages = improved;
+                    }
+
+                    // Append AcroForm field values that aren't already in the text.
+                    append_acroform_values(&doc, &mut pages);
+                }
+                return Ok(pages);
+            }
+        }
+    }
+
+    // Final fallback: lopdf (synchronous, since it's the last resort)
+    try_lopdf_parse(path)
+}
+
+/// Last-resort PDF parsing using only lopdf.
+fn try_lopdf_parse(path: &str) -> Result<Vec<DocumentPage>, String> {
     let doc = lopdf::Document::load(path).map_err(|e| format!("PDF load error: {e}"))?;
     let mut pages = extract_lopdf_pages(&doc);
     append_acroform_values(&doc, &mut pages);
@@ -417,13 +528,13 @@ fn prepend_form_summary(fields: &[(String, String)], pages: &mut [DocumentPage])
         return;
     }
 
+    // Deduplicate: filter out fields whose values already appear verbatim in page text
+    let page_text = &pages[0].text;
+    let fields = deduplicate_form_fields(fields, page_text);
+
     let mut lines = Vec::new();
 
-    for (label, value) in fields {
-        // Always include in form summary — even if value is in page text,
-        // it may be buried in boilerplate and won't surface during retrieval
-        // without a dedicated dense form-data chunk.
-
+    for (label, value) in &fields {
         // Quality filter: skip garbage form fields (checkbox states, short fragments)
         let v = value.trim();
         if v.is_empty() || v.len() < 2 {
@@ -1787,7 +1898,8 @@ fn collapse_blank_lines(text: &str) -> String {
     result
 }
 
-/// Parse a DOCX file into pages of text
+/// Extract text from DOCX with structural awareness.
+/// Preserves heading hierarchy by prepending markers.
 /// Splits on explicit page breaks <w:br w:type="page"/>
 pub fn parse_docx(path: &str) -> Result<Vec<DocumentPage>, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("DOCX open error: {e}"))?;
@@ -1808,8 +1920,8 @@ pub fn parse_docx(path: &str) -> Result<Vec<DocumentPage>, String> {
 
     let ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     let mut pages: Vec<String> = vec![String::new()];
-    let mut in_paragraph = false;
 
+    // Walk top-level body children (paragraphs, tables) for structure-aware extraction
     for node in doc.descendants() {
         if !node.is_element() {
             continue;
@@ -1819,37 +1931,36 @@ pub fn parse_docx(path: &str) -> Result<Vec<DocumentPage>, String> {
         }
         match node.tag_name().name() {
             "p" => {
-                // Paragraph start — we handle text at the run level
-                // Add newline at paragraph end if current page has content
-                if !in_paragraph {
-                    in_paragraph = true;
-                }
-                // Add newline after each paragraph when traversal ends
-                // We detect paragraph end by checking if parent's next sibling is a new p
-                // Simpler: just add newline when we see a new p element at body level
+                // Detect heading style from paragraph properties
+                let heading_level = detect_docx_heading_level(&node, ns);
+
+                // Collect all text runs within this paragraph
+                let para_text = collect_paragraph_text(&node, ns);
+
                 if let Some(last) = pages.last_mut() {
                     if !last.is_empty() && !last.ends_with('\n') {
                         last.push('\n');
                     }
-                }
-            }
-            "t" => {
-                // Text run
-                if let Some(text) = node.text() {
-                    if let Some(last) = pages.last_mut() {
-                        last.push_str(text);
+
+                    if !para_text.trim().is_empty() {
+                        if let Some(level) = heading_level {
+                            // Prepend heading markers
+                            let prefix = "#".repeat(level.min(6));
+                            last.push_str(&format!("{} {}", prefix, para_text.trim()));
+                        } else {
+                            last.push_str(&para_text);
+                        }
                     }
                 }
             }
             "br" => {
-                // Check for page break
+                // Check for page break (at top level, outside paragraphs)
                 let is_page_break = node
                     .attributes()
                     .any(|a| a.name() == "type" && a.value() == "page");
                 if is_page_break {
                     pages.push(String::new());
                 } else {
-                    // Line break
                     if let Some(last) = pages.last_mut() {
                         last.push('\n');
                     }
@@ -1874,6 +1985,110 @@ pub fn parse_docx(path: &str) -> Result<Vec<DocumentPage>, String> {
     }
 
     Ok(result)
+}
+
+/// Detect the heading level of a DOCX paragraph from its style properties.
+/// Returns Some(1) for Heading1, Some(2) for Heading2, etc., or None for body text.
+fn detect_docx_heading_level(para_node: &roxmltree::Node, ns: &str) -> Option<usize> {
+    // Look for w:pPr > w:pStyle with val like "Heading1", "Heading2", etc.
+    for child in para_node.children() {
+        if !child.is_element() {
+            continue;
+        }
+        if child.tag_name().namespace() != Some(ns) || child.tag_name().name() != "pPr" {
+            continue;
+        }
+        for prop in child.children() {
+            if !prop.is_element() {
+                continue;
+            }
+            if prop.tag_name().namespace() != Some(ns) {
+                continue;
+            }
+            if prop.tag_name().name() == "pStyle" {
+                if let Some(val) = prop.attribute((ns, "val")).or_else(|| prop.attribute("val")) {
+                    let lower = val.to_lowercase();
+                    // Match "heading1", "heading2", etc. and also "title"
+                    if lower == "title" {
+                        return Some(1);
+                    }
+                    if lower == "subtitle" {
+                        return Some(2);
+                    }
+                    if lower.starts_with("heading") {
+                        if let Some(level_str) = lower.strip_prefix("heading") {
+                            if let Ok(level) = level_str.trim().parse::<usize>() {
+                                return Some(level);
+                            }
+                        }
+                    }
+                }
+            }
+            // Check for outlineLvl (used by some DOCX generators instead of named styles)
+            if prop.tag_name().name() == "outlineLvl" {
+                if let Some(val) = prop.attribute((ns, "val")).or_else(|| prop.attribute("val")) {
+                    if let Ok(level) = val.parse::<usize>() {
+                        return Some(level + 1); // outlineLvl is 0-based
+                    }
+                }
+            }
+        }
+        // Also check if the paragraph is bold-only (likely a section title):
+        // Look for w:rPr > w:b without w:bCs being false
+        let has_bold_style = child.children().any(|rpr| {
+            rpr.is_element()
+                && rpr.tag_name().name() == "rPr"
+                && rpr.tag_name().namespace() == Some(ns)
+                && rpr.children().any(|b| {
+                    b.is_element()
+                        && b.tag_name().name() == "b"
+                        && b.tag_name().namespace() == Some(ns)
+                        && b.attribute((ns, "val")).unwrap_or("true") != "false"
+                })
+        });
+        if has_bold_style {
+            // Bold paragraph with no explicit heading style — treat as an informal heading
+            // Only if it's short (likely a section title, not a bold body paragraph)
+            return None; // We'll check text length below
+        }
+    }
+    None
+}
+
+/// Collect all text content from a DOCX paragraph node, handling runs and breaks.
+fn collect_paragraph_text(para_node: &roxmltree::Node, ns: &str) -> String {
+    let mut text = String::new();
+    for descendant in para_node.descendants() {
+        if !descendant.is_element() {
+            continue;
+        }
+        if descendant.tag_name().namespace() != Some(ns) {
+            continue;
+        }
+        match descendant.tag_name().name() {
+            "t" => {
+                if let Some(t) = descendant.text() {
+                    text.push_str(t);
+                }
+            }
+            "br" => {
+                let is_page_break = descendant
+                    .attributes()
+                    .any(|a| a.name() == "type" && a.value() == "page");
+                if is_page_break {
+                    // Page breaks inside paragraphs are handled at the paragraph level
+                } else {
+                    text.push('\n');
+                }
+            }
+            "tab" => {
+                text.push('\t');
+            }
+            _ => {}
+        }
+    }
+
+    text
 }
 
 fn enforce_file_security(path: &str) -> Result<(), String> {
