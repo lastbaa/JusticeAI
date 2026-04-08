@@ -478,19 +478,90 @@ impl RagState {
         }
     }
 
-    /// Cosine similarity between two vectors
+    /// Compute cosine similarity between two vectors.
+    /// Uses manual loop unrolling for better auto-vectorization and f64
+    /// accumulators for numerical stability.
     pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         if a.len() != b.len() || a.is_empty() {
             return 0.0;
         }
-        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm_a == 0.0 || norm_b == 0.0 || !norm_a.is_finite() || !norm_b.is_finite() {
-            0.0
-        } else {
-            dot / (norm_a * norm_b)
+        let n = a.len();
+
+        // Process 4 elements at a time for auto-vectorization
+        let chunks = n / 4;
+        let remainder_start = chunks * 4;
+
+        let mut dot = 0.0f64;
+        let mut norm_a = 0.0f64;
+        let mut norm_b = 0.0f64;
+
+        // Unrolled loop — compiler will auto-vectorize this
+        for i in 0..chunks {
+            let base = i * 4;
+            let a0 = a[base] as f64;
+            let a1 = a[base + 1] as f64;
+            let a2 = a[base + 2] as f64;
+            let a3 = a[base + 3] as f64;
+            let b0 = b[base] as f64;
+            let b1 = b[base + 1] as f64;
+            let b2 = b[base + 2] as f64;
+            let b3 = b[base + 3] as f64;
+
+            dot += a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3;
+            norm_a += a0 * a0 + a1 * a1 + a2 * a2 + a3 * a3;
+            norm_b += b0 * b0 + b1 * b1 + b2 * b2 + b3 * b3;
         }
+
+        // Handle remainder
+        for i in remainder_start..n {
+            let ai = a[i] as f64;
+            let bi = b[i] as f64;
+            dot += ai * bi;
+            norm_a += ai * ai;
+            norm_b += bi * bi;
+        }
+
+        let denom = (norm_a * norm_b).sqrt();
+        if denom < 1e-10 { 0.0 } else { (dot / denom) as f32 }
+    }
+
+    /// Pre-compute L2 norms for a set of embedding slices.
+    pub fn precompute_norms(embeddings: &[&[f32]]) -> Vec<f64> {
+        embeddings.iter().map(|emb| {
+            let sum: f64 = emb.iter().map(|&x| (x as f64) * (x as f64)).sum();
+            sum.sqrt()
+        }).collect()
+    }
+
+    /// Pre-compute L2 norms for owned embedding vectors.
+    pub fn precompute_norms_owned(embeddings: &[Vec<f32>]) -> Vec<f64> {
+        embeddings.iter().map(|emb| {
+            let sum: f64 = emb.iter().map(|&x| (x as f64) * (x as f64)).sum();
+            sum.sqrt()
+        }).collect()
+    }
+
+    /// Cosine similarity with pre-computed norms (avoids redundant norm computation).
+    pub fn cosine_similarity_with_norms(a: &[f32], b: &[f32], norm_a: f64, norm_b: f64) -> f32 {
+        let dot: f64 = a.iter().zip(b.iter()).map(|(&x, &y)| (x as f64) * (y as f64)).sum();
+        let denom = norm_a * norm_b;
+        if denom < 1e-10 { 0.0 } else { (dot / denom) as f32 }
+    }
+
+    /// Compute cosine similarity between a query vector and all corpus vectors.
+    /// Pre-computes the query norm once. Returns a Vec of similarity values
+    /// aligned with the corpus index.
+    pub fn batch_cosine_similarity(query: &[f32], corpus: &[&[f32]]) -> Vec<f32> {
+        let query_norm: f64 = query.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+        if query_norm < 1e-10 {
+            return vec![0.0; corpus.len()];
+        }
+
+        corpus.iter().map(|doc| {
+            let dot: f64 = query.iter().zip(doc.iter()).map(|(&q, &d)| (q as f64) * (d as f64)).sum();
+            let doc_norm: f64 = doc.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+            if doc_norm < 1e-10 { 0.0 } else { (dot / (query_norm * doc_norm)) as f32 }
+        }).collect()
     }
 
     /// Get all text chunks for a specific file+page from chunk registry,
@@ -874,5 +945,109 @@ mod tests {
         let result = RagState::truncate_summary(&long, 80);
         assert!(result.chars().count() <= 81); // 80 + ellipsis
         assert!(result.ends_with('…'));
+    }
+
+    // ── Cosine similarity tests ──────────────────────────────────────────
+
+    #[test]
+    fn cosine_identical_vectors() {
+        let a = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let sim = RagState::cosine_similarity(&a, &a);
+        assert!((sim - 1.0).abs() < 1e-5, "identical vectors should have sim ~1.0, got {sim}");
+    }
+
+    #[test]
+    fn cosine_orthogonal_vectors() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        let sim = RagState::cosine_similarity(&a, &b);
+        assert!(sim.abs() < 1e-5, "orthogonal vectors should have sim ~0.0, got {sim}");
+    }
+
+    #[test]
+    fn cosine_opposite_vectors() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![-1.0, -2.0, -3.0];
+        let sim = RagState::cosine_similarity(&a, &b);
+        assert!((sim + 1.0).abs() < 1e-5, "opposite vectors should have sim ~-1.0, got {sim}");
+    }
+
+    #[test]
+    fn cosine_empty_returns_zero() {
+        let sim = RagState::cosine_similarity(&[], &[]);
+        assert_eq!(sim, 0.0);
+    }
+
+    #[test]
+    fn cosine_zero_vector_returns_zero() {
+        let a = vec![0.0, 0.0, 0.0];
+        let b = vec![1.0, 2.0, 3.0];
+        let sim = RagState::cosine_similarity(&a, &b);
+        assert_eq!(sim, 0.0);
+    }
+
+    #[test]
+    fn cosine_mismatched_lengths_returns_zero() {
+        let a = vec![1.0, 2.0];
+        let b = vec![1.0, 2.0, 3.0];
+        let sim = RagState::cosine_similarity(&a, &b);
+        assert_eq!(sim, 0.0);
+    }
+
+    #[test]
+    fn cosine_remainder_elements() {
+        // 5 elements: 4 in unrolled loop + 1 remainder
+        let a = vec![1.0, 0.0, 0.0, 0.0, 1.0];
+        let b = vec![1.0, 0.0, 0.0, 0.0, 1.0];
+        let sim = RagState::cosine_similarity(&a, &b);
+        assert!((sim - 1.0).abs() < 1e-5, "got {sim}");
+    }
+
+    #[test]
+    fn cosine_with_norms_matches_standard() {
+        let a = vec![1.0, 2.0, 3.0, 4.0];
+        let b = vec![4.0, 3.0, 2.0, 1.0];
+        let standard = RagState::cosine_similarity(&a, &b);
+
+        let norm_a: f64 = a.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+        let norm_b: f64 = b.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+        let with_norms = RagState::cosine_similarity_with_norms(&a, &b, norm_a, norm_b);
+
+        assert!((standard - with_norms).abs() < 1e-5,
+            "standard={standard} with_norms={with_norms}");
+    }
+
+    #[test]
+    fn precompute_norms_correct() {
+        let v1 = vec![3.0f32, 4.0];
+        let v2 = vec![1.0f32, 0.0];
+        let norms = RagState::precompute_norms_owned(&[v1, v2]);
+        assert!((norms[0] - 5.0).abs() < 1e-10, "3-4-5 triangle: got {}", norms[0]);
+        assert!((norms[1] - 1.0).abs() < 1e-10, "unit vector: got {}", norms[1]);
+    }
+
+    #[test]
+    fn batch_cosine_matches_individual() {
+        let query = vec![1.0, 2.0, 3.0];
+        let c0 = vec![3.0f32, 2.0, 1.0];
+        let c1 = vec![0.0f32, 1.0, 0.0];
+        let c2 = vec![1.0f32, 1.0, 1.0];
+        let corpus: Vec<&[f32]> = vec![c0.as_slice(), c1.as_slice(), c2.as_slice()];
+
+        let batch = RagState::batch_cosine_similarity(&query, &corpus);
+        for (i, doc) in corpus.iter().enumerate() {
+            let individual = RagState::cosine_similarity(&query, doc);
+            assert!((batch[i] - individual).abs() < 1e-5,
+                "mismatch at {i}: batch={} individual={}", batch[i], individual);
+        }
+    }
+
+    #[test]
+    fn batch_cosine_zero_query() {
+        let query = vec![0.0, 0.0, 0.0];
+        let c0 = vec![1.0f32, 2.0, 3.0];
+        let corpus: Vec<&[f32]> = vec![c0.as_slice()];
+        let batch = RagState::batch_cosine_similarity(&query, &corpus);
+        assert_eq!(batch[0], 0.0);
     }
 }
