@@ -8,7 +8,7 @@
   --bg-alt: #1a1a1a;
   --surface: #2c2c2c;
   --surface-hover: #363636;
-  --surface-active: #264f78;
+  --surface-active: rgba(201, 168, 76, 0.10);
   --surface-raised: #282828;
   --surface-dark: #141414;
   --panel: #1a1a1a;

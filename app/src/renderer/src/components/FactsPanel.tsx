@@ -11,9 +11,6 @@ const DATE_PATTERNS = [
 
 const AMOUNT_PATTERN = /\$[\d,]+\.?\d*/g
 
-const PARTY_PATTERN =
-  /(?:between|by and between|party|parties|tenant|landlord|employer|employee|buyer|seller|lessor|lessee|licensor|licensee|borrower|lender)\s+([A-Z][a-zA-Z\s,.]+?)(?:\s*(?:and|,|\(|")|$)/gi
-
 const LEGAL_TERMS = [
   'indemnification', 'termination', 'liability', 'confidentiality',
   'non-compete', 'non-disclosure', 'arbitration', 'jurisdiction',
@@ -27,7 +24,6 @@ const LEGAL_TERMS = [
 export interface ExtractedFacts {
   dates: string[]
   amounts: string[]
-  parties: string[]
   terms: string[]
 }
 
@@ -35,17 +31,12 @@ export function extractFacts(texts: string[]): ExtractedFacts {
   const combined = texts.join('\n')
   const dates = new Set<string>()
   const amounts = new Set<string>()
-  const parties = new Set<string>()
   const terms = new Set<string>()
 
   for (const pat of DATE_PATTERNS) {
     for (const m of combined.matchAll(pat)) dates.add(m[0])
   }
   for (const m of combined.matchAll(AMOUNT_PATTERN)) amounts.add(m[0])
-  for (const m of combined.matchAll(PARTY_PATTERN)) {
-    const name = m[1].trim().replace(/[,.]$/, '').trim()
-    if (name.length > 2 && name.length < 60) parties.add(name)
-  }
   const lower = combined.toLowerCase()
   for (const term of LEGAL_TERMS) {
     if (lower.includes(term)) terms.add(term)
@@ -54,7 +45,6 @@ export function extractFacts(texts: string[]): ExtractedFacts {
   return {
     dates: [...dates].slice(0, 8),
     amounts: [...amounts].slice(0, 8),
-    parties: [...parties].slice(0, 6),
     terms: [...terms].slice(0, 10),
   }
 }
@@ -99,7 +89,7 @@ export default function FactsPanel({ chunkTexts, onClickFact }: Props): JSX.Elem
 
   const facts = useMemo(() => extractFacts(chunkTexts), [chunkTexts])
 
-  const hasAny = facts.dates.length + facts.amounts.length + facts.parties.length + facts.terms.length > 0
+  const hasAny = facts.dates.length + facts.amounts.length + facts.terms.length > 0
   if (!hasAny) return null
 
   return (
@@ -126,7 +116,7 @@ export default function FactsPanel({ chunkTexts, onClickFact }: Props): JSX.Elem
             className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
             style={{ background: 'rgba(201,168,76,0.08)', color: 'rgba(201,168,76,0.55)' }}
           >
-            {facts.dates.length + facts.amounts.length + facts.parties.length + facts.terms.length}
+            {facts.dates.length + facts.amounts.length + facts.terms.length}
           </span>
         </div>
         <svg
@@ -159,16 +149,6 @@ export default function FactsPanel({ chunkTexts, onClickFact }: Props): JSX.Elem
               <div className="flex flex-wrap gap-1.5">
                 {facts.amounts.map((a) => (
                   <FactTag key={a} label={a} color="#3fb950" onClick={() => onClickFact(`What is the ${a} for?`)} />
-                ))}
-              </div>
-            </div>
-          )}
-          {facts.parties.length > 0 && (
-            <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] mb-1.5" style={{ color: 'rgb(var(--ov) / 0.18)' }}>Parties</p>
-              <div className="flex flex-wrap gap-1.5">
-                {facts.parties.map((p) => (
-                  <FactTag key={p} label={p} color="#d2a8ff" onClick={() => onClickFact(`What is the role of ${p}?`)} />
                 ))}
               </div>
             </div>

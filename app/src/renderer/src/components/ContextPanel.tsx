@@ -177,36 +177,32 @@ function FileRow({
               <span style={{ color: 'rgb(var(--ov) / 0.15)', margin: '0 4px' }}>{'\u00B7'}</span>
               {file.fileName}
             </p>
-            {/* Role badge */}
-            <span className={`inline-block text-[9px] font-medium px-1.5 py-0.5 rounded shrink-0 ${roleInfo.color}`}>
-              {roleInfo.label}
-            </span>
+            {/* Role badge — click to cycle through roles */}
+            {onSetRole ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const roles: DocumentRole[] = ['ClientDocument', 'LegalAuthority', 'Evidence', 'Reference']
+                  const currentIdx = roles.indexOf(file.role || 'ClientDocument')
+                  const nextRole = roles[(currentIdx + 1) % roles.length]
+                  onSetRole(file.id, nextRole)
+                }}
+                className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded shrink-0 cursor-pointer transition-all hover:brightness-125 ${roleInfo.color}`}
+                title="Click to change document role"
+              >
+                {roleInfo.label}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-50"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+              </button>
+            ) : (
+              <span className={`inline-block text-[9px] font-medium px-1.5 py-0.5 rounded shrink-0 ${roleInfo.color}`}>
+                {roleInfo.label}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <p className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.22)' }}>
               {file.totalPages} {file.totalPages === 1 ? 'page' : 'pages'}
             </p>
-            {/* Role selector (inline) */}
-            {onSetRole && (
-              <select
-                value={file.role || 'ClientDocument'}
-                onChange={(e) => onSetRole(file.id, e.target.value as DocumentRole)}
-                onClick={(e) => e.stopPropagation()}
-                className="text-[10px] px-1.5 py-0.5 rounded cursor-pointer transition-colors focus:outline-none"
-                style={{
-                  background: 'var(--bg-alt)',
-                  border: '1px solid rgb(var(--ov) / 0.08)',
-                  color: 'rgb(var(--ov) / 0.45)',
-                }}
-                onFocus={(e) => { (e.currentTarget as HTMLSelectElement).style.borderColor = 'rgba(201,168,76,0.4)' }}
-                onBlur={(e) => { (e.currentTarget as HTMLSelectElement).style.borderColor = 'rgb(var(--ov) / 0.08)' }}
-              >
-                <option value="ClientDocument">Client Doc</option>
-                <option value="LegalAuthority">Legal Authority</option>
-                <option value="Evidence">Evidence</option>
-                <option value="Reference">Reference</option>
-              </select>
-            )}
           </div>
         </div>
         {hovered && (
@@ -242,12 +238,6 @@ function FileRow({
               className="mt-1.5 px-2 py-1.5 rounded text-[10px]"
               style={{ background: 'var(--bg-alt)', border: '1px solid rgb(var(--ov) / 0.06)' }}
             >
-              {file.factSheet.parties.length > 0 && (
-                <div className="mb-1">
-                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Parties:</span>{' '}
-                  <span style={{ color: 'var(--text)' }}>{file.factSheet.parties.slice(0, 4).join(' \u2022 ')}</span>
-                </div>
-              )}
               {file.factSheet.amounts.length > 0 && (
                 <div className="mb-1">
                   <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Amounts:</span>{' '}

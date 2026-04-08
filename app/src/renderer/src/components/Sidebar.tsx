@@ -145,7 +145,7 @@ function SessionItem({
       onMouseLeave={() => setHovered(false)}
       onClick={onLoad}
       onDoubleClick={startEdit}
-      className="group relative flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer transition-all"
+      className="group relative flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer transition-all select-none"
       style={{
         background: isActive ? 'var(--surface-active)' : hovered ? 'var(--surface-hover)' : 'transparent',
         color: isActive ? '#c9a84c' : hovered ? '#e6edf3' : 'rgb(var(--ov) / 0.45)',
