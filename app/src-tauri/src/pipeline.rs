@@ -22,7 +22,17 @@ pub const SCORE_THRESHOLD: f32 = 0.0;
 /// If the top chunk is below this, the query is considered unrelated to documents.
 /// Note: generic queries like "tell me about this file" score ~0.15-0.25 against
 /// document content, so this must be low enough to allow them through.
+/// Default value — use `cosine_floor_for_mode()` for mode-dependent thresholds.
 pub const COSINE_FLOOR: f32 = 0.15;
+
+/// Return mode-dependent cosine floor threshold.
+pub fn cosine_floor_for_mode(mode: &InferenceMode) -> f32 {
+    match mode {
+        InferenceMode::Quick => 0.20,
+        InferenceMode::Balanced => 0.15,
+        InferenceMode::Extended => 0.12,
+    }
+}
 
 /// Find the largest byte index <= `pos` that is a valid UTF-8 char boundary.
 fn floor_char_boundary(s: &str, pos: usize) -> usize {
@@ -152,6 +162,14 @@ A: - **Landlord**: Robert James Smith [lease.pdf, p. 1]\n\
 Q: What is the penalty for early termination?\n\
 A: This information is not present in the provided documents.";
 
+/// Shorter rules prompt for Quick mode — fewer examples, less preamble.
+pub const RULES_PROMPT_QUICK: &str = "\
+You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\n\n\
+1. If the answer is not in the context, state: \"This information is not present in the provided documents.\"\n\
+2. Cite every claim as [filename, p. N].\n\
+3. Reproduce numbers, dates, and names EXACTLY as written.\n\
+4. Be direct. No preambles.\n";
+
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
 pub struct InferenceParams {
@@ -162,6 +180,8 @@ pub struct InferenceParams {
     pub system_prompt_override: Option<String>,
     /// Maximum wall-clock seconds for the generation loop before breaking.
     pub timeout_secs: u64,
+    /// Whether this is Quick mode (uses shorter RULES_PROMPT_QUICK).
+    pub is_quick: bool,
 }
 
 impl InferenceParams {
@@ -173,10 +193,11 @@ impl InferenceParams {
         match mode {
             InferenceMode::Quick => Self {
                 max_new_tokens: 256,
-                temperature: 0.15,
+                temperature: 0.05,
                 system_prompt_suffix: "\nStart your answer with the specific fact or value requested. Answer in 1-3 sentences. Cite the source.",
                 system_prompt_override: None,
                 timeout_secs: 30,
+                is_quick: true,
             },
             InferenceMode::Balanced => Self {
                 max_new_tokens: 1024,
@@ -184,6 +205,7 @@ impl InferenceParams {
                 system_prompt_suffix: "\nProvide a complete answer with all relevant details. Use bullet points for multiple facts. Cite every claim.",
                 system_prompt_override: None,
                 timeout_secs: 60,
+                is_quick: false,
             },
             InferenceMode::Extended => Self {
                 max_new_tokens: 1024,
@@ -191,6 +213,7 @@ impl InferenceParams {
                 system_prompt_suffix: "\nFirst, identify the relevant facts in the context. Then, provide your structured response:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim.",
                 system_prompt_override: None,
                 timeout_secs: 120,
+                is_quick: false,
             },
         }
     }
@@ -201,6 +224,14 @@ pub struct RetrievalModeParams {
     pub candidate_pool_k: usize,
     pub max_context_chars_jur: usize,
     pub max_context_chars_no_jur: usize,
+    /// MMR lambda: higher = relevance-heavy, lower = diversity-heavy.
+    pub mmr_lambda: f32,
+    /// Cosine floor threshold for routing to general chat.
+    pub cosine_floor: f32,
+    /// Jaccard dedup threshold: higher = more permissive (fewer deduped).
+    pub jaccard_threshold: f32,
+    /// Adaptive-K gap threshold: larger = stricter cutoff.
+    pub adaptive_k_gap: f32,
 }
 
 impl RetrievalModeParams {
@@ -215,18 +246,30 @@ impl RetrievalModeParams {
                 candidate_pool_k: 30,
                 max_context_chars_jur: 5_000,
                 max_context_chars_no_jur: 5_500,
+                mmr_lambda: 0.85,
+                cosine_floor: 0.20,
+                jaccard_threshold: 0.70,
+                adaptive_k_gap: 0.12,
             },
             InferenceMode::Balanced => Self {
                 top_k: 6,
                 candidate_pool_k: 60,
                 max_context_chars_jur: 10_000,
                 max_context_chars_no_jur: 11_000,
+                mmr_lambda: 0.70,
+                cosine_floor: 0.15,
+                jaccard_threshold: 0.80,
+                adaptive_k_gap: 0.08,
             },
             InferenceMode::Extended => Self {
                 top_k: 10,
                 candidate_pool_k: 80,
                 max_context_chars_jur: 10_000,
                 max_context_chars_no_jur: 11_000,
+                mmr_lambda: 0.55,
+                cosine_floor: 0.12,
+                jaccard_threshold: 0.85,
+                adaptive_k_gap: 0.05,
             },
         }
     }
@@ -786,7 +829,9 @@ Answer the current question using ONLY these excerpts.\n\
     // Inject jurisdiction-specific rules into the system prompt when available.
     // Uses PromptCache to avoid redundant string formatting when jurisdiction
     // and inference mode haven't changed between queries.
-    let base_prompt = inference_params.system_prompt_override.as_deref().unwrap_or(RULES_PROMPT);
+    let base_prompt = inference_params.system_prompt_override.as_deref().unwrap_or(
+        if inference_params.is_quick { RULES_PROMPT_QUICK } else { RULES_PROMPT }
+    );
     let j_fragment = jurisdiction.map(jurisdiction_prompt_fragment).unwrap_or_default();
     let mode_suffix = inference_params.system_prompt_suffix;
     let sys_prompt = PromptCache::get_or_build(base_prompt, &j_fragment, mode_suffix);
@@ -916,6 +961,7 @@ Answer the current question using ONLY these excerpts.\n\
 
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::penalties(256, 1.15, 0.3, 0.0),
+            LlamaSampler::top_k(50),
             LlamaSampler::min_p(0.10, 1),
             LlamaSampler::top_p(0.92, 1),
             LlamaSampler::temp(inference_params.temperature),
@@ -1850,13 +1896,29 @@ pub fn expand_keywords(keywords: &std::collections::HashSet<String>) -> std::col
         ("attorney",        &["counsel", "lawyer", "legal representative"]),
     ];
 
+    // Build reverse mappings automatically for bidirectional expansion:
+    // if "landlord" maps to ["lessor"], then "lessor" also maps back to ["landlord"].
+    let mut reverse_map: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+    for (key, syns) in SYNONYMS {
+        for &syn in *syns {
+            reverse_map.entry(syn).or_default().push(key);
+        }
+    }
+
     let mut expanded = keywords.clone();
     for kw in keywords.iter() {
+        // Forward: keyword matches a SYNONYMS key
         for (key, syns) in SYNONYMS {
             if kw == key {
                 for &syn in *syns {
                     expanded.insert(syn.to_string());
                 }
+            }
+        }
+        // Reverse: keyword appears as a synonym value — map back to its key(s)
+        if let Some(reverse_keys) = reverse_map.get(kw.as_str()) {
+            for &rk in reverse_keys {
+                expanded.insert(rk.to_string());
             }
         }
     }
@@ -1959,19 +2021,28 @@ pub fn expand_query(query: &str) -> Vec<String> {
         ("deadline", "due date"),
         ("fee", "charge"),
         ("damages", "liability"),
+        ("termination", "discharge"),
+        ("indemnification", "hold harmless"),
+        ("waive", "relinquish"),
+        ("liability", "obligation"),
+        ("provision", "clause"),
+        ("remedy", "relief"),
+        ("default", "breach"),
+        ("convey", "transfer"),
     ];
 
-    // Try each substitution — if query contains term, create rewrite with replacement
+    // Try each substitution — allow up to 2 synonym rewrites
+    let mut synonym_count = 0;
     for (term, replacement) in &substitutions {
+        if synonym_count >= 2 { break; }
         if lower.contains(term) && !lower.contains(replacement) {
             let rewritten = lower.replace(term, replacement);
             queries.push(rewritten);
-            break; // Only one synonym rewrite
-        }
-        if lower.contains(replacement) && !lower.contains(term) {
+            synonym_count += 1;
+        } else if lower.contains(replacement) && !lower.contains(term) {
             let rewritten = lower.replace(replacement, term);
             queries.push(rewritten);
-            break;
+            synonym_count += 1;
         }
     }
 
@@ -1988,8 +2059,11 @@ pub fn expand_query(query: &str) -> Vec<String> {
         .replace("when does the ", "")
         .replace("where is the ", "")
         .replace("how much is the ", "")
+        .replace("how much ", "")
         .replace("how many ", "")
         .replace("is there a ", "")
+        .replace("is there ", "")
+        .replace("are there ", "")
         .replace("does the ", "")
         .replace("can the ", "")
         .trim()
@@ -1999,8 +2073,8 @@ pub fn expand_query(query: &str) -> Vec<String> {
         queries.push(statement);
     }
 
-    // Cap at 3 total
-    queries.truncate(3);
+    // Cap at 4 total
+    queries.truncate(4);
     queries
 }
 
@@ -2036,6 +2110,10 @@ pub struct RetrievalConfig {
     pub mmr_lambda: f32,
     /// Whether to expand query keywords with legal synonyms.
     pub expand_keywords: bool,
+    /// Jaccard dedup threshold (mode-dependent).
+    pub jaccard_threshold: f32,
+    /// Adaptive-K gap threshold (mode-dependent).
+    pub adaptive_k_gap: f32,
 }
 
 impl Default for RetrievalConfig {
@@ -2046,6 +2124,8 @@ impl Default for RetrievalConfig {
             score_threshold: SCORE_THRESHOLD,
             mmr_lambda: 0.7,
             expand_keywords: true,
+            jaccard_threshold: 0.80,
+            adaptive_k_gap: 0.08,
         }
     }
 }
@@ -2158,12 +2238,12 @@ fn jaccard_similarity(a: &str, b: &str) -> f32 {
     if union == 0 { 0.0 } else { intersection as f32 / union as f32 }
 }
 
-/// Remove near-duplicate chunks (Jaccard > 0.80), keeping the higher-scored one.
-fn deduplicate_by_jaccard(candidates: &mut Vec<(usize, f32)>, texts: &[&str]) {
+/// Remove near-duplicate chunks (Jaccard > threshold), keeping the higher-scored one.
+fn deduplicate_by_jaccard(candidates: &mut Vec<(usize, f32)>, texts: &[&str], threshold: f32) {
     let mut keep = Vec::with_capacity(candidates.len());
     for &(idx, score) in candidates.iter() {
         let is_dup = keep.iter().any(|&(kept_idx, _kept_score): &(usize, f32)| {
-            jaccard_similarity(texts[idx], texts[kept_idx]) > 0.80
+            jaccard_similarity(texts[idx], texts[kept_idx]) > threshold
         });
         if !is_dup {
             keep.push((idx, score));
@@ -2255,17 +2335,17 @@ impl RetrievalBackend for HybridBm25Cosine {
         let mut indexed: Vec<(usize, f32)> = hybrid.into_iter().enumerate().collect();
         indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        // B7: Duplicate chunk suppression — drop near-duplicate chunks (Jaccard > 0.80)
-        deduplicate_by_jaccard(&mut indexed, &corpus.texts);
+        // B7: Duplicate chunk suppression — drop near-duplicate chunks (Jaccard > threshold)
+        deduplicate_by_jaccard(&mut indexed, &corpus.texts, config.jaccard_threshold);
 
-        // B4: Adaptive top-K — find largest score gap > 0.08 before top_k, cut there.
+        // B4: Adaptive top-K — find largest score gap > threshold before top_k, cut there.
         let adaptive_k = {
             let max_k = config.top_k.min(indexed.len());
             let mut cut = max_k;
             let mut largest_gap = 0.0f32;
             for i in 0..max_k.saturating_sub(1) {
                 let gap = indexed[i].1 - indexed[i + 1].1;
-                if gap > 0.08 && gap > largest_gap {
+                if gap > config.adaptive_k_gap && gap > largest_gap {
                     largest_gap = gap;
                     cut = i + 1; // cut after this element
                 }
@@ -2388,6 +2468,8 @@ impl RetrievalBackend for RerankerBackend {
             score_threshold: 0.0,
             expand_keywords: config.expand_keywords,
             mmr_lambda: config.mmr_lambda,
+            jaccard_threshold: config.jaccard_threshold,
+            adaptive_k_gap: config.adaptive_k_gap,
         };
         // If corpus is small enough, skip first pass and rerank everything.
         if corpus.texts.len() <= self.first_pass_k {
@@ -2488,9 +2570,10 @@ mod tests {
     fn inference_params_quick() {
         let p = InferenceParams::from_mode(&InferenceMode::Quick);
         assert_eq!(p.max_new_tokens, 256);
-        assert!((p.temperature - 0.15).abs() < 0.01);
+        assert!((p.temperature - 0.05).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 30);
+        assert!(p.is_quick);
     }
 
     #[test]
@@ -2958,6 +3041,7 @@ mod tests {
             score_threshold: 0.0,
             mmr_lambda: 0.7,
             expand_keywords: false,
+            ..Default::default()
         };
         // Without MMR
         let config_raw = RetrievalConfig {
@@ -2966,6 +3050,7 @@ mod tests {
             score_threshold: 0.0,
             mmr_lambda: 0.7,
             expand_keywords: false,
+            ..Default::default()
         };
         let backend = HybridBm25Cosine::default();
         let with_mmr = backend.retrieve("salary", &query_vec, &corpus, &config_mmr);
@@ -3759,9 +3844,9 @@ defers to state insurance regulation."#;
     }
 
     #[test]
-    fn expand_query_capped_at_three() {
+    fn expand_query_capped_at_four() {
         let results = expand_query("What is the landlord's penalty?");
-        assert!(results.len() <= 3, "Should cap at 3: {:?}", results);
+        assert!(results.len() <= 4, "Should cap at 4: {:?}", results);
     }
 
     #[test]

@@ -1588,6 +1588,7 @@ async fn main() {
         score_threshold: 0.0,
         mmr_lambda: 0.7,
         expand_keywords: true,
+        ..Default::default()
     };
 
     let scored = match embed_and_retrieve(&chunks, &query, &pdf_path, &model_dir, backend.as_ref(), &config).await {

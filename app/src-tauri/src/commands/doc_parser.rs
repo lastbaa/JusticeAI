@@ -125,6 +125,51 @@ fn deduplicate_form_fields(
         .collect()
 }
 
+/// Normalize a multi-line form field value into a single line for readability.
+/// Replaces newlines with ", " and trims whitespace from each line fragment.
+fn normalize_field_value(value: &str) -> String {
+    value
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Redact common PII patterns (SSN, EIN, credit card, routing numbers) from a string.
+///
+/// NOT applied by default — Justice AI runs fully on-device so all data stays local.
+/// This function is available for future use if/when document sharing, export, or
+/// cloud sync features are implemented. To enable, call `redact_pii()` on field values
+/// before displaying citations/excerpts to the user. Do NOT apply to chunks used for
+/// retrieval — the LLM needs original values to answer questions accurately.
+#[allow(dead_code)]
+fn redact_pii(value: &str) -> String {
+    let mut result = value.to_string();
+
+    // SSN: XXX-XX-XXXX
+    let ssn_re = Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").unwrap();
+    result = ssn_re.replace_all(&result, "***-**-****").to_string();
+
+    // SSN without dashes: 9 digits, but skip invalid prefixes (0xx, 9xx)
+    let ssn_re2 = Regex::new(r"\b[1-8]\d{8}\b").unwrap();
+    result = ssn_re2.replace_all(&result, "*********").to_string();
+
+    // EIN: XX-XXXXXXX
+    let ein_re = Regex::new(r"\b\d{2}-\d{7}\b").unwrap();
+    result = ein_re.replace_all(&result, "**-*******").to_string();
+
+    // Credit card: XXXX-XXXX-XXXX-XXXX or XXXXXXXXXXXXXXXX (with optional spaces/dashes)
+    let cc_re = Regex::new(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b").unwrap();
+    result = cc_re.replace_all(&result, "**** **** **** ****").to_string();
+
+    // Routing number: 9 digits starting with 0-3
+    let routing_re = Regex::new(r"\b[0-3]\d{8}\b").unwrap();
+    result = routing_re.replace_all(&result, "*********").to_string();
+
+    result
+}
+
 /// Detect and format table-like content in extracted text.
 /// Looks for tab-delimited or consistent-spacing patterns.
 fn format_tables(text: &str) -> String {
@@ -550,15 +595,16 @@ fn prepend_form_summary(fields: &[(String, String)], pages: &mut [DocumentPage])
         }
 
         let clean_label = label.replace("[0]", "").replace("[1]", "");
+        let normalized_value = normalize_field_value(value);
         // For generic field names (f1_01, etc.), infer a descriptive label from the value
         if clean_label.is_empty()
             || clean_label.starts_with("f1_")
             || clean_label.starts_with("f2_")
         {
-            let inferred = infer_field_label(value);
-            lines.push(format!("{inferred}: {value}"));
+            let inferred = infer_field_label(&normalized_value);
+            lines.push(format!("{inferred}: {normalized_value}"));
         } else {
-            lines.push(format!("{clean_label}: {value}"));
+            lines.push(format!("{clean_label}: {normalized_value}"));
         }
     }
 
@@ -911,7 +957,10 @@ fn reinterleave_form_fields(
                 let form_lines: Vec<String> = field_values
                     .iter()
                     .filter(|v| v.trim().len() >= 2)
-                    .map(|v| format!("Form Field: {v}"))
+                    .map(|v| {
+                        let normalized = normalize_field_value(v);
+                        format!("Form Field: {normalized}")
+                    })
                     .collect();
                 let mut page = original_pages[page_idx].clone();
                 if !form_lines.is_empty() {

@@ -1,5 +1,6 @@
 pub mod assertions;
 pub mod commands;
+pub mod grading;
 pub mod pipeline;
 pub mod state;
 

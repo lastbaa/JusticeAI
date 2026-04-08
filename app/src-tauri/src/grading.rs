@@ -147,6 +147,23 @@ pub fn grade_efficiency(answer: &str, mode: &str) -> (f64, String) {
         notes.push(format!("{filler_count} filler phrase(s) (-{filler_penalty})"));
     }
 
+    // Extended mode section checking
+    if mode == "extended" || mode == "Extended" {
+        let expected_sections = ["**Answer**", "**Key Provisions**", "**Analysis**", "**Caveats**"];
+        let lower_answer = answer.to_lowercase();
+        let mut missing_sections = Vec::new();
+        for section in &expected_sections {
+            if !lower_answer.contains(&section.to_lowercase().replace("**", "")) {
+                missing_sections.push(*section);
+            }
+        }
+        if !missing_sections.is_empty() {
+            let penalty = (missing_sections.len() as f64 * 10.0).min(30.0);
+            score -= penalty;
+            notes.push(format!("Missing sections: {}", missing_sections.join(", ")));
+        }
+    }
+
     // Word count penalty
     let word_count = answer.split_whitespace().count();
     let limit = if mode == "quick" { 300 } else { 800 };
@@ -346,5 +363,40 @@ mod tests {
                        I hope this helps. Let me explain. As mentioned. In conclusion. To summarize. ".repeat(50);
         let (score, _) = grade_efficiency(&answer, "quick");
         assert!(score >= 0.0);
+    }
+
+    // ── Extended mode section checking tests (Gap 28) ───────────────────
+
+    #[test]
+    fn efficiency_extended_all_sections_present() {
+        let answer = "**Answer**\nThe rent is $1000.\n\n**Key Provisions**\nSection 5.\n\n**Analysis**\nThis is standard.\n\n**Caveats**\nConsult a lawyer.";
+        let (score, _) = grade_efficiency(answer, "extended");
+        // No section penalty expected
+        assert_eq!(score, 100.0);
+    }
+
+    #[test]
+    fn efficiency_extended_missing_sections() {
+        let answer = "**Answer**\nThe rent is $1000.\n\n**Analysis**\nThis is standard.";
+        let (score, detail) = grade_efficiency(answer, "extended");
+        // Missing Key Provisions and Caveats => -20
+        assert!(score < 100.0, "score={score}, detail={detail}");
+        assert!(detail.contains("Missing sections"), "detail={detail}");
+    }
+
+    #[test]
+    fn efficiency_extended_all_missing() {
+        let answer = "The rent is $1000 per month.";
+        let (score, detail) = grade_efficiency(answer, "extended");
+        // Missing all 4 sections => -30 (capped)
+        assert!(score <= 70.0, "score={score}, detail={detail}");
+    }
+
+    #[test]
+    fn efficiency_non_extended_no_section_check() {
+        // Non-extended mode should not penalize missing sections
+        let answer = "The rent is $1000 per month.";
+        let (score, _) = grade_efficiency(answer, "balanced");
+        assert_eq!(score, 100.0);
     }
 }

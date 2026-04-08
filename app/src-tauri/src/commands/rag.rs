@@ -1,6 +1,6 @@
 use crate::pipeline::{
     self, chunk_document, embed_text, greeting_response, is_non_document_query,
-    is_simple_greeting, RetrievalBackend, COSINE_FLOOR, GGUF_MIN_SIZE, SAUL_GGUF_URL,
+    is_simple_greeting, RetrievalBackend, GGUF_MIN_SIZE, SAUL_GGUF_URL,
     SCORE_THRESHOLD,
 };
 use crate::state::{
@@ -853,6 +853,20 @@ fn build_neighbor_map(
     map
 }
 
+/// Only include neighbor if it shares >= 3 significant words with the retrieved chunk.
+fn neighbor_is_relevant(target_text: &str, neighbor_text: &str) -> bool {
+    let target_words: std::collections::HashSet<&str> = target_text
+        .split_whitespace()
+        .filter(|w| w.len() > 4)
+        .collect();
+    let neighbor_words: std::collections::HashSet<&str> = neighbor_text
+        .split_whitespace()
+        .filter(|w| w.len() > 4)
+        .collect();
+    let shared = target_words.intersection(&neighbor_words).count();
+    shared >= 3
+}
+
 /// Truncate text to a budget without cutting mid-word or mid-sentence.
 /// Prefers sentence boundaries (`. `), falls back to word boundaries.
 fn truncate_to_budget(text: &str, budget: usize) -> String {
@@ -965,12 +979,13 @@ pub async fn query(
             resolved_jurisdiction.as_ref(),
             chat_params,
         ).await?;
+        let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]);
         return Ok(QueryResult {
             answer: general_answer,
             citations: vec![],
             not_found: false,
             assertions: vec![],
-            confidence: None,
+            confidence: Some(answer_confidence),
         });
     }
 
@@ -987,6 +1002,7 @@ pub async fn query(
     let saved_system_prompt_suffix = inference_params.system_prompt_suffix;
     let saved_system_prompt_override = inference_params.system_prompt_override.clone();
     let saved_timeout_secs = inference_params.timeout_secs;
+    let saved_is_quick = inference_params.is_quick;
     let candidate_k = retrieval_params.candidate_pool_k;
 
     // ── Single consolidated state lock for retrieval + cosine check + form injection + neighbor map ──
@@ -1072,12 +1088,13 @@ pub async fn query(
                 chat_params,
             )
             .await?;
+            let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]);
             return Ok(QueryResult {
                 answer: general_answer,
                 citations: vec![],
                 not_found: false,
                 assertions: vec![],
-                confidence: None,
+                confidence: Some(answer_confidence),
             });
         }
 
@@ -1118,8 +1135,10 @@ pub async fn query(
             top_k: retrieval_params.top_k,
             candidate_pool_k: candidate_k,
             score_threshold: SCORE_THRESHOLD,
-            mmr_lambda: 0.7,
+            mmr_lambda: retrieval_params.mmr_lambda,
             expand_keywords: true,
+            jaccard_threshold: retrieval_params.jaccard_threshold,
+            adaptive_k_gap: retrieval_params.adaptive_k_gap,
         };
         let ranked = backend.retrieve(&question, &query_vec, &corpus, &config);
 
@@ -1179,7 +1198,9 @@ pub async fn query(
                     }
                     if let Some(&global_idx) = neighbor_map.get(&key) {
                         let nbr = &s.embedded_chunks[global_idx];
-                        if !selected_ids.contains(nbr.meta.id.as_str()) {
+                        if !selected_ids.contains(nbr.meta.id.as_str())
+                            && neighbor_is_relevant(&meta.text, &nbr.meta.text)
+                        {
                             parts.push(nbr.meta.text.clone());
                             seen_neighbors.insert(key);
                         }
@@ -1197,13 +1218,14 @@ pub async fn query(
     // If retrieval returned nothing (all below threshold) OR the raw cosine
     // similarity of the best chunk is too low, route to general chat.
     // This prevents hallucination when the query is unrelated to loaded documents.
+    let mode_cosine_floor = retrieval_params.cosine_floor;
     let route_to_general = if results.is_empty() {
         log::info!("Retrieval returned no results above threshold; routing to general chat.");
         true
-    } else if best_cosine < COSINE_FLOOR {
+    } else if best_cosine < mode_cosine_floor {
         log::info!(
             "Best cosine similarity ({:.3}) below floor ({:.2}); routing to general chat.",
-            best_cosine, COSINE_FLOOR
+            best_cosine, mode_cosine_floor
         );
         true
     } else {
@@ -1240,10 +1262,14 @@ pub async fn query(
     // ── Priority-weighted context assembly ────────────────────────────────────
     // Saul-7B has a 4096-token context. Budget is mode-dependent (see RetrievalModeParams).
     // When jurisdiction is active, reduce budget to account for extra prompt tokens.
-    let max_context_chars: usize = if resolved_jurisdiction.is_some() {
-        retrieval_params.max_context_chars_jur
-    } else {
-        retrieval_params.max_context_chars_no_jur
+    let max_context_chars: usize = {
+        let base = if resolved_jurisdiction.is_some() {
+            retrieval_params.max_context_chars_jur
+        } else {
+            retrieval_params.max_context_chars_no_jur
+        };
+        let prompt_overhead_chars = 1800; // System prompt + question + history + formatting
+        base.saturating_sub(prompt_overhead_chars)
     };
     let separator = "\n\n---\n\n";
     let mut context = String::new();
@@ -1418,10 +1444,15 @@ pub async fn query(
     let (mut final_answer, mut final_not_found, mut final_assertions) =
         (answer.clone(), not_found, assertions);
 
-    if has_hallucination || has_fabrication {
+    // Compute confidence BEFORE retry decision so low confidence can trigger a retry
+    let chunk_strings_for_confidence: Vec<String> = chunk_texts.iter().map(|s| s.to_string()).collect();
+    let answer_confidence = crate::assertions::compute_confidence(&answer, &chunk_strings_for_confidence);
+    let should_retry = has_hallucination || has_fabrication || answer_confidence < 0.4;
+
+    if should_retry {
         log::warn!(
-            "Quality check failed (hallucinations: {}, fabrications: {}). Attempting retry.",
-            orig_hall, orig_fab
+            "Quality check failed (hallucinations: {}, fabrications: {}, confidence: {:.2}). Attempting retry.",
+            orig_hall, orig_fab, answer_confidence
         );
         window
             .emit("query-status", serde_json::json!({"phase": "retrying"}))
@@ -1443,6 +1474,7 @@ pub async fn query(
             system_prompt_suffix: saved_system_prompt_suffix,
             system_prompt_override: saved_system_prompt_override,
             timeout_secs: saved_timeout_secs,
+            is_quick: saved_is_quick,
         };
 
         // Reuse the model_cache Arc cloned before the first ask_saul call.

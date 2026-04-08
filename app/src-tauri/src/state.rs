@@ -603,9 +603,29 @@ impl RagState {
     }
 
     /// Generate a short summary describing what a chunk covers.
+    /// Layer 0: structured data detection (tables, form fields).
     /// Layer 1: extract heading from the first few lines.
     /// Layer 2: keyword extraction fallback.
     pub fn summarize_chunk(text: &str) -> String {
+        // Layer 0: Structured data detection
+        // Tables: lines with 2+ tabs or 2+ pipe chars
+        let table_lines = text.lines().filter(|l| l.matches('\t').count() >= 2 || l.matches('|').count() >= 2).count();
+        if table_lines >= 2 {
+            let _total_lines = text.lines().count();
+            return format!("Table ({} rows): {}", table_lines,
+                text.lines().next().unwrap_or("").trim().chars().take(60).collect::<String>());
+        }
+
+        // Field-value pairs: lines matching "Label: Value" pattern
+        let field_lines = text.lines().filter(|l| {
+            let parts: Vec<&str> = l.splitn(2, ':').collect();
+            parts.len() == 2 && parts[0].trim().len() > 1 && parts[0].trim().len() < 40 && parts[1].trim().len() > 0
+        }).count();
+        if field_lines >= 3 {
+            return format!("Form data ({} fields): {}", field_lines,
+                text.lines().take(2).map(|l| l.trim()).collect::<Vec<_>>().join(", "));
+        }
+
         let lines: Vec<&str> = text.lines().take(3).collect();
 
         // Layer 1 — heading extraction
@@ -780,11 +800,14 @@ impl RagState {
             if words.is_empty() {
                 continue;
             }
-            let hits = words
+            let match_count = words
                 .iter()
                 .filter(|w| query_words.contains(&w.to_lowercase()))
                 .count();
-            let score = hits as f32 / (words.len() as f32).sqrt();
+            // Prefer longer sentences (more context) with good match density
+            let length_bonus = (sentence.len() as f64 / 100.0).min(1.0); // 0-1 bonus for length up to 100 chars
+            let adjusted_score = match_count as f64 + length_bonus * 0.5;
+            let score = adjusted_score as f32 / (words.len() as f32).sqrt();
             if score > best_score {
                 best_score = score;
                 best_idx = i;
@@ -1049,5 +1072,49 @@ mod tests {
         let corpus: Vec<&[f32]> = vec![c0.as_slice()];
         let batch = RagState::batch_cosine_similarity(&query, &corpus);
         assert_eq!(batch[0], 0.0);
+    }
+
+    // ── Structured data summarization tests (Gap 13) ────────────────────
+
+    #[test]
+    fn summarize_table_content() {
+        let text = "Name\tAge\tCity\nAlice\t30\tNY\nBob\t25\tLA";
+        let summary = RagState::summarize_chunk(text);
+        assert!(summary.starts_with("Table ("), "got: {}", summary);
+        assert!(summary.contains("rows"), "got: {}", summary);
+    }
+
+    #[test]
+    fn summarize_pipe_table() {
+        let text = "| Name | Age | City |\n| Alice | 30 | NY |\n| Bob | 25 | LA |";
+        let summary = RagState::summarize_chunk(text);
+        assert!(summary.starts_with("Table ("), "got: {}", summary);
+    }
+
+    #[test]
+    fn summarize_form_fields() {
+        let text = "Name: John Smith\nAddress: 123 Main St\nPhone: 555-1234\nEmail: john@example.com";
+        let summary = RagState::summarize_chunk(text);
+        assert!(summary.starts_with("Form data ("), "got: {}", summary);
+        assert!(summary.contains("fields"), "got: {}", summary);
+    }
+
+    #[test]
+    fn summarize_single_table_line_not_triggered() {
+        // Only 1 table line — should not trigger table detection
+        let text = "Name\tAge\tCity\nThis is a normal sentence without tabs.";
+        let summary = RagState::summarize_chunk(text);
+        assert!(!summary.starts_with("Table ("), "got: {}", summary);
+    }
+
+    // ── Length bonus in best_excerpt tests (Gap 14) ─────────────────────
+
+    #[test]
+    fn best_excerpt_prefers_longer_sentence() {
+        // Short sentence has exact match but longer sentence has match + more context
+        let text = "Fee: $100. The monthly fee of $100 is due on the first business day of each calendar month.";
+        let excerpt = RagState::best_excerpt(text, "fee monthly");
+        // Should prefer the longer sentence with more context
+        assert!(excerpt.contains("monthly fee"), "got: {}", excerpt);
     }
 }

@@ -250,6 +250,16 @@ function SectionIcon({ heading }: { heading: string }): JSX.Element | null {
   return null
 }
 
+// ── HTML entity escaping for code content ─────────────────────────────────────
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ── Lightweight markdown renderer ─────────────────────────────────────────────
 function renderMarkdown(text: string, ctx?: MarkdownCtx): JSX.Element {
   const lines = text.split('\n')
@@ -269,12 +279,15 @@ function renderMarkdown(text: string, ctx?: MarkdownCtx): JSX.Element {
         i++
       }
       const codeText = codeLines.join('\n')
+      const escapedCodeText = escapeHtml(codeText)
       elements.push(
         <div key={i} style={{ position: 'relative', margin: '8px 0' }}>
           <pre style={{ background: 'var(--bg)', border: '1px solid rgb(var(--ov) / 0.1)', borderRadius: 10, padding: '12px 16px', overflowX: 'auto', margin: 0 }}>
-            <code style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.82em', color: 'rgb(var(--ov) / 0.82)', lineHeight: 1.65 }} data-lang={lang}>
-              {codeText}
-            </code>
+            <code
+              style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.82em', color: 'rgb(var(--ov) / 0.82)', lineHeight: 1.65 }}
+              data-lang={lang}
+              dangerouslySetInnerHTML={{ __html: escapedCodeText }}
+            />
           </pre>
           <div style={{ position: 'absolute', top: 8, right: 8 }}>
             <CopyButton text={codeText} />
@@ -469,9 +482,11 @@ function inlineMarkdown(text: string, ctx?: MarkdownCtx): (string | JSX.Element)
     } else if (m[4]) {
       // Inline code
       parts.push(
-        <code key={m.index} style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.85em', background: 'rgb(var(--ov) / 0.07)', border: '1px solid rgb(var(--ov) / 0.08)', borderRadius: 4, padding: '0.1em 0.35em' }}>
-          {m[4]}
-        </code>
+        <code
+          key={m.index}
+          style={{ fontFamily: "'SF Mono','Fira Mono',monospace", fontSize: '0.85em', background: 'rgb(var(--ov) / 0.07)', border: '1px solid rgb(var(--ov) / 0.08)', borderRadius: 4, padding: '0.1em 0.35em' }}
+          dangerouslySetInnerHTML={{ __html: escapeHtml(m[4]) }}
+        />
       )
     } else if (m[5] && m[6]) {
       // Citation: [filename, p. N]

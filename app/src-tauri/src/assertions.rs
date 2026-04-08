@@ -414,6 +414,7 @@ pub fn check_citation_pages(
 pub fn check_misattribution(
     answer: &str,
     chunks_by_file: &HashMap<String, Vec<String>>,
+    threshold: f64,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
     let cite_re = Regex::new(r"\[([^,\[\]]+),\s*p\.\s*(\d+)\]").unwrap();
@@ -466,7 +467,7 @@ pub fn check_misattribution(
                 .count();
             let ratio = grounded_count as f64 / key_words.len() as f64;
 
-            if ratio < 0.3 {
+            if ratio < threshold {
                 warnings.push(format!(
                     "Potential misattribution: sentence cites [{}] but only {:.0}% of key terms found in that file: \"{}\"",
                     filename,
@@ -478,6 +479,14 @@ pub fn check_misattribution(
     }
 
     warnings
+}
+
+/// Convenience wrapper for `check_misattribution` using the default 0.30 threshold.
+pub fn check_misattribution_default(
+    answer: &str,
+    chunks_by_file: &HashMap<String, Vec<String>>,
+) -> Vec<String> {
+    check_misattribution(answer, chunks_by_file, 0.30)
 }
 
 /// Compute a confidence score (0.0–1.0) for an answer based on grounding signals.
@@ -545,6 +554,23 @@ pub fn compute_confidence(answer: &str, chunks: &[String]) -> f64 {
     }
 
     confidence.clamp(0.0, 1.0)
+}
+
+/// Compute a confidence score that blends grading-system output (60%) with
+/// heuristic confidence (40%). Use when grading data (known_files, expected
+/// terms, first_hit_rank, mode) is available for a more calibrated result.
+pub fn compute_confidence_with_grading(
+    answer: &str,
+    chunks: &[String],
+    known_files: &[String],
+    expected: &[String],
+    first_hit_rank: Option<usize>,
+    mode: &str,
+) -> f64 {
+    let grade = crate::grading::grade_response(answer, chunks, known_files, expected, first_hit_rank, mode);
+    let grade_confidence = grade.overall / 100.0;
+    let heuristic = compute_confidence(answer, chunks);
+    (grade_confidence * 0.6 + heuristic * 0.4).clamp(0.0, 1.0)
 }
 
 /// Strip sentences from the answer that contain proper nouns or numbers not
@@ -628,12 +654,15 @@ pub fn strip_ungrounded_claims(answer: &str, chunks: &[String]) -> String {
             continue;
         }
 
-        // Check if all key tokens are grounded in sources
-        let grounded = tokens.iter().all(|tok| {
-            sources_lower.contains(&tok.to_lowercase())
-        });
+        // Check if >= 60% of key tokens are grounded in sources.
+        // This prevents stripping sentences where the core fact is grounded
+        // but a name is paraphrased.
+        let grounded_count = tokens.iter()
+            .filter(|tok| sources_lower.contains(&tok.to_lowercase()))
+            .count();
+        let grounded_ratio = grounded_count as f64 / tokens.len() as f64;
 
-        if grounded {
+        if grounded_ratio >= 0.6 {
             kept.push(segment.clone());
         } else {
             log::info!(
@@ -784,7 +813,7 @@ mod tests {
             "lease.pdf".to_string(),
             vec!["Rent is due on the first of each month. Late fees apply after the fifth.".to_string()],
         );
-        let warnings = check_misattribution(answer, &chunks_by_file);
+        let warnings = check_misattribution(answer, &chunks_by_file, 0.30);
         assert!(!warnings.is_empty(), "Should flag misattributed content");
     }
 
@@ -796,7 +825,7 @@ mod tests {
             "lease.pdf".to_string(),
             vec!["The monthly rent payment is due on the first of each calendar month.".to_string()],
         );
-        let warnings = check_misattribution(answer, &chunks_by_file);
+        let warnings = check_misattribution(answer, &chunks_by_file, 0.30);
         assert!(warnings.is_empty(), "Well-grounded citation should pass: {:?}", warnings);
     }
 
@@ -804,7 +833,7 @@ mod tests {
     fn misattribution_skips_unknown_file() {
         let answer = "Details are in [mystery.pdf, p. 1].";
         let chunks_by_file = HashMap::new();
-        let warnings = check_misattribution(answer, &chunks_by_file);
+        let warnings = check_misattribution(answer, &chunks_by_file, 0.30);
         assert!(warnings.is_empty(), "Unknown file should be skipped");
     }
 
@@ -984,5 +1013,89 @@ mod tests {
         assert!(!words.contains("fox"), "'fox' is <= 4 chars");
         assert!(!words.contains("ran"), "'ran' is <= 4 chars");
         assert!(!words.contains("over"), "'over' is <= 4 chars");
+    }
+
+    // ── compute_confidence_with_grading tests ─────────────────────────────
+
+    #[test]
+    fn confidence_with_grading_blends_scores() {
+        let answer = "The rent is $1,500 [lease.pdf, p. 1]. Late fees are $100 [lease.pdf, p. 2].";
+        let chunks = vec![
+            "The rent is $1,500 per month.".to_string(),
+            "Late fees of $100 apply.".to_string(),
+        ];
+        let known_files = vec!["lease.pdf".to_string()];
+        let expected = vec!["rent".to_string(), "$1,500".to_string()];
+        let conf = compute_confidence_with_grading(answer, &chunks, &known_files, &expected, Some(1), "normal");
+        assert!(conf > 0.0 && conf <= 1.0, "Blended confidence should be in (0,1], got {}", conf);
+    }
+
+    #[test]
+    fn confidence_with_grading_low_grade_reduces_score() {
+        // No citations, no expected terms found, no retrieval hit → grade should be low
+        let answer = "Something completely unrelated with no citations.";
+        let chunks = vec!["The lease requires 30 days notice.".to_string()];
+        let known_files = vec!["lease.pdf".to_string()];
+        let expected = vec!["deposit".to_string(), "security".to_string()];
+        let conf = compute_confidence_with_grading(answer, &chunks, &known_files, &expected, None, "normal");
+        let heuristic = compute_confidence(answer, &chunks);
+        // With a low grade, blended should be less than or equal to pure heuristic
+        assert!(conf <= heuristic + 0.05, "Low grade should not inflate confidence: blended={}, heuristic={}", conf, heuristic);
+    }
+
+    // ── strip_ungrounded_claims softened threshold tests ──────────────────
+
+    #[test]
+    fn strip_keeps_sentence_when_most_tokens_grounded() {
+        // "Smith" is not in source but "rent" and "$2,500" and "Monthly" are → 3/4 = 75% ≥ 60%
+        let answer = "Monthly rent from Smith is $2,500.";
+        let chunks = vec!["Monthly rent is $2,500 per the lease agreement.".to_string()];
+        let result = strip_ungrounded_claims(answer, &chunks);
+        assert!(result.contains("$2,500"), "Should keep sentence when >=60% tokens grounded, got: {}", result);
+    }
+
+    #[test]
+    fn strip_removes_sentence_when_few_tokens_grounded() {
+        // Fabricated tokens: "Johannesburg", "Canterbury", "Wellington" — none in source
+        // Only grounded token might be none. All 3 proper nouns ungrounded → 0% < 60%
+        let answer = "Filed in Johannesburg by Canterbury and Wellington.\nThe rent is $2,500.";
+        let chunks = vec!["The rent is $2,500 per month.".to_string()];
+        let result = strip_ungrounded_claims(answer, &chunks);
+        assert!(!result.contains("Johannesburg"), "Should strip sentence with <60% grounded tokens");
+        assert!(result.contains("$2,500"), "Should keep grounded sentence");
+    }
+
+    // ── check_misattribution threshold parameter tests ────────────────────
+
+    #[test]
+    fn misattribution_custom_threshold_stricter() {
+        let answer = "The indemnification clause requires coverage [lease.pdf, p. 3].";
+        let mut chunks_by_file = HashMap::new();
+        chunks_by_file.insert(
+            "lease.pdf".to_string(),
+            vec!["Rent is due on the first of each month. Indemnification applies broadly.".to_string()],
+        );
+        // With a very strict threshold (0.80), even partial grounding should flag
+        let warnings_strict = check_misattribution(answer, &chunks_by_file, 0.80);
+        // With lenient threshold (0.10), should pass
+        let warnings_lenient = check_misattribution(answer, &chunks_by_file, 0.10);
+        assert!(
+            warnings_strict.len() >= warnings_lenient.len(),
+            "Stricter threshold should produce >= warnings: strict={}, lenient={}",
+            warnings_strict.len(), warnings_lenient.len()
+        );
+    }
+
+    #[test]
+    fn misattribution_default_wrapper_matches() {
+        let answer = "The indemnification clause requires unlimited liability coverage [lease.pdf, p. 3].";
+        let mut chunks_by_file = HashMap::new();
+        chunks_by_file.insert(
+            "lease.pdf".to_string(),
+            vec!["Rent is due on the first of each month. Late fees apply after the fifth.".to_string()],
+        );
+        let direct = check_misattribution(answer, &chunks_by_file, 0.30);
+        let default = check_misattribution_default(answer, &chunks_by_file);
+        assert_eq!(direct, default, "Default wrapper should match threshold=0.30");
     }
 }
