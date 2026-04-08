@@ -85,6 +85,14 @@ export interface AppSettings {
   inferenceMode: InferenceMode
 }
 
+export const DEFAULT_SETTINGS: AppSettings = {
+  chunkSize: 1000,
+  chunkOverlap: 150,
+  topK: 6,
+  theme: 'navy',
+  inferenceMode: 'balanced',
+}
+
 export interface ModelStatus {
   llmReady: boolean
   llmSizeGb: number
