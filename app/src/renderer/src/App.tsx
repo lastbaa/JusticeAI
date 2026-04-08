@@ -426,6 +426,7 @@ export default function App(): JSX.Element {
         timestamp: Date.now(),
         qualityAssertions: result.assertions,
         inferenceMode: settings.inferenceMode,
+        confidence: result.confidence,
       }
       setMessages((prev) => {
         const hasStreaming = prev.some((m) => m.id === streamingId)

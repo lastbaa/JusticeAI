@@ -142,7 +142,15 @@ You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\
 2. CITATIONS: Cite every claim as [filename, p. N]. Example: The lease runs 12 months [lease.pdf, p. 3].\n\
 3. EXACTNESS: Reproduce numbers, dates, dollar amounts, and names EXACTLY as written. Never round or approximate.\n\
 4. NO FABRICATION: Never invent case numbers, court names, statutes, party names, or amounts not in the context.\n\
-5. FORMAT: Be direct. No preambles or sign-offs. Bold key terms. Bullets for multiple facts.";
+5. FORMAT: Be direct. No preambles or sign-offs. Bold key terms. Bullets for multiple facts.\n\n\
+Examples:\n\
+Q: What is the lease term?\n\
+A: The lease term is **12 months**, commencing **January 1, 2024** and ending **December 31, 2024** [residential_lease.pdf, p. 3].\n\n\
+Q: Who are the parties?\n\
+A: - **Landlord**: Robert James Smith [lease.pdf, p. 1]\n\
+- **Tenant**: Maria Garcia [lease.pdf, p. 1]\n\n\
+Q: What is the penalty for early termination?\n\
+A: This information is not present in the provided documents.";
 
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
@@ -166,7 +174,7 @@ impl InferenceParams {
             InferenceMode::Quick => Self {
                 max_new_tokens: 256,
                 temperature: 0.15,
-                system_prompt_suffix: "\nAnswer in 1-3 sentences. Extract only the specific fact requested. Cite the source.",
+                system_prompt_suffix: "\nStart your answer with the specific fact or value requested. Answer in 1-3 sentences. Cite the source.",
                 system_prompt_override: None,
                 timeout_secs: 30,
             },
@@ -180,7 +188,7 @@ impl InferenceParams {
             InferenceMode::Extended => Self {
                 max_new_tokens: 1024,
                 temperature: 0.10,
-                system_prompt_suffix: "\nStructure your response as:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim.",
+                system_prompt_suffix: "\nFirst, identify the relevant facts in the context. Then, provide your structured response:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim.",
                 system_prompt_override: None,
                 timeout_secs: 120,
             },
@@ -1734,6 +1742,81 @@ pub fn mmr_select(
         .collect()
 }
 
+// ── Query Expansion ──────────────────────────────────────────────────────────
+
+/// Generate alternative query phrasings for better retrieval coverage.
+/// Returns the original query plus up to 2 rewrites.
+pub fn expand_query(query: &str) -> Vec<String> {
+    let mut queries = vec![query.to_string()];
+    let lower = query.to_lowercase();
+
+    // 1. Legal synonym substitution
+    let substitutions = [
+        ("landlord", "lessor"),
+        ("tenant", "lessee"),
+        ("buyer", "purchaser"),
+        ("seller", "vendor"),
+        ("employee", "worker"),
+        ("employer", "company"),
+        ("contract", "agreement"),
+        ("payment", "compensation"),
+        ("penalty", "liquidated damages"),
+        ("terminate", "cancel"),
+        ("breach", "violation"),
+        ("property", "premises"),
+        ("rent", "lease payment"),
+        ("sue", "bring action"),
+        ("court", "tribunal"),
+        ("law", "statute"),
+        ("sign", "execute"),
+        ("deadline", "due date"),
+        ("fee", "charge"),
+        ("damages", "liability"),
+    ];
+
+    // Try each substitution — if query contains term, create rewrite with replacement
+    for (term, replacement) in &substitutions {
+        if lower.contains(term) && !lower.contains(replacement) {
+            let rewritten = lower.replace(term, replacement);
+            queries.push(rewritten);
+            break; // Only one synonym rewrite
+        }
+        if lower.contains(replacement) && !lower.contains(term) {
+            let rewritten = lower.replace(replacement, term);
+            queries.push(rewritten);
+            break;
+        }
+    }
+
+    // 2. Question → statement transformation
+    // "What is the rent amount?" → "rent amount"
+    // "Who is the landlord?" → "landlord identity name"
+    let statement = lower
+        .trim_end_matches('?')
+        .replace("what is the ", "")
+        .replace("what are the ", "")
+        .replace("who is the ", "")
+        .replace("who are the ", "")
+        .replace("when is the ", "")
+        .replace("when does the ", "")
+        .replace("where is the ", "")
+        .replace("how much is the ", "")
+        .replace("how many ", "")
+        .replace("is there a ", "")
+        .replace("does the ", "")
+        .replace("can the ", "")
+        .trim()
+        .to_string();
+
+    if statement != lower.trim_end_matches('?').trim() && statement.len() > 3 {
+        queries.push(statement);
+    }
+
+    // Cap at 3 total
+    queries.truncate(3);
+    queries
+}
+
 // ── Pluggable Retrieval Backend ───────────────────────────────────────────────
 
 /// A scored result referencing a corpus item by index.
@@ -1911,9 +1994,19 @@ impl RetrievalBackend for HybridBm25Cosine {
             return vec![];
         }
 
-        // 1. BM25 scoring
+        // 1. BM25 scoring — multi-query expansion for broader keyword coverage.
+        // Tokenize the original query plus any expanded query variants.
         let bm25_index = Bm25Index::build(&corpus.texts);
+        let query_variants = expand_query(query_text);
         let mut query_terms = bm25_tokenize(&query_text.to_lowercase());
+        // Merge tokens from expanded query variants into BM25 terms.
+        for variant in &query_variants[1..] {
+            for token in bm25_tokenize(variant) {
+                if !query_terms.contains(&token) {
+                    query_terms.push(token);
+                }
+            }
+        }
         if config.expand_keywords {
             let keywords = extract_query_keywords(query_text, true);
             for kw in &keywords {
@@ -3425,5 +3518,59 @@ defers to state insurance regulation."#;
         assert!(is_non_document_query("test"));
         assert!(is_non_document_query("testing"));
         assert!(is_non_document_query("ping"));
+    }
+
+    // ── expand_query ─────────────────────────────────────────────────────
+
+    #[test]
+    fn expand_query_includes_original() {
+        let results = expand_query("What is the rent amount?");
+        assert_eq!(results[0], "What is the rent amount?");
+    }
+
+    #[test]
+    fn expand_query_synonym_substitution() {
+        let results = expand_query("Who is the landlord?");
+        assert!(results.len() >= 2, "Should have at least 2 variants: {:?}", results);
+        assert!(results.iter().any(|q| q.contains("lessor")),
+            "Should substitute landlord → lessor: {:?}", results);
+    }
+
+    #[test]
+    fn expand_query_reverse_synonym() {
+        let results = expand_query("Name of the lessee");
+        assert!(results.iter().any(|q| q.contains("tenant")),
+            "Should substitute lessee → tenant: {:?}", results);
+    }
+
+    #[test]
+    fn expand_query_question_to_statement() {
+        let results = expand_query("What is the rent amount?");
+        assert!(results.iter().any(|q| !q.contains("what is the")),
+            "Should produce a statement variant: {:?}", results);
+        assert!(results.iter().any(|q| q.contains("rent amount")),
+            "Statement should contain 'rent amount': {:?}", results);
+    }
+
+    #[test]
+    fn expand_query_capped_at_three() {
+        let results = expand_query("What is the landlord's penalty?");
+        assert!(results.len() <= 3, "Should cap at 3: {:?}", results);
+    }
+
+    #[test]
+    fn expand_query_no_expansion_for_plain() {
+        // A query with no legal synonyms and no question pattern
+        let results = expand_query("summarize the document");
+        assert_eq!(results.len(), 1, "No expansion expected: {:?}", results);
+        assert_eq!(results[0], "summarize the document");
+    }
+
+    #[test]
+    fn expand_query_breach_to_violation() {
+        // "breach" alone (no "contract" to match first)
+        let results = expand_query("Was there a breach of the terms?");
+        assert!(results.iter().any(|q| q.contains("violation")),
+            "Should substitute breach → violation: {:?}", results);
     }
 }

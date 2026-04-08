@@ -101,6 +101,7 @@ export interface ChatMessage {
   qualityAssertions?: unknown
   inferenceMode?: string
   isGreeting?: boolean
+  confidence?: number
 }
 
 export interface ChatSession {

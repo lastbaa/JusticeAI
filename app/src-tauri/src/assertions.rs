@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +19,32 @@ pub enum AssertionType {
     Blocklist,
     Hallucination,
     FabricatedEntity,
+}
+
+/// Common English stopwords used to filter key content words.
+const STOPWORDS: &[&str] = &[
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
+    "being", "have", "has", "had", "do", "does", "did", "will", "would",
+    "could", "should", "may", "might", "can", "this", "that", "these",
+    "those", "it", "its", "not", "no", "nor", "if", "then", "than",
+    "so", "as", "any", "all", "each", "every", "such", "other", "into",
+    "upon", "under", "over", "between", "through", "after", "before",
+    "shall", "hereby", "thereof", "herein", "pursuant", "notwithstanding",
+    "hereinafter", "therein", "thereto", "whereas", "hereunder", "hereof",
+    "also", "about", "which", "when", "where", "there", "their", "they",
+    "them", "what", "who", "whom", "your", "you", "more", "most", "some",
+    "only", "very", "just", "still", "here", "both", "same", "while",
+];
+
+/// Extract key content words from text: words > 4 chars that are not stopwords.
+fn extract_key_words(text: &str) -> HashSet<String> {
+    let stopset: HashSet<&str> = STOPWORDS.iter().copied().collect();
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 4 && !stopset.contains(w))
+        .map(|w| w.to_string())
+        .collect()
 }
 
 /// Verify citations match `[filename, p. N]` format, at least one exists,
@@ -101,24 +128,49 @@ pub fn check_blocklist(answer: &str, blocked: &[&str]) -> Vec<AssertionResult> {
         .collect()
 }
 
-/// Extract sentences containing numbers or capitalized proper nouns from the
-/// answer, then verify each appears (substring) in at least one source chunk.
+/// Extract sentences containing numbers, capitalized proper nouns, strong legal
+/// qualifiers, or negation+legal patterns from the answer, then verify each
+/// appears (substring) in at least one source chunk.
 pub fn check_no_hallucination(answer: &str, chunks: &[&str]) -> Vec<AssertionResult> {
+    // Original pattern: sentences with numbers or proper nouns
     let claim_re = Regex::new(
         r"(?:^|[.!?]\s+)([A-Z][^.!?]*(?:\d[\d,./%$]+|[A-Z][a-z]{2,})[^.!?]*[.!?])"
     ).unwrap();
 
+    let legal_qualifiers = [
+        "perpetual", "unlimited", "exclusive", "irrevocable", "non-refundable",
+        "binding", "mandatory", "prohibited", "waived", "forfeited", "void",
+        "terminated", "expired", "renewed", "amended", "assignable",
+        "non-transferable", "confidential", "material",
+    ];
+
+    let negation_re = Regex::new(
+        r"\b(no|not|never|none|cannot|shall not|must not|may not)\b"
+    ).unwrap();
+
+    // Regex to strip inline citations before matching against source text
+    let cite_strip = Regex::new(r"\s*\[[^\]]*\]").unwrap();
+
+    // Split answer into sentences for qualifier/negation checks
+    let sentence_split_re = Regex::new(r"(?s)([^.!?\n]+[.!?])").unwrap();
+    let all_sentences: Vec<&str> = sentence_split_re
+        .find_iter(answer)
+        .map(|m| m.as_str().trim())
+        .filter(|s| s.len() >= 15)
+        .collect();
+
     let mut results = Vec::new();
+    let mut checked_sentences: HashSet<String> = HashSet::new();
+
+    // 1. Original: sentences with numbers or proper nouns (token-level check)
     for cap in claim_re.captures_iter(answer) {
         let sentence = cap[1].trim();
-        // Strip inline citations before matching against source text
-        let cite_strip = Regex::new(r"\s*\[[^\]]*\]").unwrap();
         let clean = cite_strip.replace_all(sentence, "").trim().to_string();
         if clean.len() < 15 {
             continue;
         }
-        // Extract key tokens (numbers, capitalized words 3+ chars) and check
-        // that each token appears in at least one chunk.
+        checked_sentences.insert(clean.clone());
+
         let token_re = Regex::new(r"\d[\d,./%$]+|[A-Z][a-z]{2,}").unwrap();
         let tokens: Vec<&str> = token_re.find_all(&clean).map(|m| m.as_str()).collect();
         if tokens.is_empty() {
@@ -143,6 +195,89 @@ pub fn check_no_hallucination(answer: &str, chunks: &[&str]) -> Vec<AssertionRes
             },
         });
     }
+
+    // 2. Qualitative claims: sentences with strong legal qualifiers
+    let chunks_lower: Vec<String> = chunks.iter().map(|c| c.to_lowercase()).collect();
+
+    for sentence in &all_sentences {
+        let clean = cite_strip.replace_all(sentence, "").trim().to_string();
+        if clean.len() < 15 || checked_sentences.contains(&clean) {
+            continue;
+        }
+        let lower = clean.to_lowercase();
+        let has_qualifier = legal_qualifiers.iter().any(|q| lower.contains(q));
+        if !has_qualifier {
+            continue;
+        }
+        checked_sentences.insert(clean.clone());
+
+        let key_words = extract_key_words(&clean);
+        if key_words.is_empty() {
+            continue;
+        }
+        let grounded_count = key_words.iter()
+            .filter(|w| chunks_lower.iter().any(|c| c.contains(w.as_str())))
+            .count();
+        let ratio = grounded_count as f64 / key_words.len() as f64;
+        let passed = ratio >= 0.5;
+        results.push(AssertionResult {
+            passed,
+            assertion_type: AssertionType::Hallucination,
+            message: if passed {
+                format!("Qualifier claim grounded ({:.0}%): \"{}\"", ratio * 100.0, truncate(&clean, 80))
+            } else {
+                format!(
+                    "Possible hallucination — qualifier claim only {:.0}% grounded: \"{}\"",
+                    ratio * 100.0, truncate(&clean, 80)
+                )
+            },
+        });
+    }
+
+    // 3. Negation claims: sentences with negation + legal terms
+    let legal_context_terms = [
+        "contract", "agreement", "clause", "term", "party", "obligation",
+        "right", "liability", "warranty", "indemnity", "license", "payment",
+        "notice", "termination", "breach", "remedy", "dispute", "claim",
+        "damages", "penalty", "consent", "approval", "assignment",
+    ];
+
+    for sentence in &all_sentences {
+        let clean = cite_strip.replace_all(sentence, "").trim().to_string();
+        if clean.len() < 15 || checked_sentences.contains(&clean) {
+            continue;
+        }
+        let lower = clean.to_lowercase();
+        let has_negation = negation_re.is_match(&lower);
+        let has_legal = legal_context_terms.iter().any(|t| lower.contains(t));
+        if !has_negation || !has_legal {
+            continue;
+        }
+        checked_sentences.insert(clean.clone());
+
+        let key_words = extract_key_words(&clean);
+        if key_words.is_empty() {
+            continue;
+        }
+        let grounded_count = key_words.iter()
+            .filter(|w| chunks_lower.iter().any(|c| c.contains(w.as_str())))
+            .count();
+        let ratio = grounded_count as f64 / key_words.len() as f64;
+        let passed = ratio >= 0.5;
+        results.push(AssertionResult {
+            passed,
+            assertion_type: AssertionType::Hallucination,
+            message: if passed {
+                format!("Negation claim grounded ({:.0}%): \"{}\"", ratio * 100.0, truncate(&clean, 80))
+            } else {
+                format!(
+                    "Possible hallucination — negation claim only {:.0}% grounded: \"{}\"",
+                    ratio * 100.0, truncate(&clean, 80)
+                )
+            },
+        });
+    }
+
     if results.is_empty() {
         results.push(AssertionResult {
             passed: true,
@@ -241,27 +376,162 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
     results
 }
 
+/// Validate page numbers in citations against known page counts.
+/// Returns a list of violations for citations referencing pages beyond a file's
+/// actual page count.
+pub fn check_citation_pages(
+    answer: &str,
+    file_page_counts: &HashMap<String, usize>,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let cite_re = Regex::new(r"\[([^,\[\]]+),\s*p\.\s*(\d+)\]").unwrap();
+
+    for cap in cite_re.captures_iter(answer) {
+        let filename = cap[1].trim();
+        let page: usize = match cap[2].parse() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+
+        if let Some(&total) = file_page_counts.get(filename) {
+            if page > total {
+                violations.push(format!(
+                    "Citation [{}, p. {}] invalid: file has only {} pages",
+                    filename, page, total
+                ));
+            }
+        }
+        // If file not in map, skip (can't validate)
+    }
+
+    violations
+}
+
+/// Check if cited facts actually appear in the cited source file.
+/// For each citation and the sentence it appears in, extracts key terms and
+/// checks whether they appear in chunks from that specific file. If <30% of
+/// key terms are found, flags as potential misattribution.
+pub fn check_misattribution(
+    answer: &str,
+    chunks_by_file: &HashMap<String, Vec<String>>,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let cite_re = Regex::new(r"\[([^,\[\]]+),\s*p\.\s*(\d+)\]").unwrap();
+    let cite_strip = Regex::new(r"\s*\[[^\]]*\]").unwrap();
+
+    // Neutralize periods inside brackets so "p. N" doesn't cause sentence breaks.
+    // Replace each char inside [...] with a space (preserves byte offsets).
+    let mut neutralized: Vec<u8> = answer.bytes().collect();
+    let mut in_bracket = false;
+    for b in neutralized.iter_mut() {
+        match *b {
+            b'[' => in_bracket = true,
+            b']' => in_bracket = false,
+            b'.' | b'!' | b'?' if in_bracket => *b = b' ',
+            _ => {}
+        }
+    }
+    let neutralized_str = String::from_utf8_lossy(&neutralized);
+    let sentence_re = Regex::new(r"(?s)([^.!?\n]+[.!?])").unwrap();
+
+    // Find sentence boundaries in neutralized text, then map back to original
+    let sentences: Vec<&str> = sentence_re
+        .find_iter(&neutralized_str)
+        .filter_map(|m| answer.get(m.start()..m.end()))
+        .map(|s| s.trim())
+        .collect();
+
+    for sentence in &sentences {
+        for cap in cite_re.captures_iter(sentence) {
+            let filename = cap[1].trim().to_string();
+            let file_chunks = match chunks_by_file.get(&filename) {
+                Some(c) => c,
+                None => continue, // Can't validate without chunks
+            };
+
+            // Strip citations from sentence to get the claim text
+            let clean = cite_strip.replace_all(sentence, "").trim().to_string();
+            let key_words = extract_key_words(&clean);
+            if key_words.is_empty() {
+                continue;
+            }
+
+            let file_text: String = file_chunks.iter()
+                .map(|c| c.to_lowercase())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            let grounded_count = key_words.iter()
+                .filter(|w| file_text.contains(w.as_str()))
+                .count();
+            let ratio = grounded_count as f64 / key_words.len() as f64;
+
+            if ratio < 0.3 {
+                warnings.push(format!(
+                    "Potential misattribution: sentence cites [{}] but only {:.0}% of key terms found in that file: \"{}\"",
+                    filename,
+                    ratio * 100.0,
+                    truncate(&clean, 80)
+                ));
+            }
+        }
+    }
+
+    warnings
+}
+
 /// Compute a confidence score (0.0–1.0) for an answer based on grounding signals.
 /// Starts at 1.0 and deducts for hedging language, missing citations, short answers,
-/// and "not found" disclaimers. Boosts for multiple citations (good grounding).
-pub fn compute_confidence(answer: &str, _chunks: &[String]) -> f64 {
+/// and "not found" disclaimers. Boosts for multiple citations and strong grounding.
+pub fn compute_confidence(answer: &str, chunks: &[String]) -> f64 {
     let mut confidence: f64 = 1.0;
+    let lower = answer.to_lowercase();
 
     // Deduct for hedging language
     let hedges = [
-        "may be", "possibly", "it appears", "it seems", "might",
+        "may be", "possibly", "it appears", "it seems", "might be",
         "could be", "perhaps", "unclear", "uncertain",
     ];
-    let lower = answer.to_lowercase();
     for hedge in &hedges {
         if lower.contains(hedge) {
             confidence -= 0.05;
         }
     }
 
-    // Deduct if no citations found
-    if !answer.contains('[') || !answer.contains(", p.") {
-        confidence -= 0.2;
+    // Citation-based scoring
+    let citation_count = answer.matches(", p.").count();
+    match citation_count {
+        0 => confidence -= 0.25,
+        1 => confidence -= 0.05,
+        2..=4 => confidence += 0.05,
+        _ => confidence += 0.10,
+    }
+
+    // Factual density: ratio of sentences with at least one citation
+    let sentences: Vec<&str> = answer.split(". ").collect();
+    let cited_sentences = sentences.iter()
+        .filter(|s| s.contains('[') && s.contains(", p."))
+        .count();
+    if sentences.len() > 2 {
+        let citation_ratio = cited_sentences as f64 / sentences.len() as f64;
+        if citation_ratio < 0.3 {
+            confidence -= 0.15;
+        } else if citation_ratio > 0.6 {
+            confidence += 0.05;
+        }
+    }
+
+    // Content grounding against chunks
+    let answer_words: HashSet<&str> = lower.split_whitespace()
+        .filter(|w| w.len() > 4)
+        .collect();
+    if !answer_words.is_empty() && !chunks.is_empty() {
+        let chunk_text = chunks.join(" ").to_lowercase();
+        let grounded = answer_words.iter().filter(|w| chunk_text.contains(*w)).count();
+        let grounding_ratio = grounded as f64 / answer_words.len() as f64;
+        if grounding_ratio < 0.5 {
+            confidence -= 0.20;
+        }
     }
 
     // Deduct if answer is very short (< 50 chars) for non-simple queries
@@ -274,12 +544,6 @@ pub fn compute_confidence(answer: &str, _chunks: &[String]) -> f64 {
         confidence -= 0.15;
     }
 
-    // Boost if multiple citations found (good grounding)
-    let citation_count = answer.matches(", p.").count();
-    if citation_count >= 3 {
-        confidence += 0.1;
-    }
-
     confidence.clamp(0.0, 1.0)
 }
 
@@ -287,19 +551,55 @@ pub fn compute_confidence(answer: &str, _chunks: &[String]) -> f64 {
 /// grounded in any source chunk. This is a last-resort cleanup that removes
 /// individual ungrounded sentences rather than failing the whole response.
 /// If all sentences would be removed, returns the original answer unchanged.
+///
+/// Handles sentences ending with `.\n`, `.\n\n`, and bullet points (`- `, `* `).
 pub fn strip_ungrounded_claims(answer: &str, chunks: &[String]) -> String {
     let all_sources = chunks.join(" ");
     let sources_lower = all_sources.to_lowercase();
 
-    // Split into sentences (rough: split on `. `, `! `, `? `, or newline)
-    let sentence_re = Regex::new(r"(?s)([^.!?\n]+[.!?])").unwrap();
-    let sentences: Vec<&str> = sentence_re
-        .find_iter(answer)
-        .map(|m| m.as_str())
-        .collect();
+    // Split into lines first, then split lines into sentences
+    // This handles bullet points and newline-separated content
+    let mut segments: Vec<String> = Vec::new();
+    for line in answer.split('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            segments.push(String::new()); // preserve paragraph breaks
+            continue;
+        }
 
-    if sentences.is_empty() {
-        return answer.to_string();
+        // Detect bullet prefix
+        let (prefix, content) = if trimmed.starts_with("- ") {
+            ("- ", &trimmed[2..])
+        } else if trimmed.starts_with("* ") {
+            ("* ", &trimmed[2..])
+        } else {
+            ("", trimmed)
+        };
+
+        // Split content into sentences within this line
+        let sentence_re = Regex::new(r"(?s)([^.!?]+[.!?])").unwrap();
+        let line_sentences: Vec<&str> = sentence_re
+            .find_iter(content)
+            .map(|m| m.as_str())
+            .collect();
+
+        if line_sentences.is_empty() {
+            // No sentence-ending punctuation; treat whole line as one segment
+            segments.push(format!("{}{}", prefix, content));
+        } else {
+            for (i, s) in line_sentences.iter().enumerate() {
+                let p = if i == 0 { prefix } else { "" };
+                segments.push(format!("{}{}", p, s.trim()));
+            }
+            // Trailing text after last sentence
+            let last_end = content.rfind(|c: char| c == '.' || c == '!' || c == '?');
+            if let Some(pos) = last_end {
+                let tail = content[pos + 1..].trim();
+                if !tail.is_empty() {
+                    segments.push(tail.to_string());
+                }
+            }
+        }
     }
 
     // Regex for proper nouns (capitalized multi-char words) and numbers
@@ -307,14 +607,24 @@ pub fn strip_ungrounded_claims(answer: &str, chunks: &[String]) -> String {
     // Regex to strip inline citations before checking
     let cite_strip_re = Regex::new(r"\s*\[[^\]]*\]").unwrap();
 
-    let mut kept: Vec<&str> = Vec::new();
-    for sentence in &sentences {
-        let clean = cite_strip_re.replace_all(sentence, "");
+    let original_count = segments.iter().filter(|s| !s.trim().is_empty()).count();
+    let mut kept: Vec<String> = Vec::new();
+
+    for segment in &segments {
+        let trimmed = segment.trim();
+
+        // Preserve empty lines (paragraph breaks)
+        if trimmed.is_empty() {
+            kept.push(String::new());
+            continue;
+        }
+
+        let clean = cite_strip_re.replace_all(trimmed, "");
         let tokens: Vec<&str> = key_token_re.find_iter(&clean).map(|m| m.as_str()).collect();
 
-        // If no key tokens, keep the sentence (it's generic/connective text)
+        // If no key tokens, keep (it's generic/connective text)
         if tokens.is_empty() {
-            kept.push(sentence);
+            kept.push(segment.clone());
             continue;
         }
 
@@ -324,26 +634,42 @@ pub fn strip_ungrounded_claims(answer: &str, chunks: &[String]) -> String {
         });
 
         if grounded {
-            kept.push(sentence);
+            kept.push(segment.clone());
         } else {
             log::info!(
-                "Stripping ungrounded sentence: \"{}\"",
-                if sentence.len() > 80 { &sentence[..80] } else { sentence }
+                "Stripping ungrounded segment: \"{}\"",
+                if trimmed.len() > 80 { &trimmed[..80] } else { trimmed }
             );
         }
     }
 
-    // If all sentences removed, return original (don't make it worse)
-    if kept.is_empty() {
+    // Count non-empty kept segments
+    let kept_count = kept.iter().filter(|s| !s.trim().is_empty()).count();
+
+    // If all segments removed, return original (don't make it worse)
+    if kept_count == 0 {
         return answer.to_string();
     }
 
     // If nothing was stripped, return original to preserve formatting
-    if kept.len() == sentences.len() {
+    if kept_count == original_count {
         return answer.to_string();
     }
 
-    kept.join(" ")
+    // Remove orphaned bullet markers and trailing empty lines
+    let result: Vec<&str> = kept.iter()
+        .map(|s| s.as_str())
+        .filter(|s| {
+            let t = s.trim();
+            // Remove lines that are just bullet markers with no content
+            t != "-" && t != "*" && t != "- " && t != "* "
+        })
+        .collect();
+
+    // Join with newlines, collapse multiple blank lines
+    let joined = result.join("\n");
+    let collapse_re = Regex::new(r"\n{3,}").unwrap();
+    collapse_re.replace_all(&joined, "\n\n").trim().to_string()
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -370,6 +696,193 @@ impl<'t> FindAll<'t> for Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── check_no_hallucination tests ─────────────────────────────────────────
+
+    #[test]
+    fn hallucination_catches_qualifier_claim() {
+        let answer = "The license is perpetual and irrevocable under all circumstances.";
+        let chunks = &["The license is granted for a period of 12 months."];
+        let results = check_no_hallucination(answer, chunks);
+        let has_flag = results.iter().any(|r| !r.passed);
+        assert!(has_flag, "Should flag ungrounded qualifier claim");
+    }
+
+    #[test]
+    fn hallucination_passes_grounded_qualifier() {
+        let answer = "The license is exclusive and non-transferable.";
+        let chunks = &["Licensor grants an exclusive, non-transferable license to use the software."];
+        let results = check_no_hallucination(answer, chunks);
+        let has_flag = results.iter().any(|r| !r.passed);
+        assert!(!has_flag, "Grounded qualifier claim should pass");
+    }
+
+    #[test]
+    fn hallucination_catches_negation_claim() {
+        let answer = "The contract contains no termination clause whatsoever.";
+        let chunks = &["Either party may terminate this agreement with 30 days notice."];
+        let results = check_no_hallucination(answer, chunks);
+        let has_flag = results.iter().any(|r| !r.passed);
+        assert!(has_flag, "Should flag ungrounded negation+legal claim");
+    }
+
+    #[test]
+    fn hallucination_passes_grounded_negation() {
+        let answer = "The agreement shall not be assigned without prior written consent.";
+        let chunks = &["This agreement shall not be assigned without prior written consent of the other party."];
+        let results = check_no_hallucination(answer, chunks);
+        let has_flag = results.iter().any(|r| !r.passed);
+        assert!(!has_flag, "Grounded negation claim should pass");
+    }
+
+    // ── check_citation_pages tests ──────────────────────────────────────────
+
+    #[test]
+    fn citation_page_valid() {
+        let answer = "See [contract.pdf, p. 5] for details.";
+        let mut pages = HashMap::new();
+        pages.insert("contract.pdf".to_string(), 10);
+        let violations = check_citation_pages(answer, &pages);
+        assert!(violations.is_empty(), "Page 5 of 10 should be valid");
+    }
+
+    #[test]
+    fn citation_page_exceeds_count() {
+        let answer = "See [contract.pdf, p. 50] for details.";
+        let mut pages = HashMap::new();
+        pages.insert("contract.pdf".to_string(), 10);
+        let violations = check_citation_pages(answer, &pages);
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].contains("only 10 pages"));
+    }
+
+    #[test]
+    fn citation_page_unknown_file_skipped() {
+        let answer = "See [unknown.pdf, p. 99] for details.";
+        let pages = HashMap::new();
+        let violations = check_citation_pages(answer, &pages);
+        assert!(violations.is_empty(), "Unknown file should be skipped");
+    }
+
+    #[test]
+    fn citation_page_multiple_violations() {
+        let answer = "See [a.pdf, p. 5] and [b.pdf, p. 20] for details.";
+        let mut pages = HashMap::new();
+        pages.insert("a.pdf".to_string(), 3);
+        pages.insert("b.pdf".to_string(), 8);
+        let violations = check_citation_pages(answer, &pages);
+        assert_eq!(violations.len(), 2);
+    }
+
+    // ── check_misattribution tests ──────────────────────────────────────────
+
+    #[test]
+    fn misattribution_detected() {
+        let answer = "The indemnification clause requires unlimited liability coverage [lease.pdf, p. 3].";
+        let mut chunks_by_file = HashMap::new();
+        chunks_by_file.insert(
+            "lease.pdf".to_string(),
+            vec!["Rent is due on the first of each month. Late fees apply after the fifth.".to_string()],
+        );
+        let warnings = check_misattribution(answer, &chunks_by_file);
+        assert!(!warnings.is_empty(), "Should flag misattributed content");
+    }
+
+    #[test]
+    fn misattribution_passes_when_grounded() {
+        let answer = "Monthly rent payment is due on the first of each calendar month [lease.pdf, p. 1].";
+        let mut chunks_by_file = HashMap::new();
+        chunks_by_file.insert(
+            "lease.pdf".to_string(),
+            vec!["The monthly rent payment is due on the first of each calendar month.".to_string()],
+        );
+        let warnings = check_misattribution(answer, &chunks_by_file);
+        assert!(warnings.is_empty(), "Well-grounded citation should pass: {:?}", warnings);
+    }
+
+    #[test]
+    fn misattribution_skips_unknown_file() {
+        let answer = "Details are in [mystery.pdf, p. 1].";
+        let chunks_by_file = HashMap::new();
+        let warnings = check_misattribution(answer, &chunks_by_file);
+        assert!(warnings.is_empty(), "Unknown file should be skipped");
+    }
+
+    // ── compute_confidence tests ────────────────────────────────────────────
+
+    #[test]
+    fn confidence_no_citations_penalized() {
+        let answer = "The agreement requires 30 days notice for termination. This is a standard clause in most contracts.";
+        let chunks = vec!["The agreement requires 30 days notice for termination.".to_string()];
+        let conf = compute_confidence(answer, &chunks);
+        assert!(conf < 0.85, "No citations should reduce confidence, got {}", conf);
+    }
+
+    #[test]
+    fn confidence_well_cited_answer() {
+        let answer = "The rent is $2,500 [lease.pdf, p. 1]. Late fees are $100 [lease.pdf, p. 2]. Notice period is 30 days [lease.pdf, p. 3].";
+        let chunks = vec![
+            "rent is $2,500 per month".to_string(),
+            "late fees of $100".to_string(),
+            "notice period is 30 days".to_string(),
+        ];
+        let conf = compute_confidence(answer, &chunks);
+        assert!(conf > 0.8, "Well-cited answer should have high confidence, got {}", conf);
+    }
+
+    #[test]
+    fn confidence_hedging_reduces_score() {
+        let answer = "It seems the contract may be void. It appears there might be an issue [doc.pdf, p. 1].";
+        let chunks = vec!["contract void issue".to_string()];
+        let conf = compute_confidence(answer, &chunks);
+        assert!(conf < 0.9, "Hedging should reduce confidence, got {}", conf);
+    }
+
+    #[test]
+    fn confidence_ungrounded_content_penalized() {
+        let answer = "The zygomorphic parameterization of the stochastic eigenvalues indicates divergence [doc.pdf, p. 1].";
+        let chunks = vec!["The lease requires 30 days notice.".to_string()];
+        let conf = compute_confidence(answer, &chunks);
+        assert!(conf < 0.85, "Ungrounded content should reduce confidence, got {}", conf);
+    }
+
+    // ── strip_ungrounded_claims tests ───────────────────────────────────────
+
+    #[test]
+    fn strip_handles_newline_sentences() {
+        let answer = "The rent is $2,500.\nThe landlord is John Smith.\nThe lease expires in December.";
+        let chunks = vec!["The rent is $2,500 per month. The lease expires in December 2025.".to_string()];
+        let result = strip_ungrounded_claims(answer, &chunks);
+        assert!(!result.contains("John Smith"), "Should strip ungrounded John Smith sentence");
+        assert!(result.contains("$2,500"), "Should keep grounded rent sentence");
+    }
+
+    #[test]
+    fn strip_preserves_bullet_formatting() {
+        let answer = "Key terms:\n- The rent is $2,500.\n- The landlord is John Smith.\n- Payment due monthly.";
+        let chunks = vec!["The rent is $2,500. Payment due monthly.".to_string()];
+        let result = strip_ungrounded_claims(answer, &chunks);
+        assert!(!result.contains("John Smith"), "Should strip ungrounded bullet");
+        assert!(result.contains("$2,500"), "Should keep grounded bullet");
+    }
+
+    #[test]
+    fn strip_no_orphan_bullets() {
+        let answer = "Items:\n- The landlord is John Smith.\n- End of list.";
+        // Only "John Smith" is ungrounded; "End" short token is ignored
+        let chunks = vec!["End of list noted.".to_string()];
+        let result = strip_ungrounded_claims(answer, &chunks);
+        // Should not contain orphaned "- " with no content
+        assert!(!result.contains("\n- \n"), "Should not leave orphaned bullet markers");
+    }
+
+    #[test]
+    fn strip_returns_original_when_all_grounded() {
+        let answer = "The rent is $2,500.\nPayment is due monthly.";
+        let chunks = vec!["The rent is $2,500. Payment is due monthly.".to_string()];
+        let result = strip_ungrounded_claims(answer, &chunks);
+        assert_eq!(result, answer, "Should return original when nothing stripped");
+    }
 
     // ── check_fabricated_entities tests ────────────────────────────────────────
 
@@ -438,8 +951,6 @@ mod tests {
 
     #[test]
     fn hello_hallucination_scenario() {
-        // This is the exact scenario from the bug: user says "Hello", model fabricates
-        // court details that don't exist in any document.
         let answer = "The case is currently in the Superior Court of California, County of San Diego.\n\
             The case is about a dispute between the plaintiff, the defendant, and the defendant's \
             insurer regarding the defendant's alleged negligence in causing harm to the plaintiff.";
@@ -450,5 +961,28 @@ mod tests {
         let results = check_fabricated_entities(answer, chunks);
         let has_fabrication = results.iter().any(|r| !r.passed && matches!(r.assertion_type, AssertionType::FabricatedEntity));
         assert!(has_fabrication, "Must catch the 'Hello' hallucination scenario — fabricated court/county");
+    }
+
+    // ── extract_key_words tests ─────────────────────────────────────────────
+
+    #[test]
+    fn extract_key_words_filters_stopwords() {
+        let words = extract_key_words("the contract requires unlimited liability coverage");
+        assert!(words.contains("contract"));
+        assert!(words.contains("requires"));
+        assert!(words.contains("unlimited"));
+        assert!(words.contains("liability"));
+        assert!(words.contains("coverage"));
+        assert!(!words.contains("the"), "Should filter stopword 'the'");
+    }
+
+    #[test]
+    fn extract_key_words_filters_short_words() {
+        let words = extract_key_words("the big red fox ran over");
+        assert!(!words.contains("big"), "'big' is <= 4 chars");
+        assert!(!words.contains("red"), "'red' is <= 4 chars");
+        assert!(!words.contains("fox"), "'fox' is <= 4 chars");
+        assert!(!words.contains("ran"), "'ran' is <= 4 chars");
+        assert!(!words.contains("over"), "'over' is <= 4 chars");
     }
 }

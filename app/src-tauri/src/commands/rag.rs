@@ -1092,11 +1092,21 @@ pub async fn query(
         .iter()
         .enumerate()
         .map(|(i, (_, meta))| {
+            let section = extract_section_header(&meta.text);
+            let source_label = match section {
+                Some(ref hdr) => format!(
+                    "[Source: {}, p. {}, Section: {}]",
+                    meta.file_name, meta.page_number, hdr
+                ),
+                None => format!(
+                    "[Source: {}, p. {}]",
+                    meta.file_name, meta.page_number
+                ),
+            };
             format!(
-                "SOURCE {} — {}, Page {}:\n\"{}\"",
+                "SOURCE {} — {}\n{}\n---",
                 i + 1,
-                meta.file_name,
-                meta.page_number,
+                source_label,
                 meta.text
             )
         })
@@ -1355,7 +1365,13 @@ pub async fn query(
         }
     }
 
-    // ── Layer 5: Strip ungrounded claims ─────────────────────────────────────
+    // ── Layer 5: Output cleanup pipeline ─────────────────────────────────────
+    // Apply cleanup in order: collapse repetitions, strip excessive hedging,
+    // repair malformed citations, then strip ungrounded claims.
+    final_answer = collapse_repetitions(&final_answer);
+    final_answer = strip_excessive_hedging(&final_answer);
+    final_answer = repair_citations(&final_answer);
+
     // Last-resort cleanup: remove individual sentences with ungrounded proper
     // nouns or numbers, rather than failing the whole response.
     let chunk_strings: Vec<String> = chunk_texts.iter().map(|s| s.to_string()).collect();
@@ -1383,6 +1399,120 @@ pub async fn query(
         assertions: final_assertions,
         confidence: Some(confidence),
     })
+}
+
+// ── Output Cleanup Helpers ────────────────────────────────────────────────────
+
+/// Extract a recognizable section header from the first line of a chunk.
+/// Detects ALL-CAPS headers, "Section N"/"Article N" patterns, and numbered headings.
+fn extract_section_header(text: &str) -> Option<String> {
+    let first_line = text.lines().next()?.trim();
+    // Check if first line is a section header
+    if first_line.len() > 3 && first_line.len() < 80 {
+        // ALL-CAPS header
+        if first_line
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .all(|c| c.is_uppercase())
+            && first_line.chars().filter(|c| c.is_alphabetic()).count() > 3
+        {
+            return Some(first_line.to_string());
+        }
+        // "Section N" or "Article N" header
+        if first_line.starts_with("Section ")
+            || first_line.starts_with("SECTION ")
+            || first_line.starts_with("Article ")
+            || first_line.starts_with("ARTICLE ")
+        {
+            return Some(first_line.to_string());
+        }
+        // Numbered header: "1.1", "2.3.1"
+        if first_line
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_digit())
+            && first_line.contains('.')
+        {
+            return Some(first_line.to_string());
+        }
+    }
+    None
+}
+
+/// Detect and remove excessive hedging when >50% of sentences hedge.
+fn strip_excessive_hedging(answer: &str) -> String {
+    let hedging_phrases = [
+        "it appears that",
+        "it seems that",
+        "it may be",
+        "it might be",
+        "it could be",
+        "possibly",
+        "perhaps",
+        "it is unclear",
+        "it is uncertain",
+        "this may not",
+        "this might not",
+    ];
+
+    let sentences: Vec<&str> = answer.split(". ").collect();
+    let hedge_count = sentences
+        .iter()
+        .filter(|s| {
+            let lower = s.to_lowercase();
+            hedging_phrases.iter().any(|h| lower.contains(h))
+        })
+        .count();
+
+    // If >50% of sentences hedge, strip the hedging sentences (keep only grounded ones)
+    if sentences.len() > 2 && hedge_count as f64 / sentences.len() as f64 > 0.5 {
+        let grounded: Vec<&str> = sentences
+            .iter()
+            .filter(|s| {
+                let lower = s.to_lowercase();
+                !hedging_phrases.iter().any(|h| lower.contains(h))
+            })
+            .copied()
+            .collect();
+        if !grounded.is_empty() {
+            return grounded.join(". ") + ".";
+        }
+    }
+    answer.to_string()
+}
+
+/// Collapse repeated sentences in the output.
+fn collapse_repetitions(answer: &str) -> String {
+    let sentences: Vec<&str> = answer.split(". ").collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut unique = Vec::new();
+
+    for sentence in &sentences {
+        let normalized = sentence.trim().to_lowercase();
+        if normalized.len() < 10 || seen.insert(normalized) {
+            unique.push(*sentence);
+        }
+    }
+
+    unique.join(". ")
+}
+
+/// Fix incomplete or malformed citations in the output.
+fn repair_citations(answer: &str) -> String {
+    let mut result = answer.to_string();
+
+    // Fix unclosed brackets: "[file, p. 3" → "[file, p. 3]"
+    let re = regex::Regex::new(r"\[([^\]]+,\s*p\.\s*\d+)(?!\])").unwrap();
+    result = re.replace_all(&result, "[$1]").to_string();
+
+    // Fix empty citations: "[, p. ]" → remove entirely
+    let empty_re = regex::Regex::new(r"\[\s*,?\s*p\.\s*\]").unwrap();
+    result = empty_re.replace_all(&result, "").to_string();
+
+    // Fix double brackets: "[[file, p. 3]]" → "[file, p. 3]"
+    result = result.replace("[[", "[").replace("]]", "]");
+
+    result
 }
 
 // ── File Registry ────────────────────────────────────────────────────────────

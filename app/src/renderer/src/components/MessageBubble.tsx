@@ -757,9 +757,11 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
               <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--gold)' }}>Suggestions</p>
               <ul className="flex flex-col gap-1.5" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                 {[
-                  'Rephrase your question with different keywords',
+                  'Using specific terms from the document (names, dates, amounts)',
+                  'Asking about a specific section or clause',
+                  'Switching to Discovery mode for deeper analysis',
                   'Check that the relevant documents are loaded',
-                  'Try a broader or more specific question',
+                  'Rephrase your question with different keywords',
                 ].map((tip, idx) => (
                   <li key={idx} className="flex items-center gap-2 text-[12px]" style={{ color: 'rgb(var(--ov) / 0.6)' }}>
                     <svg width="6" height="6" viewBox="0 0 6 6" fill="var(--gold)" className="shrink-0">
@@ -780,6 +782,15 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
               borderLeft: '2.5px solid rgba(201,168,76,0.28)',
             }}
           >
+            {/* Low confidence banner */}
+            {message.confidence !== undefined && message.confidence !== null && message.confidence < 0.4 && (
+              <div className="mb-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400 flex items-center gap-2">
+                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                </svg>
+                Low confidence — this response may contain inaccuracies. Consider rephrasing your question.
+              </div>
+            )}
             <div className="text-[13.5px] leading-[1.75]" style={{ color: 'var(--text)' }}>
               {message.content.trim()
                 ? <>
@@ -801,6 +812,32 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
                 : <span style={{ color: 'rgb(var(--ov) / 0.2)', fontStyle: 'italic' }}>No response generated. Please try again.</span>
               }
             </div>
+
+            {/* Confidence bar */}
+            {message.confidence !== undefined && message.confidence !== null && (
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <span style={{ color: 'rgb(var(--ov) / 0.35)' }}>Confidence:</span>
+                <div className="flex-1 max-w-[120px] h-1.5 rounded-full overflow-hidden" style={{ background: 'rgb(var(--ov) / 0.08)' }}>
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      message.confidence >= 0.8 ? 'bg-emerald-500' :
+                      message.confidence >= 0.6 ? 'bg-yellow-500' :
+                      message.confidence >= 0.4 ? 'bg-orange-500' :
+                      'bg-red-500'
+                    }`}
+                    style={{ width: `${Math.round(message.confidence * 100)}%` }}
+                  />
+                </div>
+                <span className={`font-medium ${
+                  message.confidence >= 0.8 ? 'text-emerald-400' :
+                  message.confidence >= 0.6 ? 'text-yellow-400' :
+                  message.confidence >= 0.4 ? 'text-orange-400' :
+                  'text-red-400'
+                }`}>
+                  {Math.round(message.confidence * 100)}%
+                </span>
+              </div>
+            )}
           </div>
         )}
 
