@@ -294,6 +294,9 @@ pub fn run() {
             commands::rag::assign_session_to_case,
             commands::rag::set_case_jurisdiction,
             commands::rag::get_case_summaries,
+            commands::rag::set_document_role,
+            commands::rag::save_case_context,
+            commands::rag::get_entities,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Case, ChatSession, FileInfo } from '../../../../../shared/src/types'
+import { Case, ChatSession, DocumentRole, EntityEntry, FileInfo } from '../../../../../shared/src/types'
 
 interface Props {
   sessions: ChatSession[]
@@ -27,6 +27,12 @@ interface Props {
   onMoveFileToCase: (fileId: string, caseId: string | null) => void
   caseFiles: FileInfo[]
   onLoadPaths: (paths: string[]) => void
+  // Case context
+  caseContext: string
+  onCaseContextChange: (value: string) => void
+  onSaveCaseContext: () => void
+  // Entity registry
+  entities: EntityEntry[]
 }
 
 function ScalesIcon({ size = 16 }: { size?: number }): JSX.Element {
@@ -332,6 +338,10 @@ export default function Sidebar({
   onMoveFileToCase,
   caseFiles,
   onLoadPaths,
+  caseContext,
+  onCaseContextChange,
+  onSaveCaseContext,
+  entities,
 }: Props): JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
   const [collapsed, setCollapsed] = useState(false)
@@ -582,6 +592,52 @@ export default function Sidebar({
               </button>
             </div>
           </div>
+
+          {/* Case Context */}
+          <div className="px-3 py-2" style={{ borderBottom: '1px solid rgb(var(--ov) / 0.04)' }}>
+            <label className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--ov) / 0.3)' }}>Case Background</label>
+            <textarea
+              value={caseContext}
+              onChange={(e) => onCaseContextChange(e.target.value)}
+              onBlur={onSaveCaseContext}
+              placeholder="Describe the case context (e.g., 'California landlord-tenant dispute about habitability issues')"
+              className="mt-1 w-full text-xs rounded-md px-2 py-1.5 resize-none focus:outline-none transition-colors"
+              style={{
+                background: 'var(--bg)',
+                border: '1px solid rgb(var(--ov) / 0.06)',
+                color: 'var(--text)',
+              }}
+              onFocus={(e) => { (e.currentTarget as HTMLTextAreaElement).style.borderColor = 'rgba(201,168,76,0.4)' }}
+              onBlurCapture={(e) => { (e.currentTarget as HTMLTextAreaElement).style.borderColor = 'rgb(var(--ov) / 0.06)' }}
+              rows={2}
+            />
+          </div>
+
+          {/* Entity Registry */}
+          {entities.length > 0 && (
+            <div className="px-3 py-2" style={{ borderBottom: '1px solid rgb(var(--ov) / 0.04)' }}>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--ov) / 0.3)' }}>Identified Parties</label>
+                <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.2)' }}>{entities.length}</span>
+              </div>
+              <div className="mt-1.5 space-y-1">
+                {entities.map((entity, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-[11px]">
+                    {entity.role && (
+                      <span
+                        className="text-[9px] px-1 py-0.5 rounded font-medium"
+                        style={{ background: 'rgba(201,168,76,0.1)', color: '#c9a84c' }}
+                      >
+                        {entity.role}
+                      </span>
+                    )}
+                    <span className="truncate" style={{ color: 'var(--text)' }}>{entity.name}</span>
+                    <span className="text-[9px] truncate" style={{ color: 'rgb(var(--ov) / 0.2)' }}>({entity.sourceFile})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="mx-3 mb-2 h-px" style={{ background: 'rgba(201,168,76,0.1)' }} />
 

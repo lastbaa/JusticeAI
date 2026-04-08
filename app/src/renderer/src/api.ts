@@ -9,7 +9,9 @@ import type {
   AppSettings,
   Case,
   ChatSession,
+  DocumentRole,
   DownloadProgress,
+  EntityEntry,
   FileInfo,
   Jurisdiction,
   ModelStatus,
@@ -105,4 +107,16 @@ export const api = {
 
   getCaseSummaries: (caseId: string, excludeSessionId?: string): Promise<{ sessionId: string; summary: string }[]> =>
     invoke('get_case_summaries', { caseId, excludeSessionId: excludeSessionId ?? null }),
+
+  // Document roles
+  setDocumentRole: (fileId: string, role: DocumentRole): Promise<void> =>
+    invoke('set_document_role', { fileId, role }),
+
+  // Entity registry
+  getEntities: (caseId?: string): Promise<EntityEntry[]> =>
+    invoke('get_entities', { caseId: caseId ?? null }),
+
+  // Case context
+  saveCaseContext: (caseId: string, context: string): Promise<void> =>
+    invoke('save_case_context', { caseId, context }),
 }

@@ -12,6 +12,36 @@ pub struct CloseAllowed(pub AtomicBool);
 // ── Shared Types (mirror of shared/src/types.ts) ────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub enum DocumentRole {
+    #[default]
+    ClientDocument,
+    LegalAuthority,
+    Evidence,
+    Reference,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FactSheet {
+    pub parties: Vec<String>,
+    pub dates: Vec<String>,
+    pub amounts: Vec<String>,
+    pub key_clauses: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityEntry {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    pub source_file: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceMode {
     Quick,
@@ -49,6 +79,8 @@ pub struct Case {
     pub updated_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jurisdiction: Option<Jurisdiction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +104,10 @@ pub struct FileInfo {
     pub case_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detected_jurisdiction: Option<Jurisdiction>,
+    #[serde(default)]
+    pub role: DocumentRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact_sheet: Option<FactSheet>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,6 +275,8 @@ pub struct ChunkMetadata {
     pub chunk_index: usize,
     pub text: String,
     pub token_count: usize,
+    #[serde(default)]
+    pub role: DocumentRole,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,6 +302,8 @@ pub struct RagState {
     pub llama_model: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>>,
     /// Cached BM25 index — rebuilt only when chunks change.
     pub bm25_cache: CachedBm25,
+    /// Extracted entities from all loaded documents.
+    pub entity_registry: Vec<EntityEntry>,
 }
 
 impl RagState {
@@ -282,6 +322,7 @@ impl RagState {
             embed_model: String::new(),
             llama_model: Arc::new(Mutex::new(None)),
             bm25_cache: CachedBm25::default(),
+            entity_registry: Vec::new(),
         }
     }
 
@@ -371,6 +412,8 @@ impl RagState {
                     if let Some(entry) = self.file_registry.get_mut(&id) {
                         entry.case_id = saved_info.case_id;
                         entry.detected_jurisdiction = saved_info.detected_jurisdiction;
+                        entry.role = saved_info.role;
+                        entry.fact_sheet = saved_info.fact_sheet;
                     }
                 }
             }
@@ -406,6 +449,8 @@ impl RagState {
                         chunk_count: count,
                         case_id: None,
                         detected_jurisdiction: None,
+                        role: DocumentRole::default(),
+                        fact_sheet: None,
                     },
                 );
             }

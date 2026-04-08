@@ -32,7 +32,7 @@
 
 use app_lib::commands::doc_parser;
 use app_lib::pipeline::{self, RetrievalBackend, RetrievalConfig, RetrievalCorpus};
-use app_lib::state::{AppSettings, ChunkMetadata, DocumentPage, InferenceMode};
+use app_lib::state::{AppSettings, ChunkMetadata, DocumentPage, DocumentRole, InferenceMode};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -321,6 +321,7 @@ async fn embed_and_retrieve(
                 chunk_index: chunk.chunk_index,
                 text: chunk.text.clone(),
                 token_count: chunk.token_count,
+                role: DocumentRole::default(),
             };
             (r.score, meta, r.chunk_index)
         })
@@ -365,6 +366,7 @@ fn retrieve_with_cached_embeddings(
                 chunk_index: chunk.chunk_index,
                 text: chunk.text.clone(),
                 token_count: chunk.token_count,
+                role: DocumentRole::default(),
             };
             (r.score, meta, r.chunk_index)
         })

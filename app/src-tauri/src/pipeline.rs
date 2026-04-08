@@ -152,7 +152,8 @@ You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\
 2. CITATIONS: Cite every claim as [filename, p. N]. Example: The lease runs 12 months [lease.pdf, p. 3].\n\
 3. EXACTNESS: Reproduce numbers, dates, dollar amounts, and names EXACTLY as written. Never round or approximate.\n\
 4. NO FABRICATION: Never invent case numbers, court names, statutes, party names, or amounts not in the context.\n\
-5. FORMAT: Be direct. No preambles or sign-offs. Bold key terms. Bullets for multiple facts.\n\n\
+5. FORMAT: Be direct. No preambles or sign-offs. Bold key terms. Bullets for multiple facts.\n\
+6. DOCUMENT ROLES: Context is organized by role. Apply LEGAL AUTHORITY to facts in CLIENT DOCUMENTS. Cite each document by its role.\n\n\
 Examples:\n\
 Q: What is the lease term?\n\
 A: The lease term is **12 months**, commencing **January 1, 2024** and ending **December 31, 2024** [residential_lease.pdf, p. 3].\n\n\
@@ -2398,6 +2399,7 @@ impl RetrievalBackend for HybridBm25Cosine {
                         chunk_index: idx,
                         text: corpus.texts[idx].to_string(),
                         token_count: 0,
+                        role: crate::state::DocumentRole::default(),
                     };
                     (score, meta, corpus.vectors[idx].to_vec())
                 })
@@ -2700,6 +2702,7 @@ mod tests {
             chunk_index: 0,
             text: id.to_string(),
             token_count: 10,
+            role: crate::state::DocumentRole::default(),
         }
     }
 

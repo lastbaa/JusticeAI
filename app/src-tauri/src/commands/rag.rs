@@ -4,8 +4,8 @@ use crate::pipeline::{
     SCORE_THRESHOLD,
 };
 use crate::state::{
-    AppSettings, Case, ChatSession, ChunkMetadata, Citation, EmbeddedChunkEntry, FileInfo,
-    Jurisdiction, ModelStatus, QueryResult, RagState,
+    AppSettings, Case, ChatSession, ChunkMetadata, Citation, DocumentRole, EmbeddedChunkEntry,
+    EntityEntry, FactSheet, FileInfo, Jurisdiction, ModelStatus, QueryResult, RagState,
 };
 use base64::Engine;
 use serde::Serialize;
@@ -538,6 +538,7 @@ pub async fn migrate_garbled_chunks(state: &mut RagState) {
                             chunk_index: chunk.chunk_index,
                             text: chunk.text.clone(),
                             token_count: chunk.token_count,
+                            role: DocumentRole::default(),
                         },
                     };
                     state.chunk_registry.insert(item_id.clone(), entry.meta.clone());
@@ -563,6 +564,8 @@ pub async fn migrate_garbled_chunks(state: &mut RagState) {
             chunk_count: new_ids.len(),
             case_id: None,
             detected_jurisdiction: None,
+            role: DocumentRole::default(),
+            fact_sheet: None,
         });
 
         log::info!("Re-parsed '{}': {} pages, {} chunks", file_name, pages.len(), new_ids.len());
@@ -692,6 +695,10 @@ async fn process_file(
         r.jurisdiction
     });
 
+    // Extract fact sheet and entities from document text (regex-based, fast)
+    let fact_sheet = extract_fact_sheet(&pages);
+    let new_entities = extract_entities(&pages, &file_name);
+
     let chunks = chunk_document(&pages, settings);
 
     // Embed all chunks first without holding the state lock, then insert atomically.
@@ -751,6 +758,7 @@ async fn process_file(
                 chunk_index: chunk.chunk_index,
                 text: chunk.text.clone(),
                 token_count: chunk.token_count,
+                role: DocumentRole::ClientDocument,
             },
         };
         new_entries.push((item_id, entry));
@@ -767,9 +775,11 @@ async fn process_file(
         chunk_count: item_ids.len(),
         case_id: None,
         detected_jurisdiction,
+        role: DocumentRole::ClientDocument,
+        fact_sheet: Some(fact_sheet),
     };
 
-    // Single lock acquisition: insert all chunks + registry entries + save.
+    // Single lock acquisition: insert all chunks + registry entries + entities + save.
     {
         let mut s = state.lock().await;
         for (item_id, entry) in new_entries {
@@ -779,6 +789,12 @@ async fn process_file(
         s.invalidate_bm25_cache();
         s.doc_chunk_ids.insert(doc_id.clone(), item_ids);
         s.file_registry.insert(doc_id.clone(), file_info.clone());
+        // Add extracted entities (dedup by name)
+        for entity in new_entities {
+            if !s.entity_registry.iter().any(|e| e.name == entity.name) {
+                s.entity_registry.push(entity);
+            }
+        }
         s.save_chunks().await;
     }
 
@@ -1284,7 +1300,66 @@ pub async fn query(
         }
     }
 
-    // Calculate remaining budget after case context prefix
+    // Inject case background from case.case_context (Feature B)
+    {
+        let s = state.lock().await;
+        if let Some(ref cid) = case_id {
+            if let Some(case) = s.cases.iter().find(|c| c.id == *cid) {
+                if let Some(ref ctx) = case.case_context {
+                    context.push_str(&format!("CASE BACKGROUND: {}\n\n", ctx));
+                }
+            }
+        }
+
+        // Inject identified entities (Feature D)
+        let case_files: std::collections::HashSet<String> = s
+            .file_registry
+            .values()
+            .filter(|fi| fi.case_id.as_ref() == case_id.as_ref())
+            .map(|fi| fi.file_name.clone())
+            .collect();
+        let relevant_entities: Vec<&EntityEntry> = s
+            .entity_registry
+            .iter()
+            .filter(|e| case_files.contains(&e.source_file))
+            .collect();
+        if !relevant_entities.is_empty() {
+            let entity_lines: Vec<String> = relevant_entities
+                .iter()
+                .map(|e| {
+                    if let Some(ref role) = e.role {
+                        format!("{}: {} [{}]", role, e.name, e.source_file)
+                    } else {
+                        format!("{} [{}]", e.name, e.source_file)
+                    }
+                })
+                .collect();
+            context.push_str(&format!("IDENTIFIED PARTIES:\n{}\n\n", entity_lines.join("\n")));
+        }
+
+        // Inject condensed fact sheet (Feature C)
+        let mut fact_parts = Vec::new();
+        for fi in s.file_registry.values() {
+            if fi.case_id.as_ref() == case_id.as_ref() {
+                if let Some(ref fs) = fi.fact_sheet {
+                    if !fs.parties.is_empty() {
+                        fact_parts.push(format!("Parties ({}): {}", fi.file_name, fs.parties.join(", ")));
+                    }
+                    if !fs.amounts.is_empty() {
+                        fact_parts.push(format!("Amounts ({}): {}", fi.file_name, fs.amounts.join(", ")));
+                    }
+                    if !fs.dates.is_empty() {
+                        fact_parts.push(format!("Key dates ({}): {}", fi.file_name, fs.dates.join(", ")));
+                    }
+                }
+            }
+        }
+        if !fact_parts.is_empty() {
+            context.push_str(&format!("KEY FACTS:\n{}\n\n", fact_parts.join("\n")));
+        }
+    }
+
+    // Calculate remaining budget after injected context
     let remaining_budget = max_context_chars.saturating_sub(context.len());
 
     // Reserve ~20% of remaining budget for neighbor expansion (non-Quick modes)
@@ -1299,8 +1374,8 @@ pub async fn query(
     let scores: Vec<f32> = results.iter().map(|(s, _)| *s).collect();
     let chunk_budgets = allocate_chunk_budgets(&scores, primary_budget, 200);
 
-    // Build context parts with per-chunk budget-aware truncation
-    let context_parts: Vec<String> = results
+    // Build per-chunk formatted strings with budget-aware truncation
+    let formatted_chunks: Vec<(DocumentRole, String)> = results
         .iter()
         .enumerate()
         .map(|(i, (_, meta))| {
@@ -1317,13 +1392,44 @@ pub async fn query(
             };
             let header = format!("SOURCE {} — {}\n", i + 1, source_label);
             let footer = "\n---";
-            // Budget for this chunk's text = allocated budget minus header/footer overhead
             let overhead = header.len() + footer.len();
             let text_budget = chunk_budgets.get(i).copied().unwrap_or(200).saturating_sub(overhead);
             let truncated_text = truncate_to_budget(&meta.text, text_budget);
-            format!("{}{}{}", header, truncated_text, footer)
+            (meta.role.clone(), format!("{}{}{}", header, truncated_text, footer))
         })
         .collect();
+
+    // Group chunks by document role for role-aware context assembly
+    let mut client_parts = Vec::new();
+    let mut authority_parts = Vec::new();
+    let mut evidence_parts = Vec::new();
+    let mut reference_parts = Vec::new();
+    for (role, text) in &formatted_chunks {
+        match role {
+            DocumentRole::ClientDocument => client_parts.push(text.as_str()),
+            DocumentRole::LegalAuthority => authority_parts.push(text.as_str()),
+            DocumentRole::Evidence => evidence_parts.push(text.as_str()),
+            DocumentRole::Reference => reference_parts.push(text.as_str()),
+        }
+    }
+
+    let mut context_parts: Vec<String> = Vec::new();
+    if !client_parts.is_empty() {
+        context_parts.push("--- CLIENT DOCUMENTS ---".to_string());
+        for p in &client_parts { context_parts.push(p.to_string()); }
+    }
+    if !authority_parts.is_empty() {
+        context_parts.push("--- LEGAL AUTHORITY ---".to_string());
+        for p in &authority_parts { context_parts.push(p.to_string()); }
+    }
+    if !evidence_parts.is_empty() {
+        context_parts.push("--- EVIDENCE ---".to_string());
+        for p in &evidence_parts { context_parts.push(p.to_string()); }
+    }
+    if !reference_parts.is_empty() {
+        context_parts.push("--- REFERENCE ---".to_string());
+        for p in &reference_parts { context_parts.push(p.to_string()); }
+    }
 
     // Add primary context chunks with budget enforcement
     for part in &context_parts {
@@ -1984,6 +2090,233 @@ pub async fn get_case_summaries(
         })
         .collect();
     Ok(summaries)
+}
+
+// ── Document Roles ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn set_document_role(
+    file_id: String,
+    role: DocumentRole,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<(), String> {
+    let mut s = state.lock().await;
+    if let Some(file_info) = s.file_registry.get_mut(&file_id) {
+        file_info.role = role.clone();
+    }
+    for chunk in &mut s.embedded_chunks {
+        if chunk.meta.document_id == file_id {
+            chunk.meta.role = role.clone();
+        }
+    }
+    for meta in s.chunk_registry.values_mut() {
+        if meta.document_id == file_id {
+            meta.role = role.clone();
+        }
+    }
+    s.save_chunks().await;
+    s.save_file_registry().await;
+    Ok(())
+}
+
+// ── Case Context ──────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn save_case_context(
+    case_id: String,
+    context: String,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<(), String> {
+    let mut s = state.lock().await;
+    if let Some(case) = s.cases.iter_mut().find(|c| c.id == case_id) {
+        case.case_context = if context.trim().is_empty() {
+            None
+        } else {
+            Some(context)
+        };
+    }
+    s.save_cases().await;
+    Ok(())
+}
+
+// ── Entity Registry ───────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_entities(
+    case_id: Option<String>,
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<Vec<EntityEntry>, String> {
+    let s = state.lock().await;
+    let case_files: std::collections::HashSet<String> = s
+        .file_registry
+        .values()
+        .filter(|fi| fi.case_id.as_ref() == case_id.as_ref())
+        .map(|fi| fi.file_name.clone())
+        .collect();
+    Ok(s.entity_registry
+        .iter()
+        .filter(|e| case_files.contains(&e.source_file))
+        .cloned()
+        .collect())
+}
+
+// ── Fact Sheet Extraction (regex-based, no LLM) ──────────────────────────────
+
+fn extract_fact_sheet(pages: &[crate::state::DocumentPage]) -> FactSheet {
+    let full_text = pages
+        .iter()
+        .map(|p| p.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Extract parties — "between X and Y", role keywords
+    let mut parties = Vec::new();
+    if let Ok(party_re) = regex::Regex::new(
+        r"(?i)(?:between|by and between)\s+([A-Z][a-zA-Z\s,\.]+?)(?:\s+\(|,\s+a\s+|,\s+an\s+|\s+and\s+)",
+    ) {
+        for cap in party_re.captures_iter(&full_text) {
+            parties.push(cap[1].trim().to_string());
+        }
+    }
+    if let Ok(role_re) = regex::Regex::new(
+        r"(?i)(landlord|tenant|buyer|seller|employer|employee|licensor|licensee|borrower|lender|plaintiff|defendant|lessor|lessee)\s*[:]\s*([A-Z][a-zA-Z\s\.]+)",
+    ) {
+        for cap in role_re.captures_iter(&full_text) {
+            let role = cap[1].to_string();
+            let name = cap[2].trim().to_string();
+            parties.push(format!("{}: {}", role, name));
+        }
+    }
+    parties.dedup();
+
+    // Extract dates
+    let mut dates = Vec::new();
+    if let Ok(date_re) = regex::Regex::new(
+        r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b",
+    ) {
+        for m in date_re.find_iter(&full_text) {
+            dates.push(m.as_str().to_string());
+        }
+    }
+    dates.dedup();
+
+    // Extract dollar amounts
+    let mut amounts = Vec::new();
+    if let Ok(amount_re) = regex::Regex::new(r"\$[\d,]+(?:\.\d{2})?") {
+        for m in amount_re.find_iter(&full_text) {
+            amounts.push(m.as_str().to_string());
+        }
+    }
+    amounts.dedup();
+
+    // Extract key clauses — section headers
+    let mut key_clauses = Vec::new();
+    if let Ok(clause_re) = regex::Regex::new(
+        r"(?m)^(?:Section\s+\d+[.:]\s*|Article\s+[IVX\d]+[.:]\s*|ARTICLE\s+[IVX\d]+[.:]\s*|\d+\.\d+\s+)(.{5,80})$",
+    ) {
+        for cap in clause_re.captures_iter(&full_text) {
+            key_clauses.push(cap[1].trim().to_string());
+        }
+    }
+    // Also detect ALL-CAPS section headers
+    for line in full_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.len() > 3
+            && trimmed.len() < 80
+            && trimmed
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .all(|c| c.is_uppercase())
+            && trimmed.chars().filter(|c| c.is_alphabetic()).count() > 3
+        {
+            key_clauses.push(trimmed.to_string());
+        }
+    }
+    key_clauses.dedup();
+    key_clauses.truncate(15);
+
+    // Build summary (first 200 chars of document)
+    let summary = full_text.chars().take(200).collect::<String>().trim().to_string();
+
+    FactSheet {
+        parties,
+        dates,
+        amounts,
+        key_clauses,
+        summary,
+    }
+}
+
+// ── Entity Extraction (regex-based, no LLM) ──────────────────────────────────
+
+fn extract_entities(pages: &[crate::state::DocumentPage], file_name: &str) -> Vec<EntityEntry> {
+    let full_text = pages
+        .iter()
+        .map(|p| p.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut entities = Vec::new();
+
+    let role_patterns: &[(&str, &str)] = &[
+        (r"(?i)landlord\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Landlord"),
+        (r"(?i)tenant\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Tenant"),
+        (r"(?i)buyer\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Buyer"),
+        (r"(?i)seller\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Seller"),
+        (r"(?i)employer\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Employer"),
+        (r"(?i)employee\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Employee"),
+        (r"(?i)plaintiff\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Plaintiff"),
+        (r"(?i)defendant\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Defendant"),
+        (r"(?i)licensor\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Licensor"),
+        (r"(?i)licensee\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Licensee"),
+        (r"(?i)borrower\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Borrower"),
+        (r"(?i)lender\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Lender"),
+        (r"(?i)lessor\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Lessor"),
+        (r"(?i)lessee\s*[:]\s*([A-Z][a-zA-Z\s\.]+?)(?:\n|,|\()", "Lessee"),
+    ];
+
+    for (pattern, role) in role_patterns {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            for cap in re.captures_iter(&full_text) {
+                let name = cap[1].trim().to_string();
+                if name.len() > 2 && name.len() < 60 {
+                    entities.push(EntityEntry {
+                        name: name.clone(),
+                        role: Some(role.to_string()),
+                        source_file: file_name.to_string(),
+                        aliases: Vec::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    // "between X and Y" patterns
+    if let Ok(between_re) = regex::Regex::new(
+        r"(?i)between\s+([A-Z][a-zA-Z\s\.]+?)\s+(?:\(.*?\)\s+)?and\s+([A-Z][a-zA-Z\s\.]+?)(?:\s*\(|\s*,|\s*\.)",
+    ) {
+        for cap in between_re.captures_iter(&full_text) {
+            let name1 = cap[1].trim().to_string();
+            let name2 = cap[2].trim().to_string();
+            if name1.len() > 2 && name1.len() < 60 && !entities.iter().any(|e| e.name == name1) {
+                entities.push(EntityEntry {
+                    name: name1,
+                    role: None,
+                    source_file: file_name.to_string(),
+                    aliases: Vec::new(),
+                });
+            }
+            if name2.len() > 2 && name2.len() < 60 && !entities.iter().any(|e| e.name == name2) {
+                entities.push(EntityEntry {
+                    name: name2,
+                    role: None,
+                    source_file: file_name.to_string(),
+                    aliases: Vec::new(),
+                });
+            }
+        }
+    }
+
+    entities
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

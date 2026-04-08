@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import { Citation, FileInfo } from '../../../../../shared/src/types'
+import { Citation, DocumentRole, FileInfo } from '../../../../../shared/src/types'
+
+const ROLE_LABELS: Record<DocumentRole, { label: string; color: string }> = {
+  ClientDocument: { label: 'Client', color: 'text-blue-400 bg-blue-400/10' },
+  LegalAuthority: { label: 'Legal', color: 'text-amber-400 bg-amber-400/10' },
+  Evidence: { label: 'Evidence', color: 'text-emerald-400 bg-emerald-400/10' },
+  Reference: { label: 'Ref', color: 'text-gray-400 bg-gray-400/10' },
+}
 
 interface Props {
   files: FileInfo[]
@@ -16,6 +23,7 @@ interface Props {
   activeCitation?: Citation | null
   onExportCitations?: () => void
   caseName?: string
+  onSetDocumentRole?: (fileId: string, role: DocumentRole) => void
 }
 
 function CitationRow({
@@ -131,55 +139,142 @@ function FileRow({
   file,
   index,
   onRemove,
+  onSetRole,
 }: {
   file: FileInfo
   index: number
   onRemove: () => void
+  onSetRole?: (fileId: string, role: DocumentRole) => void
 }): JSX.Element {
   const [hovered, setHovered] = useState(false)
+  const [showFacts, setShowFacts] = useState(false)
   const ext = file.fileName.split('.').pop()?.toUpperCase() ?? 'DOC'
   const exhibitLabel = index < 26 ? `Ex. ${String.fromCharCode(65 + index)}` : `Ex. ${index + 1}`
+  const roleInfo = ROLE_LABELS[file.role || 'ClientDocument']
 
   return (
     <div
-      className="flex items-center gap-2.5 px-2 py-2.5 rounded-lg transition-colors"
+      className="px-2 py-2.5 rounded-lg transition-colors"
       style={{ background: hovered ? 'rgb(var(--ov) / 0.03)' : 'transparent' }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <span
-        className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
-        style={{ background: 'rgba(201,168,76,0.08)', color: 'rgba(201,168,76,0.65)' }}
-      >
-        {ext}
-      </span>
-      <div className="flex-1 min-w-0">
-        <p
-          className="text-[11.5px] truncate leading-snug"
-          style={{ color: 'rgb(var(--ov) / 0.6)' }}
-          title={file.fileName}
+      <div className="flex items-center gap-2.5">
+        <span
+          className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
+          style={{ background: 'rgba(201,168,76,0.08)', color: 'rgba(201,168,76,0.65)' }}
         >
-          <span className="font-semibold" style={{ color: 'rgba(201,168,76,0.55)' }}>{exhibitLabel}</span>
-          <span style={{ color: 'rgb(var(--ov) / 0.15)', margin: '0 4px' }}>{'\u00B7'}</span>
-          {file.fileName}
-        </p>
-        <p className="text-[10px] mt-0.5" style={{ color: 'rgb(var(--ov) / 0.22)' }}>
-          {file.totalPages} {file.totalPages === 1 ? 'page' : 'pages'}
-        </p>
+          {ext}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p
+              className="text-[11.5px] truncate leading-snug flex-1"
+              style={{ color: 'rgb(var(--ov) / 0.6)' }}
+              title={file.fileName}
+            >
+              <span className="font-semibold" style={{ color: 'rgba(201,168,76,0.55)' }}>{exhibitLabel}</span>
+              <span style={{ color: 'rgb(var(--ov) / 0.15)', margin: '0 4px' }}>{'\u00B7'}</span>
+              {file.fileName}
+            </p>
+            {/* Role badge */}
+            <span className={`inline-block text-[9px] font-medium px-1.5 py-0.5 rounded shrink-0 ${roleInfo.color}`}>
+              {roleInfo.label}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.22)' }}>
+              {file.totalPages} {file.totalPages === 1 ? 'page' : 'pages'}
+            </p>
+            {/* Role selector (inline) */}
+            {onSetRole && (
+              <select
+                value={file.role || 'ClientDocument'}
+                onChange={(e) => onSetRole(file.id, e.target.value as DocumentRole)}
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] px-1.5 py-0.5 rounded cursor-pointer transition-colors focus:outline-none"
+                style={{
+                  background: 'var(--bg-alt)',
+                  border: '1px solid rgb(var(--ov) / 0.08)',
+                  color: 'rgb(var(--ov) / 0.45)',
+                }}
+                onFocus={(e) => { (e.currentTarget as HTMLSelectElement).style.borderColor = 'rgba(201,168,76,0.4)' }}
+                onBlur={(e) => { (e.currentTarget as HTMLSelectElement).style.borderColor = 'rgb(var(--ov) / 0.08)' }}
+              >
+                <option value="ClientDocument">Client Doc</option>
+                <option value="LegalAuthority">Legal Authority</option>
+                <option value="Evidence">Evidence</option>
+                <option value="Reference">Reference</option>
+              </select>
+            )}
+          </div>
+        </div>
+        {hovered && (
+          <button
+            onClick={onRemove}
+            aria-label={`Remove ${file.fileName}`}
+            className="shrink-0 h-5 w-5 flex items-center justify-center rounded transition-colors"
+            style={{ color: 'rgb(var(--ov) / 0.2)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.2)' }}
+          >
+            <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
+            </svg>
+          </button>
+        )}
       </div>
-      {hovered && (
-        <button
-          onClick={onRemove}
-          aria-label={`Remove ${file.fileName}`}
-          className="shrink-0 h-5 w-5 flex items-center justify-center rounded transition-colors"
-          style={{ color: 'rgb(var(--ov) / 0.2)' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.2)' }}
-        >
-          <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
-            <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
-          </svg>
-        </button>
+
+      {/* Fact Sheet (collapsible) */}
+      {file.factSheet && (
+        <>
+          <button
+            onClick={() => setShowFacts((v) => !v)}
+            className="mt-1 text-[9px] font-medium transition-colors"
+            style={{ color: 'rgba(201,168,76,0.5)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#c9a84c' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(201,168,76,0.5)' }}
+          >
+            {showFacts ? 'Hide facts' : 'Show facts'}
+          </button>
+          {showFacts && (
+            <div
+              className="mt-1.5 px-2 py-1.5 rounded text-[10px]"
+              style={{ background: 'var(--bg-alt)', border: '1px solid rgb(var(--ov) / 0.06)' }}
+            >
+              {file.factSheet.parties.length > 0 && (
+                <div className="mb-1">
+                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Parties:</span>{' '}
+                  <span style={{ color: 'var(--text)' }}>{file.factSheet.parties.slice(0, 4).join(' \u2022 ')}</span>
+                </div>
+              )}
+              {file.factSheet.amounts.length > 0 && (
+                <div className="mb-1">
+                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Amounts:</span>{' '}
+                  <span style={{ color: '#c9a84c' }}>{file.factSheet.amounts.slice(0, 4).join(' \u2022 ')}</span>
+                </div>
+              )}
+              {file.factSheet.dates.length > 0 && (
+                <div className="mb-1">
+                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Dates:</span>{' '}
+                  <span style={{ color: 'var(--text)' }}>{file.factSheet.dates.slice(0, 4).join(' \u2022 ')}</span>
+                </div>
+              )}
+              {file.factSheet.keyClauses.length > 0 && (
+                <div className="mb-1">
+                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Key Clauses:</span>{' '}
+                  <span style={{ color: 'var(--text)' }}>{file.factSheet.keyClauses.slice(0, 3).join(' \u2022 ')}</span>
+                </div>
+              )}
+              {file.factSheet.summary && (
+                <div>
+                  <span style={{ color: 'rgb(var(--ov) / 0.3)' }}>Summary:</span>{' '}
+                  <span style={{ color: 'var(--text)' }}>{file.factSheet.summary}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -200,6 +295,7 @@ export default function ContextPanel({
   onViewCitation,
   onExportCitations,
   caseName,
+  onSetDocumentRole,
 }: Props): JSX.Element {
   const hasCitations = citations.length > 0
   const showSources = hasCitations || isQuerying
@@ -460,6 +556,7 @@ export default function ContextPanel({
                       file={file}
                       index={i}
                       onRemove={() => onRemoveFile(file.id)}
+                      onSetRole={onSetDocumentRole}
                     />
                   ))}
                 </div>

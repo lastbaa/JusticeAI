@@ -9,6 +9,8 @@ import {
   ChatSession,
   Citation,
   DEFAULT_SETTINGS,
+  DocumentRole,
+  EntityEntry,
   FileInfo,
   InferenceMode,
 } from '../../../../shared/src/types'
@@ -77,6 +79,10 @@ export default function App(): JSX.Element {
   const [contextPanelMinimized, setContextPanelMinimized] = useState(false)
   // Command palette
   const [showCommandPalette, setShowCommandPalette] = useState(false)
+  // Case context (per-case background description)
+  const [caseContext, setCaseContext] = useState<string>('')
+  // Entity registry
+  const [entities, setEntities] = useState<EntityEntry[]>([])
 
   const queryAbortRef = useRef(false)
   const messagesRef = useRef(messages)
@@ -221,6 +227,47 @@ export default function App(): JSX.Element {
     fetchTexts()
     return () => { cancelled = true }
   }, [files])
+
+  // ── Load case context when switching cases ──────────────────
+  useEffect(() => {
+    const c = cases.find((c) => c.id === currentCaseId)
+    setCaseContext(c?.caseContext || '')
+  }, [currentCaseId, cases])
+
+  // ── Load entities when case or files change ────────────────
+  useEffect(() => {
+    if (currentCaseId) {
+      window.api.getEntities(currentCaseId).then(setEntities).catch(() => setEntities([]))
+    } else {
+      setEntities([])
+    }
+  }, [currentCaseId, files])
+
+  // ── Document role handler ──────────────────────────────────
+  async function handleSetDocumentRole(fileId: string, role: DocumentRole): Promise<void> {
+    try {
+      await window.api.setDocumentRole(fileId, role)
+      setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, role } : f)))
+    } catch (err) {
+      console.error('Failed to set document role:', err)
+      addToast('error', 'Failed to set document role')
+    }
+  }
+
+  // ── Case context save handler ──────────────────────────────
+  async function handleSaveCaseContext(): Promise<void> {
+    if (currentCaseId) {
+      try {
+        await window.api.saveCaseContext(currentCaseId, caseContext)
+        setCases((prev) =>
+          prev.map((c) => (c.id === currentCaseId ? { ...c, caseContext } : c))
+        )
+      } catch (err) {
+        console.error('Failed to save case context:', err)
+        addToast('error', 'Failed to save case context')
+      }
+    }
+  }
 
   // ── File management ───────────────────────────────────────────
   async function handleLoadPaths(paths: string[]): Promise<void> {
@@ -404,17 +451,25 @@ export default function App(): JSX.Element {
       )
 
       // Build cross-conversation context from sibling sessions in the same case
-      let caseContext: string | undefined
+      let queryCaseContext: string | undefined
       if (currentCaseId) {
+        const parts: string[] = []
+        // Include user-provided case background
+        if (caseContext.trim()) {
+          parts.push(caseContext.trim())
+        }
         try {
           const summaries = await window.api.getCaseSummaries(currentCaseId, currentSessionId)
           if (summaries.length > 0) {
-            caseContext = summaries.map((s) => s.summary).join('\n')
+            parts.push(summaries.map((s) => s.summary).join('\n'))
           }
         } catch { }
+        if (parts.length > 0) {
+          queryCaseContext = parts.join('\n\n')
+        }
       }
 
-      const result = await window.api.query(question, recentHistory, currentCaseId ?? undefined, caseContext)
+      const result = await window.api.query(question, recentHistory, currentCaseId ?? undefined, queryCaseContext)
 
       const finalMessage: ChatMessage = {
         id: streamingId,
@@ -944,6 +999,10 @@ export default function App(): JSX.Element {
         onMoveFileToCase={handleMoveFileToCase}
         caseFiles={caseFiles}
         onLoadPaths={handleLoadPaths}
+        caseContext={caseContext}
+        onCaseContextChange={setCaseContext}
+        onSaveCaseContext={handleSaveCaseContext}
+        entities={entities}
       />
 
       <main className="flex flex-1 flex-col overflow-hidden">
@@ -990,6 +1049,7 @@ export default function App(): JSX.Element {
           activeCitation={viewerCitation}
           onExportCitations={lastCitations.length > 0 ? handleExportCitations : undefined}
           caseName={currentCaseId ? cases.find((c) => c.id === currentCaseId)?.name : undefined}
+          onSetDocumentRole={handleSetDocumentRole}
         />
       </PanelErrorBoundary>
 

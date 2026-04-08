@@ -18,6 +18,7 @@ export interface Case {
   createdAt: number
   updatedAt: number
   jurisdiction?: Jurisdiction
+  caseContext?: string
 }
 
 export interface DocumentPage {
@@ -35,6 +36,8 @@ export interface FileInfo {
   chunkCount: number
   caseId?: string
   detectedJurisdiction?: Jurisdiction
+  role?: DocumentRole
+  factSheet?: FactSheet
 }
 
 export interface Citation {
@@ -136,4 +139,24 @@ export interface DownloadProgress {
   done: boolean
   retrying?: boolean
   attempt?: number
+}
+
+// ── Document Roles ────────────────────────────────────────────
+export type DocumentRole = 'ClientDocument' | 'LegalAuthority' | 'Evidence' | 'Reference'
+
+// ── Fact Sheet (auto-extracted per document) ──────────────────
+export interface FactSheet {
+  parties: string[]
+  dates: string[]
+  amounts: string[]
+  keyClauses: string[]
+  summary: string
+}
+
+// ── Entity Registry ───────────────────────────────────────────
+export interface EntityEntry {
+  name: string
+  role?: string
+  sourceFile: string
+  aliases: string[]
 }
