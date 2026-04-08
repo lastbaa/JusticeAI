@@ -24,7 +24,7 @@ import ModelSetup from './components/ModelSetup'
 import PanelErrorBoundary from './components/PanelErrorBoundary'
 import Toast, { ToastMessage } from './components/Toast'
 import CommandPalette, { PaletteAction } from './components/CommandPalette'
-import { makeSessionName, makeSessionSummary } from './utils/sessionName'
+import { makeSessionName, makeSessionSummary, isGenericName } from './utils/sessionName'
 
 type View = 'main' | 'settings'
 const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.csv', '.eml', '.html', '.htm', '.mhtml', '.xml', '.xlsx', '.png', '.jpg', '.jpeg', '.tif', '.tiff']
@@ -188,9 +188,34 @@ export default function App(): JSX.Element {
     if (persistable.length === 0) return
     const timer = setTimeout(async () => {
       const saveMsgs = messagesRef.current.filter((m) => !m.isGreeting)
+      const hasAssistantResponse = saveMsgs.some((m) => m.role === 'assistant')
+
+      // Determine session name:
+      // 1. If user manually named it, always use that
+      // 2. If no assistant response yet, use placeholder "New Chat"
+      // 3. Otherwise, generate from messages
+      let sessionName: string
+      if (sessionCustomNameRef.current) {
+        sessionName = sessionCustomNameRef.current
+      } else if (!hasAssistantResponse) {
+        sessionName = 'New Chat'
+      } else {
+        sessionName = makeSessionName(saveMsgs)
+      }
+
+      // Phase 4: Progressive refinement — if name is generic and we have 3+ messages,
+      // re-run naming with fuller context
+      if (
+        !sessionCustomNameRef.current &&
+        isGenericName(sessionName) &&
+        saveMsgs.length >= 3
+      ) {
+        sessionName = makeSessionName(saveMsgs)
+      }
+
       const session: ChatSession = {
         id: sessionIdRef.current,
-        name: sessionCustomNameRef.current ?? makeSessionName(saveMsgs),
+        name: sessionName,
         messages: saveMsgs,
         createdAt: sessionCreatedAtRef.current,
         updatedAt: Date.now(),

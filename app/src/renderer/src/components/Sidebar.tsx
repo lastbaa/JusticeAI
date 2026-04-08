@@ -117,7 +117,7 @@ function SessionItem({
   if (editing) {
     return (
       <div
-        className="relative flex items-center gap-2 rounded-lg px-3 py-1.5"
+        className="relative flex items-center gap-2 rounded-lg px-3 py-2"
         style={{ background: 'var(--surface-active)', border: '1px solid rgba(201,168,76,0.3)' }}
       >
         <div
@@ -131,8 +131,8 @@ function SessionItem({
           onBlur={commitEdit}
           onKeyDown={handleEditKeyDown}
           autoFocus
-          className="flex-1 bg-transparent text-[12px] leading-snug outline-none placeholder-white/30"
-          style={{ minWidth: 0, color: 'var(--text)' }}
+          className="flex-1 bg-transparent text-[13px] font-medium leading-snug outline-none placeholder-white/30"
+          style={{ minWidth: 0, color: '#e6edf3' }}
           maxLength={60}
         />
       </div>
@@ -148,16 +148,20 @@ function SessionItem({
       className="group relative flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer transition-all"
       style={{
         background: isActive ? 'var(--surface-active)' : hovered ? 'var(--surface-hover)' : 'transparent',
-        color: isActive ? 'rgb(var(--ov) / 0.85)' : hovered ? 'rgb(var(--ov) / 0.6)' : 'rgb(var(--ov) / 0.32)',
+        color: isActive ? '#c9a84c' : hovered ? '#e6edf3' : 'rgb(var(--ov) / 0.45)',
       }}
     >
       {isActive && (
         <div
-          className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 rounded-full"
+          className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 rounded-full"
           style={{ background: '#c9a84c' }}
         />
       )}
-      <span className="flex-1 truncate text-[12px] leading-snug" title={session.name}>
+      <span
+        className="flex-1 text-[13px] font-medium leading-snug"
+        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        title={session.name}
+      >
         {session.name}
       </span>
       {hovered && (

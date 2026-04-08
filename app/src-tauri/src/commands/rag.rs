@@ -1,7 +1,7 @@
 use crate::pipeline::{
-    self, chunk_document, embed_text, greeting_response, is_non_document_query,
-    is_simple_greeting, RetrievalBackend, GGUF_MIN_SIZE, SAUL_GGUF_URL,
-    SCORE_THRESHOLD,
+    self, chunk_document, embed_text, greeting_response, is_general_knowledge_query,
+    is_non_document_query, is_simple_greeting, RetrievalBackend, GGUF_MIN_SIZE,
+    SAUL_GGUF_URL, SCORE_THRESHOLD,
 };
 use crate::state::{
     AppSettings, Case, ChatSession, ChunkMetadata, Citation, DocumentRole, EmbeddedChunkEntry,
@@ -739,9 +739,31 @@ async fn process_file(
         })
         .collect();
 
+    // ── Contextual chunk prefixes (Anthropic's Contextual Retrieval technique) ──
+    // Prepend each chunk's document context (filename, page, section) to the text
+    // BEFORE embedding, so the vector captures structural information. This bridges
+    // the vocabulary gap between queries like "rent terms" and chunks that contain
+    // the answer but don't repeat those words.
+    let contextualized_texts: Vec<String> = good_chunks
+        .iter()
+        .map(|chunk| {
+            let section = pipeline::extract_chunk_section_header(&chunk.text);
+            let prefix = match section {
+                Some(ref hdr) => format!(
+                    "From {} page {}, section: {}. ",
+                    file_name, chunk.page_number, hdr
+                ),
+                None => format!("From {} page {}. ", file_name, chunk.page_number),
+            };
+            format!("{}{}", prefix, chunk.text)
+        })
+        .collect();
+
     // Batch-embed all surviving chunks in a single call for efficiency.
-    let texts: Vec<&str> = good_chunks.iter().map(|c| c.text.as_str()).collect();
-    let embeddings = pipeline::embed_texts_batch(&texts, false, model_dir).await?;
+    // We embed the contextualized text (with prefix) for better retrieval,
+    // but store the original text in metadata for display/citation.
+    let ctx_refs: Vec<&str> = contextualized_texts.iter().map(|t| t.as_str()).collect();
+    let embeddings = pipeline::embed_texts_batch(&ctx_refs, false, model_dir).await?;
 
     let mut new_entries: Vec<(String, EmbeddedChunkEntry)> = Vec::new();
     for (chunk, vector) in good_chunks.iter().zip(embeddings) {
@@ -885,6 +907,30 @@ fn neighbor_is_relevant(target_text: &str, neighbor_text: &str) -> bool {
 
 /// Truncate text to a budget without cutting mid-word or mid-sentence.
 /// Prefers sentence boundaries (`. `), falls back to word boundaries.
+/// Compress chunk text by stripping boilerplate, redundant whitespace, and
+/// low-information content to maximize useful tokens in the context window.
+fn compress_chunk_text(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for line in text.lines() {
+        let trimmed = line.trim();
+        // Skip empty lines, page markers, horizontal rules, pure underscores
+        if trimmed.is_empty() { continue; }
+        if trimmed.chars().all(|c| c == '_' || c == '-' || c == '=' || c == '.') { continue; }
+        if trimmed.starts_with("Page ") && trimmed.len() < 15 { continue; }
+        if trimmed.starts_with("page ") && trimmed.len() < 15 { continue; }
+        // Skip lines that are just repeated characters (decorators)
+        let unique_chars: std::collections::HashSet<char> = trimmed.chars().collect();
+        if unique_chars.len() <= 2 && trimmed.len() > 5 { continue; }
+        // Collapse multiple spaces
+        let compressed: String = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(&compressed);
+    }
+    result
+}
+
 fn truncate_to_budget(text: &str, budget: usize) -> String {
     if text.len() <= budget {
         return text.to_string();
@@ -1005,10 +1051,18 @@ pub async fn query(
         });
     }
 
+    // ── Follow-up question rewriting ───────────────────────────────────────
+    // Resolve pronouns and implicit references so the embedding query is
+    // self-contained. "What about the penalty?" → "What about the penalty? (regarding: lease rent)"
+    let retrieval_query = pipeline::rewrite_followup_query(&question, &history);
+    if retrieval_query != question {
+        log::info!("Follow-up rewrite: '{}' → '{}'", &question, &retrieval_query);
+    }
+
     window
         .emit("query-status", serde_json::json!({"phase": "embedding"}))
         .ok();
-    let query_vec = embed_text(&question, true, &model_dir).await?;
+    let query_vec = embed_text(&retrieval_query, true, &model_dir).await?;
 
     let retrieval_params = pipeline::RetrievalModeParams::from_mode(&settings.inference_mode);
     let inference_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
@@ -1249,10 +1303,44 @@ pub async fn query(
     };
 
     if route_to_general {
-        // Return a hardcoded not-found response instead of running inference.
-        // Saul-7B regurgitates system prompt instructions as numbered lists,
-        // so bypassing it entirely avoids that problem.
-        log::info!("No relevant chunks found — returning hardcoded not-found response.");
+        // Check if this is a general knowledge question that the LLM can answer
+        // without documents (e.g. "what is a tort?", "explain contract law").
+        if pipeline::is_general_knowledge_query(&question) {
+            log::info!("General knowledge query detected ('{}'); routing to LLM without context.", &question);
+            let model_dir_clone = model_dir.clone();
+            let window_clone = window.clone();
+            window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
+            let mut chat_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
+            chat_params.system_prompt_override = Some(
+                "You are Justice AI, a legal research assistant running locally on the user's device. \
+                The user has documents loaded but their question is about general legal knowledge, \
+                not about a specific document. Answer their question naturally and concisely using \
+                your training knowledge. Be helpful and informative. Do not fabricate specific \
+                case numbers, statutes, or citations — speak in general terms. At the end, mention \
+                that you can also help analyze their loaded documents if they have specific questions.".to_string(),
+            );
+            let general_answer = pipeline::ask_saul(
+                &question,
+                "",
+                &history,
+                &model_dir_clone,
+                Arc::clone(&model_cache),
+                move |tok| { window_clone.emit("query-token", tok.as_str()).ok(); },
+                resolved_jurisdiction.as_ref(),
+                chat_params,
+            ).await?;
+            let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]);
+            return Ok(QueryResult {
+                answer: general_answer,
+                citations: vec![],
+                not_found: false,
+                assertions: vec![],
+                confidence: Some(answer_confidence),
+            });
+        }
+
+        // Truly irrelevant query with no general knowledge match — return not-found.
+        log::info!("No relevant chunks found — returning not-found response.");
         let not_found_msg = "I could not find relevant information in your loaded documents.\n\n\
             **Suggestions**\n\
             - Rephrase your question with different keywords\n\
@@ -1357,6 +1445,37 @@ pub async fn query(
         if !fact_parts.is_empty() {
             context.push_str(&format!("KEY FACTS:\n{}\n\n", fact_parts.join("\n")));
         }
+
+        // ── Document map: brief summary of each loaded document ──────────
+        // Gives the LLM awareness of what documents exist and their scope,
+        // so it can correctly attribute information and say "not found" when
+        // the right document isn't loaded.
+        let mut doc_lines: Vec<String> = Vec::new();
+        for fi in s.file_registry.values() {
+            if fi.case_id.as_ref() == case_id.as_ref() {
+                let role_label = match fi.role {
+                    DocumentRole::ClientDocument => "Client Doc",
+                    DocumentRole::LegalAuthority => "Legal Authority",
+                    DocumentRole::Evidence => "Evidence",
+                    DocumentRole::Reference => "Reference",
+                };
+                doc_lines.push(format!(
+                    "- {} ({}, {} pages, {} words, role: {})",
+                    fi.file_name,
+                    if fi.file_name.contains('.') {
+                        fi.file_name.rsplit('.').next().unwrap_or("file").to_uppercase()
+                    } else {
+                        "FILE".to_string()
+                    },
+                    fi.total_pages,
+                    fi.word_count,
+                    role_label
+                ));
+            }
+        }
+        if !doc_lines.is_empty() {
+            context.push_str(&format!("LOADED DOCUMENTS:\n{}\n\n", doc_lines.join("\n")));
+        }
     }
 
     // Calculate remaining budget after injected context
@@ -1394,7 +1513,8 @@ pub async fn query(
             let footer = "\n---";
             let overhead = header.len() + footer.len();
             let text_budget = chunk_budgets.get(i).copied().unwrap_or(200).saturating_sub(overhead);
-            let truncated_text = truncate_to_budget(&meta.text, text_budget);
+            let compressed = compress_chunk_text(&meta.text);
+            let truncated_text = truncate_to_budget(&compressed, text_budget);
             (meta.role.clone(), format!("{}{}{}", header, truncated_text, footer))
         })
         .collect();
@@ -1760,15 +1880,60 @@ fn strip_excessive_hedging(answer: &str) -> String {
     answer.to_string()
 }
 
-/// Collapse repeated sentences in the output.
+/// Collapse repeated sentences, near-duplicate sentences, and repeated bullet points.
 fn collapse_repetitions(answer: &str) -> String {
-    let sentences: Vec<&str> = answer.split(". ").collect();
+    // Phase 1: Split into logical units (sentences and bullet points)
+    let lines: Vec<&str> = answer.lines().collect();
+    let mut deduped_lines: Vec<String> = Vec::new();
+    let mut seen_normalized: Vec<String> = Vec::new();
+
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            deduped_lines.push(line.to_string());
+            continue;
+        }
+
+        // Normalize: lowercase, strip punctuation, collapse whitespace
+        let normalized: String = trimmed
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if normalized.len() < 15 {
+            deduped_lines.push(line.to_string());
+            continue;
+        }
+
+        // Check for near-duplicates using word overlap (Jaccard > 0.80)
+        let is_dup = seen_normalized.iter().any(|prev| {
+            let prev_words: std::collections::HashSet<&str> = prev.split_whitespace().collect();
+            let cur_words: std::collections::HashSet<&str> = normalized.split_whitespace().collect();
+            let intersection = prev_words.intersection(&cur_words).count();
+            let union = prev_words.union(&cur_words).count();
+            if union == 0 { return false; }
+            (intersection as f64 / union as f64) > 0.80
+        });
+
+        if !is_dup {
+            seen_normalized.push(normalized);
+            deduped_lines.push(line.to_string());
+        }
+    }
+
+    let result = deduped_lines.join("\n");
+
+    // Phase 2: Within remaining text, collapse exact repeated sentences (". " split)
+    let sentences: Vec<&str> = result.split(". ").collect();
     let mut seen = std::collections::HashSet::new();
     let mut unique = Vec::new();
-
     for sentence in &sentences {
-        let normalized = sentence.trim().to_lowercase();
-        if normalized.len() < 10 || seen.insert(normalized) {
+        let norm = sentence.trim().to_lowercase();
+        if norm.len() < 10 || seen.insert(norm) {
             unique.push(*sentence);
         }
     }

@@ -98,6 +98,49 @@ pub fn is_non_document_query(query: &str) -> bool {
     false
 }
 
+/// Detect whether a query is a general knowledge / conversational question that
+/// should be answered by the LLM directly (without document context) even though
+/// it wasn't caught by `is_non_document_query` AND retrieval returned no relevant
+/// chunks. This prevents returning a dead-end "not found" for perfectly reasonable
+/// questions like "what is a tort?" or "explain contract law".
+pub fn is_general_knowledge_query(query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+
+    // "What is X" / "What are X" / "Define X" / "Explain X" patterns
+    let knowledge_prefixes = [
+        "what is ", "what are ", "what does ", "what do ",
+        "define ", "explain ", "describe ", "tell me about ",
+        "how does ", "how do ", "how can ", "how to ",
+        "why is ", "why are ", "why do ", "why does ",
+        "when is ", "when are ", "when do ", "when does ",
+        "can you explain", "can you tell me",
+        "what's the difference between",
+        "what is the difference between",
+        "give me an overview",
+        "summarize ", "summary of ",
+    ];
+    if knowledge_prefixes.iter().any(|p| q.starts_with(p)) {
+        return true;
+    }
+
+    // Questions ending with "?" that don't reference specific documents
+    if q.ends_with('?') {
+        // If it references "the document", "the file", "this contract", etc., it's document-specific
+        let doc_refs = [
+            "the document", "the file", "this document", "this file",
+            "the contract", "this contract", "the lease", "this lease",
+            "the agreement", "this agreement", "the pdf", "this pdf",
+            "page ", "section ", "clause ", "paragraph ",
+            "uploaded", "loaded",
+        ];
+        if !doc_refs.iter().any(|r| q.contains(r)) {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Detect whether a query is a simple greeting/hello that should get a
 /// hardcoded response (no LLM inference at all). This is a strict subset of
 /// `is_non_document_query` — only the conversational openers where the user
@@ -140,6 +183,41 @@ pub fn greeting_response(has_documents: bool) -> String {
     }
 }
 
+/// Extract a recognizable section header from the first line of a chunk.
+/// Public version used at embed-time for contextual chunk prefixes.
+pub fn extract_chunk_section_header(text: &str) -> Option<String> {
+    let first_line = text.lines().next()?.trim();
+    if first_line.len() > 3 && first_line.len() < 80 {
+        // ALL-CAPS header
+        if first_line
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .all(|c| c.is_uppercase())
+            && first_line.chars().filter(|c| c.is_alphabetic()).count() > 3
+        {
+            return Some(first_line.to_string());
+        }
+        // "Section N" or "Article N" header
+        if first_line.starts_with("Section ")
+            || first_line.starts_with("SECTION ")
+            || first_line.starts_with("Article ")
+            || first_line.starts_with("ARTICLE ")
+        {
+            return Some(first_line.to_string());
+        }
+        // Numbered header: "1.1", "2.3.1"
+        if first_line
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_digit())
+            && first_line.contains('.')
+        {
+            return Some(first_line.to_string());
+        }
+    }
+    None
+}
+
 pub const GGUF_MIN_SIZE: u64 = 4_000_000_000;
 
 pub const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instruct-v1-GGUF/resolve/main/Saul-Instruct-v1.Q4_K_M.gguf";
@@ -148,18 +226,29 @@ pub const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instr
 /// pays full attention to it (system-prompt content is under-weighted by the model).
 pub const RULES_PROMPT: &str = "\
 You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\n\n\
+RULES:\n\
 1. GROUNDING: If the answer is not in the context, state: \"This information is not present in the provided documents.\" Never speculate or use outside knowledge.\n\
 2. CITATIONS: Cite every claim as [filename, p. N]. Example: The lease runs 12 months [lease.pdf, p. 3].\n\
 3. EXACTNESS: Reproduce numbers, dates, dollar amounts, and names EXACTLY as written. Never round or approximate.\n\
 4. NO FABRICATION: Never invent case numbers, court names, statutes, party names, or amounts not in the context.\n\
 5. FORMAT: Be direct. No preambles or sign-offs. Bold key terms. Bullets for multiple facts.\n\
-6. DOCUMENT ROLES: Context is organized by role. Apply LEGAL AUTHORITY to facts in CLIENT DOCUMENTS. Cite each document by its role.\n\n\
-Examples:\n\
+6. DOCUMENT ROLES: Context is organized by role. Apply LEGAL AUTHORITY to facts in CLIENT DOCUMENTS. Cite each document by its role.\n\
+7. REASONING: Before answering, identify which specific excerpts contain the answer. Then write your response using only those excerpts.\n\n\
+NEVER DO THIS:\n\
+- Never repeat the same fact twice in different words\n\
+- Never list the same item multiple times\n\
+- Never restate what you already said\n\
+- Never say \"as mentioned above\" or \"as stated previously\"\n\
+- Never add filler like \"I hope this helps\" or \"Let me know if you need anything\"\n\n\
+GOOD example:\n\
 Q: What is the lease term?\n\
 A: The lease term is **12 months**, commencing **January 1, 2024** and ending **December 31, 2024** [residential_lease.pdf, p. 3].\n\n\
 Q: Who are the parties?\n\
 A: - **Landlord**: Robert James Smith [lease.pdf, p. 1]\n\
 - **Tenant**: Maria Garcia [lease.pdf, p. 1]\n\n\
+BAD example (do NOT do this):\n\
+Q: What is the rent?\n\
+A: The rent is $1,500 per month [lease.pdf, p. 2]. The monthly rental payment is $1,500 [lease.pdf, p. 2]. The tenant pays $1,500 each month.\n\n\
 Q: What is the penalty for early termination?\n\
 A: This information is not present in the provided documents.";
 
@@ -203,7 +292,7 @@ impl InferenceParams {
             InferenceMode::Balanced => Self {
                 max_new_tokens: 1024,
                 temperature: 0.15,
-                system_prompt_suffix: "\nProvide a complete answer with all relevant details. Use bullet points for multiple facts. Cite every claim.",
+                system_prompt_suffix: "\nProvide a complete answer with all relevant details. Use bullet points for multiple facts. Cite every claim. State each fact only once — do not repeat yourself.",
                 system_prompt_override: None,
                 timeout_secs: 60,
                 is_quick: false,
@@ -211,7 +300,7 @@ impl InferenceParams {
             InferenceMode::Extended => Self {
                 max_new_tokens: 1024,
                 temperature: 0.10,
-                system_prompt_suffix: "\nFirst, identify the relevant facts in the context. Then, provide your structured response:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim.",
+                system_prompt_suffix: "\nThink step by step:\n1. Identify which excerpts in the context answer the question.\n2. Extract the exact facts, numbers, and names from those excerpts.\n3. Write your structured response using ONLY those facts:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim. Do not repeat any fact more than once.",
                 system_prompt_override: None,
                 timeout_secs: 120,
                 is_quick: false,
@@ -835,7 +924,14 @@ Answer the current question using ONLY these excerpts.\n\
     );
     let j_fragment = jurisdiction.map(jurisdiction_prompt_fragment).unwrap_or_default();
     let mode_suffix = inference_params.system_prompt_suffix;
-    let sys_prompt = PromptCache::get_or_build(base_prompt, &j_fragment, mode_suffix);
+    let sys_prompt_cached = PromptCache::get_or_build(base_prompt, &j_fragment, mode_suffix);
+
+    // Inject the current local date so the model can reason about temporal
+    // references correctly (e.g. "is this date in the future?"). Fully local —
+    // uses the system clock, no network calls.
+    let now = chrono::Local::now();
+    let date_line = format!("Today's date is {}.", now.format("%B %d, %Y"));
+    let sys_prompt = format!("{}\n{}", date_line, sys_prompt_cached);
 
     // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
     // Saul-Instruct-v1 is fine-tuned from Mistral-7B — use Mistral chat format.
@@ -961,10 +1057,10 @@ Answer the current question using ONLY these excerpts.\n\
         }
 
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(256, 1.15, 0.3, 0.0),
-            LlamaSampler::top_k(50),
+            LlamaSampler::penalties(512, 1.3, 0.5, 0.0),
+            LlamaSampler::top_k(40),
             LlamaSampler::min_p(0.10, 1),
-            LlamaSampler::top_p(0.92, 1),
+            LlamaSampler::top_p(0.90, 1),
             LlamaSampler::temp(inference_params.temperature),
             LlamaSampler::dist(42),
         ]);
@@ -1007,6 +1103,32 @@ Answer the current question using ONLY these excerpts.\n\
             let token_piece = String::from_utf8_lossy(&output_bytes).into_owned();
             on_token(token_piece.clone());
             response.push_str(&token_piece);
+
+            // Stop sequence detection: halt if the model starts looping or
+            // producing degenerate patterns (e.g. repeating the same sentence,
+            // starting a new [INST] turn, or emitting the context delimiters).
+            if response.len() > 100 {
+                let tail = &response[response.len().saturating_sub(200)..];
+                if tail.contains("[INST]")
+                    || tail.contains("=== DOCUMENT CONTEXT ===")
+                    || tail.contains("=== END CONTEXT ===")
+                    || tail.contains("QUESTION:")
+                {
+                    log::warn!("Stop sequence detected in output — halting generation.");
+                    break;
+                }
+                // Detect phrase-level repetition: if the last 80 chars appear
+                // earlier in the response, the model is looping.
+                if response.len() > 200 {
+                    let check_len = 80.min(response.len() / 3);
+                    let last_chunk = &response[response.len() - check_len..];
+                    let earlier = &response[..response.len() - check_len];
+                    if earlier.contains(last_chunk) {
+                        log::warn!("Repetition loop detected — halting generation.");
+                        break;
+                    }
+                }
+            }
 
             batch.clear();
             batch
@@ -2074,9 +2196,114 @@ pub fn expand_query(query: &str) -> Vec<String> {
         queries.push(statement);
     }
 
-    // Cap at 4 total
-    queries.truncate(4);
+    // 3. Query decomposition: split multi-part questions joined by "and"
+    // "What are the payment terms and who are the parties?" → two sub-queries
+    // Only decompose if the query has conjunctions separating question-like parts.
+    let sub_queries = decompose_query(&lower);
+    for sq in sub_queries {
+        if queries.len() >= 6 { break; }
+        if !queries.iter().any(|q| q == &sq) {
+            queries.push(sq);
+        }
+    }
+
+    // Cap at 6 total (original + synonyms + statement + decomposed)
+    queries.truncate(6);
     queries
+}
+
+/// Rewrite a follow-up question by resolving pronouns and implicit references
+/// using conversation history. This ensures the embedding query is self-contained.
+/// Example: history="What is the rent?" → follow-up="What about the penalty?"
+/// → rewritten="What is the penalty in the lease?"
+pub fn rewrite_followup_query(query: &str, history: &[(String, String)]) -> String {
+    if history.is_empty() {
+        return query.to_string();
+    }
+
+    let q = query.trim().to_lowercase();
+
+    // Detect follow-up patterns that reference prior context
+    let followup_indicators = [
+        "what about", "how about", "and the", "and what",
+        "what else", "anything else", "tell me more",
+        "can you also", "also ", "same for",
+        "regarding that", "related to that",
+    ];
+    let pronoun_refs = ["it", "this", "that", "they", "them", "those", "these", "its"];
+
+    let is_followup = followup_indicators.iter().any(|p| q.starts_with(p))
+        || (q.split_whitespace().count() <= 5
+            && pronoun_refs.iter().any(|p| {
+                q.split_whitespace().any(|w| w.trim_matches(|c: char| !c.is_alphanumeric()) == *p)
+            }));
+
+    if !is_followup {
+        return query.to_string();
+    }
+
+    // Extract key terms from the last user question to provide context
+    let last_user = &history[history.len() - 1].0;
+    let last_lower = last_user.to_lowercase();
+
+    // Extract subject nouns from the last question (skip question words and stopwords)
+    let skip_words: std::collections::HashSet<&str> = [
+        "what", "is", "the", "are", "was", "were", "who", "how", "much",
+        "many", "does", "do", "did", "can", "could", "would", "should",
+        "a", "an", "in", "of", "for", "to", "from", "with", "about",
+        "this", "that", "these", "those", "it", "its",
+    ].iter().cloned().collect();
+
+    let context_terms: Vec<&str> = last_lower
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| w.len() > 2 && !skip_words.contains(w))
+        .collect();
+
+    if context_terms.is_empty() {
+        return query.to_string();
+    }
+
+    // Append context terms to make the query self-contained
+    let context_suffix = context_terms.join(" ");
+    format!("{} (regarding: {})", query.trim(), context_suffix)
+}
+
+/// Decompose compound questions into sub-queries for better retrieval coverage.
+/// "What are the payment terms and who are the parties?" → ["payment terms", "parties"]
+/// Only triggers when conjunctions separate distinct question fragments.
+fn decompose_query(query: &str) -> Vec<String> {
+    let q = query.trim().trim_end_matches('?');
+
+    // Split on " and " or " & " that separate question-like fragments
+    let conjunctions = [" and ", " & ", " as well as "];
+    let mut best_parts: Vec<&str> = Vec::new();
+
+    for conj in &conjunctions {
+        if q.contains(conj) {
+            let parts: Vec<&str> = q.split(conj).collect();
+            // Only decompose if we get 2-3 parts, each with >=3 words or starting with a question word
+            if parts.len() >= 2 && parts.len() <= 4 {
+                let all_meaningful = parts.iter().all(|p| {
+                    let trimmed = p.trim();
+                    trimmed.split_whitespace().count() >= 2
+                });
+                if all_meaningful && parts.len() > best_parts.len() {
+                    best_parts = parts;
+                }
+            }
+        }
+    }
+
+    if best_parts.len() < 2 {
+        return Vec::new();
+    }
+
+    best_parts
+        .iter()
+        .map(|p| p.trim().to_string())
+        .filter(|p| p.len() > 5)
+        .collect()
 }
 
 // ── Pluggable Retrieval Backend ───────────────────────────────────────────────
