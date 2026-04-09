@@ -1066,13 +1066,6 @@ pub async fn query(
 
     let retrieval_params = pipeline::RetrievalModeParams::from_mode(&settings.inference_mode);
     let inference_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
-    // Save inference param values before ask_saul consumes the struct (no Clone)
-    let saved_max_new_tokens = inference_params.max_new_tokens;
-    let saved_temperature = inference_params.temperature;
-    let saved_system_prompt_suffix = inference_params.system_prompt_suffix;
-    let saved_system_prompt_override = inference_params.system_prompt_override.clone();
-    let saved_timeout_secs = inference_params.timeout_secs;
-    let saved_is_quick = inference_params.is_quick;
     let candidate_k = retrieval_params.candidate_pool_k;
 
     // ── Single consolidated state lock for retrieval + cosine check + form injection + neighbor map ──
@@ -1602,7 +1595,6 @@ pub async fn query(
         .emit("query-status", serde_json::json!({"phase": "generating"}))
         .ok();
     let window_clone = window.clone();
-    let model_cache_for_retry = Arc::clone(&model_cache);
     let answer: String = pipeline::ask_saul(
         &question,
         &context,
@@ -1660,135 +1652,30 @@ pub async fn query(
     assertions.extend(crate::assertions::check_no_hallucination(&answer, &chunk_texts));
     assertions.extend(crate::assertions::check_fabricated_entities(&answer, &chunk_texts));
 
-    // ── Layer 4: Quality retry loop ──────────────────────────────────────────
-    // If hallucination or fabrication detected, retry ONCE with a tighter prompt
-    // and lower temperature. Use the retry only if it has fewer violations.
-    let (orig_hall, orig_fab) = count_violations(&assertions);
-    let has_hallucination = orig_hall > 0;
-    let has_fabrication = orig_fab > 0;
-
     let (mut final_answer, mut final_not_found, mut final_assertions) =
         (answer.clone(), not_found, assertions);
 
-    // Compute confidence BEFORE retry decision so low confidence can trigger a retry
-    let chunk_strings_for_confidence: Vec<String> = chunk_texts.iter().map(|s| s.to_string()).collect();
-    let answer_confidence = crate::assertions::compute_confidence(&answer, &chunk_strings_for_confidence);
-    let should_retry = has_hallucination || has_fabrication || answer_confidence < 0.4;
-
-    if should_retry {
-        log::warn!(
-            "Quality check failed (hallucinations: {}, fabrications: {}, confidence: {:.2}). Attempting retry.",
-            orig_hall, orig_fab, answer_confidence
+    // Log assertion results for diagnostics but do NOT retry inference.
+    // Retrying doubles latency and consistently produces worse answers
+    // because the tighter prompt over-constrains the model.
+    let (orig_hall, orig_fab) = count_violations(&final_assertions);
+    if orig_hall > 0 || orig_fab > 0 {
+        log::info!(
+            "Quality assertions: hallucinations={}, fabrications={} (informational only, no retry).",
+            orig_hall, orig_fab
         );
-        window
-            .emit("query-status", serde_json::json!({"phase": "retrying"}))
-            .ok();
-
-        // Build retry prompt with stricter grounding instruction
-        let retry_question = format!(
-            "{}\n\nIMPORTANT: Your previous response contained claims not found in the \
-            provided documents. Answer again using ONLY facts explicitly stated in the \
-            context above. If a fact is not in the context, do not include it.",
-            question
-        );
-
-        // Retry with halved temperature (min 0.05)
-        let retry_temp = (saved_temperature / 2.0).max(0.05);
-        let retry_params = pipeline::InferenceParams {
-            max_new_tokens: saved_max_new_tokens,
-            temperature: retry_temp,
-            system_prompt_suffix: saved_system_prompt_suffix,
-            system_prompt_override: saved_system_prompt_override,
-            timeout_secs: saved_timeout_secs,
-            is_quick: saved_is_quick,
-        };
-
-        // Reuse the model_cache Arc cloned before the first ask_saul call.
-        let model_cache_retry = model_cache_for_retry;
-        let window_retry = window.clone();
-        let retry_answer = pipeline::ask_saul(
-            &retry_question,
-            &context,
-            &history,
-            &model_dir,
-            model_cache_retry,
-            move |tok| {
-                window_retry.emit("query-token", tok.as_str()).ok();
-            },
-            resolved_jurisdiction.as_ref(),
-            retry_params,
-        )
-        .await;
-
-        match retry_answer {
-            Ok(retry_text) => {
-                // Re-run assertions on retry response
-                let mut retry_assertions =
-                    crate::assertions::check_citations(&retry_text, Some(&known_files));
-                retry_assertions.extend(crate::assertions::check_no_hallucination(
-                    &retry_text,
-                    &chunk_texts,
-                ));
-                retry_assertions.extend(crate::assertions::check_fabricated_entities(
-                    &retry_text,
-                    &chunk_texts,
-                ));
-
-                let (retry_hall, retry_fab) = count_violations(&retry_assertions);
-                let orig_total = orig_hall + orig_fab;
-                let retry_total = retry_hall + retry_fab;
-
-                if retry_total < orig_total {
-                    log::info!(
-                        "Retry improved quality: violations {} -> {}. Using retry response.",
-                        orig_total, retry_total
-                    );
-                    let retry_lower = retry_text.to_lowercase();
-                    let retry_not_found = retry_text.is_empty()
-                        || retry_lower.contains("i could not find information")
-                        || retry_lower.contains("could not find information about this")
-                        || retry_lower.contains("documents do not contain");
-                    final_answer = retry_text;
-                    final_not_found = retry_not_found;
-                    final_assertions = retry_assertions;
-                } else {
-                    log::info!(
-                        "Retry did not improve quality: violations {} -> {}. Keeping original.",
-                        orig_total, retry_total
-                    );
-                }
-            }
-            Err(e) => {
-                log::warn!("Retry inference failed: {}. Keeping original response.", e);
-            }
-        }
     }
 
     // ── Layer 5: Output cleanup pipeline ─────────────────────────────────────
-    // Apply cleanup in order: collapse repetitions, strip excessive hedging,
-    // repair malformed citations, then strip ungrounded claims.
+    // Light cleanup only: collapse repetitions, strip excessive hedging,
+    // repair malformed citations. Do NOT strip sentences based on token
+    // matching — it causes false positives that mutilate correct answers.
     final_answer = collapse_repetitions(&final_answer);
     final_answer = strip_excessive_hedging(&final_answer);
     final_answer = repair_citations(&final_answer);
 
-    // Last-resort cleanup: remove individual sentences with ungrounded proper
-    // nouns or numbers, rather than failing the whole response.
-    let chunk_strings: Vec<String> = chunk_texts.iter().map(|s| s.to_string()).collect();
-    final_answer = crate::assertions::strip_ungrounded_claims(&final_answer, &chunk_strings);
-
-    // ── Layer 6: Fabrication failsafe ────────────────────────────────────────
-    // If fabrication STILL present after retry + stripping, replace with safe error.
-    let (_, still_fabricated) = count_violations(&final_assertions);
-    if still_fabricated > 0 {
-        log::warn!("Fabricated entity still present after retry — replacing with safe response.");
-        final_answer = "I found some relevant excerpts in your documents, but I was unable to produce \
-            a fully grounded answer. Some details may not be supported by your documents.\n\n\
-            Please try rephrasing your question more specifically, or review the source \
-            excerpts below to find the information you need.".to_string();
-        final_not_found = true;
-    }
-
     // ── Confidence scoring ───────────────────────────────────────────────────
+    let chunk_strings: Vec<String> = chunk_texts.iter().map(|s| s.to_string()).collect();
     let confidence = crate::assertions::compute_confidence(&final_answer, &chunk_strings);
 
     Ok(QueryResult {
@@ -1974,8 +1861,22 @@ fn repair_citations(answer: &str) -> String {
     let mut result = answer.to_string();
 
     // Fix unclosed brackets: "[file, p. 3" → "[file, p. 3]"
-    let re = regex::Regex::new(r"\[([^\]]+,\s*p\.\s*\d+)(?!\])").unwrap();
-    result = re.replace_all(&result, "[$1]").to_string();
+    // Rust regex crate does not support lookahead, so we match the pattern
+    // and only add a closing bracket when the match isn't already closed.
+    let re = regex::Regex::new(r"\[([^\]]+,\s*p\.\s*\d+)").unwrap();
+    let mut last_end = 0;
+    let mut repaired = String::with_capacity(result.len());
+    for mat in re.find_iter(&result) {
+        repaired.push_str(&result[last_end..mat.end()]);
+        // Check if the very next char is already ']'
+        let next_char = result[mat.end()..].chars().next();
+        if next_char != Some(']') {
+            repaired.push(']');
+        }
+        last_end = mat.end();
+    }
+    repaired.push_str(&result[last_end..]);
+    result = repaired;
 
     // Fix empty citations: "[, p. ]" → remove entirely
     let empty_re = regex::Regex::new(r"\[\s*,?\s*p\.\s*\]").unwrap();

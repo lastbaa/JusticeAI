@@ -284,23 +284,23 @@ impl InferenceParams {
             InferenceMode::Quick => Self {
                 max_new_tokens: 256,
                 temperature: 0.05,
-                system_prompt_suffix: "\nStart your answer with the specific fact or value requested. Answer in 1-3 sentences. Cite the source.",
+                system_prompt_suffix: "\nStart your answer with the specific fact or value requested. Answer in 1-3 sentences. Cite the source. Then stop — do not add anything else.",
                 system_prompt_override: None,
                 timeout_secs: 30,
                 is_quick: true,
             },
             InferenceMode::Balanced => Self {
-                max_new_tokens: 1024,
+                max_new_tokens: 512,
                 temperature: 0.15,
-                system_prompt_suffix: "\nProvide a complete answer with all relevant details. Use bullet points for multiple facts. Cite every claim. State each fact only once — do not repeat yourself.",
+                system_prompt_suffix: "\nProvide a complete answer with all relevant details. Use bullet points for multiple facts. Cite every claim. State each fact only once — do not repeat yourself. Once you have answered the question, stop immediately.",
                 system_prompt_override: None,
                 timeout_secs: 60,
                 is_quick: false,
             },
             InferenceMode::Extended => Self {
-                max_new_tokens: 1024,
+                max_new_tokens: 768,
                 temperature: 0.10,
-                system_prompt_suffix: "\nThink step by step:\n1. Identify which excerpts in the context answer the question.\n2. Extract the exact facts, numbers, and names from those excerpts.\n3. Write your structured response using ONLY those facts:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim. Do not repeat any fact more than once.",
+                system_prompt_suffix: "\nThink step by step:\n1. Identify which excerpts in the context answer the question.\n2. Extract the exact facts, numbers, and names from those excerpts.\n3. Write your structured response using ONLY those facts:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim. Do not repeat any fact more than once. When your analysis is complete, stop generating.",
                 system_prompt_override: None,
                 timeout_secs: 120,
                 is_quick: false,
@@ -933,10 +933,11 @@ Answer the current question using ONLY these excerpts.\n\
     let date_line = format!("Today's date is {}.", now.format("%B %d, %Y"));
     let sys_prompt = format!("{}\n{}", date_line, sys_prompt_cached);
 
-    // "Answer:" is placed AFTER [/INST] (in the assistant turn), not before it.
     // Saul-Instruct-v1 is fine-tuned from Mistral-7B — use Mistral chat format.
     // System instructions go at the start of the user turn (no <<SYS>> wrapper).
-    let prompt = format!("[INST] {sys_prompt}\n\n{user_content} [/INST]");
+    // "Answer:" after [/INST] primes the assistant turn and helps the model
+    // understand it should produce a direct answer then stop.
+    let prompt = format!("[INST] {sys_prompt}\n\n{user_content} [/INST] Answer:");
 
     tokio::task::spawn_blocking(move || {
         // Get (or lazily initialize) the global llama.cpp backend.
@@ -1057,7 +1058,7 @@ Answer the current question using ONLY these excerpts.\n\
         }
 
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(768, 1.35, 0.6, 0.0),
+            LlamaSampler::penalties(64, 1.10, 0.3, 0.0),
             LlamaSampler::top_k(40),
             LlamaSampler::min_p(0.10, 1),
             LlamaSampler::top_p(0.90, 1),
@@ -1078,6 +1079,7 @@ Answer the current question using ONLY these excerpts.\n\
 
         let gen_start = Instant::now();
         let timeout_secs = inference_params.timeout_secs;
+        let mut tokens_since_content: usize = 0;
 
         for _ in 0..max_new_tokens {
             if pos >= n_ctx_size as usize {
@@ -1093,16 +1095,53 @@ Answer the current question using ONLY these excerpts.\n\
             let token = sampler.sample(&ctx, -1);
             sampler.accept(token);
 
+            // ── EOS detection (triple-check) ──────────────────────────
+            // 1. Crate API check
             if model.is_eog_token(token) {
+                log::info!("EOS detected via is_eog_token — halting generation.");
+                break;
+            }
+            // 2. Direct token ID comparison
+            if token == model.token_eos() {
+                log::info!("EOS detected via token_eos() match — halting generation.");
                 break;
             }
 
+            // Decode token to string — pass `true` for special tokens so
+            // EOS (`</s>`) is rendered as a visible string instead of empty bytes.
             let output_bytes = model
-                .token_to_piece_bytes(token, 128, false, None)
+                .token_to_piece_bytes(token, 128, true, None)
                 .map_err(|e| format!("Token decode error: {e}"))?;
             let token_piece = String::from_utf8_lossy(&output_bytes).into_owned();
-            on_token(token_piece.clone());
+
+            // 3. String-based EOS fallback
+            if token_piece.contains("</s>") || token_piece.contains("<|endoftext|>") {
+                log::info!("EOS detected via string match ('{}') — halting generation.", token_piece.trim());
+                break;
+            }
+
+            // Skip emitting empty/whitespace-only tokens to the UI —
+            // they cause cursor blinks with no visible content.
+            if !token_piece.trim().is_empty() {
+                on_token(token_piece.clone());
+            }
             response.push_str(&token_piece);
+
+            // ── Stall detection ──────────────────────────────────────
+            // If 30+ tokens pass without any alphanumeric content, the
+            // model is stalling (producing only whitespace/punctuation).
+            if token_piece.chars().any(|c| c.is_ascii_alphanumeric()) {
+                tokens_since_content = 0;
+            } else {
+                tokens_since_content += 1;
+                if tokens_since_content >= 30 {
+                    log::warn!(
+                        "Generation stalled: 30 tokens without alphanumeric content at {} bytes. Halting.",
+                        response.len()
+                    );
+                    break;
+                }
+            }
 
             // Stop sequence detection: halt if the model starts looping or
             // producing degenerate patterns (e.g. repeating the same sentence,
@@ -1166,6 +1205,9 @@ Answer the current question using ONLY these excerpts.\n\
         let answer = response
             .trim()
             .trim_start_matches("<s>")
+            .trim()
+            .trim_start_matches("Answer:")
+            .trim_start_matches("answer:")
             .trim()
             .trim_end_matches("</s>")
             .trim_end_matches("[INST]")
@@ -2831,7 +2873,7 @@ mod tests {
     #[test]
     fn inference_params_balanced() {
         let p = InferenceParams::from_mode(&InferenceMode::Balanced);
-        assert_eq!(p.max_new_tokens, 1024);
+        assert_eq!(p.max_new_tokens, 512);
         assert!((p.temperature - 0.15).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 60);
@@ -2840,7 +2882,7 @@ mod tests {
     #[test]
     fn inference_params_extended() {
         let p = InferenceParams::from_mode(&InferenceMode::Extended);
-        assert_eq!(p.max_new_tokens, 1024);
+        assert_eq!(p.max_new_tokens, 768);
         assert!((p.temperature - 0.10).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 120);

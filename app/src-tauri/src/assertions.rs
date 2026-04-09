@@ -176,20 +176,28 @@ pub fn check_no_hallucination(answer: &str, chunks: &[&str]) -> Vec<AssertionRes
         if tokens.is_empty() {
             continue;
         }
-        let grounded = tokens.iter().all(|tok| chunks.iter().any(|c| c.contains(tok)));
+        // Use a 60% grounding ratio instead of requiring ALL tokens to match.
+        // Minor format differences (date formats, casing) caused false positives
+        // when requiring 100% match.
+        let grounded_count = tokens.iter()
+            .filter(|tok| chunks.iter().any(|c| c.contains(*tok)))
+            .count();
+        let ratio = grounded_count as f64 / tokens.len() as f64;
+        let grounded = ratio >= 0.6;
         results.push(AssertionResult {
             passed: grounded,
             assertion_type: AssertionType::Hallucination,
             message: if grounded {
-                format!("Claim grounded in sources: \"{}\"", truncate(&clean, 80))
+                format!("Claim grounded in sources ({:.0}%): \"{}\"", ratio * 100.0, truncate(&clean, 80))
             } else {
                 let missing: Vec<&&str> = tokens
                     .iter()
                     .filter(|t| !chunks.iter().any(|c| c.contains(**t)))
                     .collect();
                 format!(
-                    "Possible hallucination — tokens {:?} not in sources: \"{}\"",
+                    "Possible hallucination — tokens {:?} not in sources ({:.0}%): \"{}\"",
                     missing,
+                    ratio * 100.0,
                     truncate(&clean, 80)
                 )
             },

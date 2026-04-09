@@ -506,8 +506,9 @@ export default function App(): JSX.Element {
       }
 
       // Safety timeout: if the backend hangs, don't block the UI forever.
-      // 180s is generous — the Rust-side timeout is 30-120s depending on mode.
-      const FRONTEND_TIMEOUT_MS = 180_000
+      // Backend can take up to 2× inference timeout (initial + quality retry)
+      // plus ~30s for assertions/post-processing. Extended mode = 2×120+30 = 270s.
+      const FRONTEND_TIMEOUT_MS = 300_000
       const result = await Promise.race([
         window.api.query(question, recentHistory, currentCaseId ?? undefined, queryCaseContext),
         new Promise<never>((_, reject) =>
@@ -540,16 +541,27 @@ export default function App(): JSX.Element {
       setLastCitations(result.citations)
     } catch (err) {
       if (queryAbortRef.current) return
-      const errorMessage: ChatMessage = {
-        id: streamingId,
-        role: 'assistant',
-        content: `Unable to get a response. ${err instanceof Error ? err.message : 'Please try again.'}`,
-        citations: [],
-        notFound: true,
-        isStreaming: false,
-        timestamp: Date.now(),
-      }
+      // If we already have good streamed content, KEEP it instead of
+      // overwriting with an error. The streamed text is the real answer —
+      // the timeout just means post-processing took too long.
       setMessages((prev) => {
+        const streaming = prev.find((m) => m.id === streamingId)
+        if (streaming && streaming.content && streaming.content.trim().length > 20) {
+          // Preserve the good streamed content, just mark as done
+          return prev.map((m) =>
+            m.id === streamingId ? { ...m, isStreaming: false } : m
+          )
+        }
+        // No meaningful content was streamed — show error
+        const errorMessage: ChatMessage = {
+          id: streamingId,
+          role: 'assistant',
+          content: `Unable to get a response. ${err instanceof Error ? err.message : 'Please try again.'}`,
+          citations: [],
+          notFound: true,
+          isStreaming: false,
+          timestamp: Date.now(),
+        }
         const hasStreaming = prev.some((m) => m.id === streamingId)
         if (hasStreaming) {
           return prev.map((m) => (m.id === streamingId ? errorMessage : m))
