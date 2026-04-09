@@ -828,31 +828,6 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
               }
             </div>
 
-            {/* Confidence bar */}
-            {message.confidence !== undefined && message.confidence !== null && (
-              <div className="mt-2 flex items-center gap-2 text-xs">
-                <span style={{ color: 'rgb(var(--ov) / 0.35)' }}>Confidence:</span>
-                <div className="flex-1 max-w-[120px] h-1.5 rounded-full overflow-hidden" style={{ background: 'rgb(var(--ov) / 0.08)' }}>
-                  <div
-                    className={`h-full rounded-full transition-all ${
-                      message.confidence >= 0.8 ? 'bg-emerald-500' :
-                      message.confidence >= 0.6 ? 'bg-yellow-500' :
-                      message.confidence >= 0.4 ? 'bg-orange-500' :
-                      'bg-red-500'
-                    }`}
-                    style={{ width: `${Math.round(message.confidence * 100)}%` }}
-                  />
-                </div>
-                <span className={`font-medium ${
-                  message.confidence >= 0.8 ? 'text-emerald-400' :
-                  message.confidence >= 0.6 ? 'text-yellow-400' :
-                  message.confidence >= 0.4 ? 'text-orange-400' :
-                  'text-red-400'
-                }`}>
-                  {Math.round(message.confidence * 100)}%
-                </span>
-              </div>
-            )}
           </div>
         )}
 

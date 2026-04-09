@@ -695,9 +695,10 @@ async fn process_file(
         r.jurisdiction
     });
 
-    // Extract fact sheet and entities from document text (regex-based, fast)
+    // Extract fact sheet, entities, and auto-classify document role
     let fact_sheet = extract_fact_sheet(&pages);
     let new_entities = extract_entities(&pages, &file_name);
+    let auto_role = classify_document_role(&pages, &file_name);
 
     let chunks = chunk_document(&pages, settings);
 
@@ -780,7 +781,7 @@ async fn process_file(
                 chunk_index: chunk.chunk_index,
                 text: chunk.text.clone(),
                 token_count: chunk.token_count,
-                role: DocumentRole::ClientDocument,
+                role: auto_role.clone(),
             },
         };
         new_entries.push((item_id, entry));
@@ -797,7 +798,7 @@ async fn process_file(
         chunk_count: item_ids.len(),
         case_id: None,
         detected_jurisdiction,
-        role: DocumentRole::ClientDocument,
+        role: auto_role,
         fact_sheet: Some(fact_sheet),
     };
 
@@ -1675,8 +1676,13 @@ pub async fn query(
     final_answer = repair_citations(&final_answer);
 
     // ── Confidence scoring ───────────────────────────────────────────────────
+    // Use the higher of answer-heuristic confidence and best source relevance.
+    // Short, direct answers without inline citations shouldn't be penalized
+    // when the source match is strong.
     let chunk_strings: Vec<String> = chunk_texts.iter().map(|s| s.to_string()).collect();
-    let confidence = crate::assertions::compute_confidence(&final_answer, &chunk_strings);
+    let heuristic_confidence = crate::assertions::compute_confidence(&final_answer, &chunk_strings);
+    let best_source_score = citations.iter().map(|c| c.score as f64).fold(0.0f64, f64::max);
+    let confidence = heuristic_confidence.max(best_source_score);
 
     Ok(QueryResult {
         answer: final_answer,
@@ -2252,6 +2258,134 @@ pub async fn get_entities(
         .filter(|e| case_files.contains(&e.source_file))
         .cloned()
         .collect())
+}
+
+// ── Automatic Document Role Classification ───────────────────────────────────
+
+/// Classify a document's role based on keyword scoring of the first few pages.
+/// Returns the highest-scoring role, defaulting to `ClientDocument`.
+fn classify_document_role(
+    pages: &[crate::state::DocumentPage],
+    file_name: &str,
+) -> DocumentRole {
+    // Concatenate first 3 pages, lowercase for matching
+    let text: String = pages
+        .iter()
+        .take(3)
+        .map(|p| p.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lower = text.to_lowercase();
+
+    let mut evidence_score: i32 = 0;
+    let mut authority_score: i32 = 0;
+    let mut reference_score: i32 = 0;
+
+    // ── Evidence keywords ────────────────────────────────────────────────
+    // Strong (3)
+    for kw in &[
+        "exhibit a", "exhibit b", "exhibit c", "exhibit d",
+        "forensic report", "witness statement", "crime scene",
+        "sworn affidavit", "deposition transcript", "autopsy report",
+    ] {
+        if lower.contains(kw) { evidence_score += 3; }
+    }
+    // Medium (2)
+    for kw in &[
+        "exhibit", "testimony", "witness", "forensic", "evidence",
+        "sworn", "deposition", "affidavit", "subpoena",
+    ] {
+        if lower.contains(kw) { evidence_score += 2; }
+    }
+    // Weak (1)
+    for kw in &[
+        "photograph", "recording", "surveillance", "incident report",
+        "police report", "medical record", "lab result", "chain of custody",
+    ] {
+        if lower.contains(kw) { evidence_score += 1; }
+    }
+
+    // ── Legal Authority keywords ─────────────────────────────────────────
+    // Strong (3)
+    for kw in &[
+        "united states code", "u.s.c.", "court of appeals", "supreme court",
+        "it is hereby ordered", "opinion of the court", "appellate court",
+        "district court", "circuit court",
+    ] {
+        if lower.contains(kw) { authority_score += 3; }
+    }
+    // Medium (2)
+    for kw in &[
+        "statute", "case law", "ruling", "court opinion", "precedent",
+        "regulation", "judicial", "appellant", "respondent", "pursuant to",
+        "hereinafter", "docket no",
+    ] {
+        if lower.contains(kw) { authority_score += 2; }
+    }
+    // Weak (1)
+    for kw in &[
+        "jurisdiction", "enacted", "repealed", "amendment", "ordinance",
+        "code of federal regulations", "cfr", "legal authority",
+    ] {
+        if lower.contains(kw) { authority_score += 1; }
+    }
+
+    // ── Reference keywords ───────────────────────────────────────────────
+    // Strong (3)
+    for kw in &[
+        "user manual", "instruction manual", "how to guide", "how-to guide",
+        "step-by-step", "frequently asked questions", "faq",
+    ] {
+        if lower.contains(kw) { reference_score += 3; }
+    }
+    // Medium (2)
+    for kw in &[
+        "manual", "guide", "handbook", "template", "instructions",
+        "reference", "glossary", "appendix", "checklist",
+    ] {
+        if lower.contains(kw) { reference_score += 2; }
+    }
+    // Weak (1)
+    for kw in &[
+        "worksheet", "overview", "introduction", "table of contents", "index",
+    ] {
+        if lower.contains(kw) { reference_score += 1; }
+    }
+
+    // ── File extension heuristic ─────────────────────────────────────────
+    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "bmp" | "tiff" | "tif" | "gif" => evidence_score += 2,
+        "html" | "eml" => reference_score += 1,
+        _ => {}
+    }
+
+    let threshold = 3;
+    let best = *[
+        (evidence_score, 0u8),
+        (authority_score, 1),
+        (reference_score, 2),
+    ]
+    .iter()
+    .max_by_key(|(score, _)| *score)
+    .unwrap();
+
+    let role = if best.0 >= threshold {
+        match best.1 {
+            0 => DocumentRole::Evidence,
+            1 => DocumentRole::LegalAuthority,
+            2 => DocumentRole::Reference,
+            _ => DocumentRole::ClientDocument,
+        }
+    } else {
+        DocumentRole::ClientDocument
+    };
+
+    log::info!(
+        "Auto-classified '{}' as {:?} (evidence={}, authority={}, reference={})",
+        file_name, role, evidence_score, authority_score, reference_score
+    );
+    role
 }
 
 // ── Fact Sheet Extraction (regex-based, no LLM) ──────────────────────────────
