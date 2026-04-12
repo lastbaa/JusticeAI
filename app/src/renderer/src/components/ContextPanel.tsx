@@ -221,6 +221,20 @@ function FileRow({
                   ⚠ Lower File Resolutions can affect Citation Results ({file.imageWidth}×{file.imageHeight}px)
                 </span>
               )}
+              {/* Warning for any file (including PDFs) where OCR produced no usable text */}
+              {file.chunkCount === 0 && (
+                <span
+                  className="text-[9px] font-medium px-1.5 py-0.5 rounded"
+                  style={{
+                    background: 'rgba(248,81,73,0.08)',
+                    color: 'rgba(248,81,73,0.65)',
+                    border: '1px solid rgba(248,81,73,0.18)',
+                  }}
+                  title="No text could be extracted — the file may be a scanned image at too low a resolution for OCR"
+                >
+                  ⚠ No Text Detected in this File - Increase File Resolution for Better Results
+                </span>
+              )}
           </div>
         </div>
         {hovered && (
