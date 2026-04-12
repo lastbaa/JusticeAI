@@ -38,6 +38,8 @@ export interface FileInfo {
   detectedJurisdiction?: Jurisdiction
   role?: DocumentRole
   factSheet?: FactSheet
+  imageWidth?: number    
+  imageHeight?: number   
 }
 
 export interface Citation {
