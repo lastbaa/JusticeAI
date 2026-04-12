@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { Citation, DocumentRole, FileInfo } from '../../../../../shared/src/types'
 
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.tif', '.tiff']
+
 const ROLE_META: Record<DocumentRole, { label: string; plural: string; color: string; hex: string; icon: string }> = {
   ClientDocument: { label: 'Client', plural: 'Client Documents', color: 'text-blue-400 bg-blue-400/10', hex: '#58a6ff', icon: 'M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25z' },
   LegalAuthority: { label: 'Legal', plural: 'Legal Authority', color: 'text-amber-400 bg-amber-400/10', hex: '#c9a84c', icon: 'M8.75.75V2h.985c.304 0 .603.08.867.231l1.29.736c.038.022.08.033.124.033h2.234a.75.75 0 0 1 0 1.5h-.427l2.111 4.692a.75.75 0 0 1-.154.838l-.53-.53.53.53-.001.002-.002.002-.006.006-.016.015a1.3 1.3 0 0 1-.071.058 3.5 3.5 0 0 1-.39.262c-.323.183-.818.398-1.465.398-.647 0-1.142-.215-1.465-.398a3.5 3.5 0 0 1-.46-.32l-.017-.015-.006-.006-.002-.002h-.001L12 9.5l-.53.53a.75.75 0 0 1-.154-.838L13.427 4.5h-.927a.98.98 0 0 1-.482-.133l-1.29-.736a.25.25 0 0 0-.124-.031H8.75V13h2.5a.75.75 0 0 1 0 1.5h-6.5a.75.75 0 0 1 0-1.5h2.5V3.6h-.984a.25.25 0 0 0-.124.031l-1.29.736A.98.98 0 0 1 4.427 4.5H3.5l2.111 4.692a.75.75 0 0 1-.154.838l-.53-.53.53.53-.002.002-.002.002-.006.006-.016.015a2.6 2.6 0 0 1-.071.058 3.5 3.5 0 0 1-.39.262C4.647 10.215 4.152 10.5 3.5 10.5c-.652 0-1.147-.285-1.47-.468a3.5 3.5 0 0 1-.39-.262 2.4 2.4 0 0 1-.088-.073l-.016-.015-.006-.006-.002-.002H1.527L1 10.19l.53-.53a.75.75 0 0 1-.154-.838L3.487 4.13a.25.25 0 0 0-.237-.13H2.75a.75.75 0 0 1 0-1.5H5a.25.25 0 0 0 .124-.033l1.29-.736A1.75 1.75 0 0 1 7.282 1.5h.968V.75a.75.75 0 0 1 1.5 0z' },
@@ -205,6 +207,20 @@ function FileRow({
             <p className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.22)' }}>
               {file.totalPages} {file.totalPages === 1 ? 'page' : 'pages'}
             </p>
+              {file.imageWidth !== undefined && file.imageHeight !== undefined &&
+              (file.imageWidth <= 2550 || file.imageHeight <= 3300) && (
+                <span
+                  className="text-[9px] font-medium px-1.5 py-0.5 rounded"
+                  style={{
+                    background: 'rgba(210,168,50,0.08)',
+                    color: 'rgba(210,168,50,0.65)',
+                    border: '1px solid rgba(210,168,50,0.18)',
+                  }}
+                  title={`Image is ${file.imageWidth}×${file.imageHeight}px — low resolution may reduce OCR accuracy`}
+                >
+                  ⚠ Lower File Resolutions can affect Citation Results ({file.imageWidth}×{file.imageHeight}px)
+                </span>
+              )}
           </div>
         </div>
         {hovered && (
