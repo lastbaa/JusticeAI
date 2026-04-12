@@ -456,6 +456,8 @@ impl RagState {
                         detected_jurisdiction: None,
                         role: DocumentRole::default(),
                         fact_sheet: None,
+                        image_width: None, 
+                        image_height: None,
                     },
                 );
             }
