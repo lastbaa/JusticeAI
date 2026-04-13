@@ -1149,11 +1149,9 @@ pub async fn query(
         window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
         let mut chat_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
         chat_params.system_prompt_override = Some(
-            "You are Justice AI, a legal research assistant running locally on the user's device. \
-            The user has documents loaded but is asking a general question. \
-            Answer naturally and concisely. Mention that you are ready to help with their documents \
-            whenever they have questions. Do not reference or fabricate any document content, \
-            court names, case details, or legal citations.".to_string(),
+            "You are Justice AI, a legal research assistant. \
+            The user is asking a general question. Answer naturally and concisely. \
+            Do not fabricate any document content, court names, case details, or legal citations.".to_string(),
         );
         let general_answer = pipeline::ask_llm(
             &question,
@@ -1258,10 +1256,8 @@ pub async fn query(
             let window_clone = window.clone();
             let mut chat_params = inference_params;
             chat_params.system_prompt_override = Some(
-                "You are Justice AI, a legal research assistant running locally on the user's device. \
+                "You are Justice AI, a legal research assistant. \
                 No documents are currently loaded. Answer the user's question naturally and concisely. \
-                You can answer general legal knowledge questions, but remind the user you are not a lawyer. \
-                Suggest they add documents to get cited, page-level answers from their own files. \
                 Do not fabricate case citations, statutes, or specific legal advice.".to_string(),
             );
             let general_answer = pipeline::ask_llm(
@@ -1371,7 +1367,7 @@ pub async fn query(
                     })
                     .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
                 if let Some((cos, entry)) = best_chunk {
-                    if cos > 0.05 {
+                    if cos > 0.15 {
                         // Give diversity chunks a meaningful score so they get
                         // adequate context budget in the proportional allocation.
                         // Use the median of existing result scores as a baseline
@@ -1491,12 +1487,10 @@ pub async fn query(
             window.emit("query-status", serde_json::json!({"phase": "generating"})).ok();
             let mut chat_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
             chat_params.system_prompt_override = Some(
-                "You are Justice AI, a legal research assistant running locally on the user's device. \
-                The user has documents loaded but their question is about general legal knowledge, \
-                not about a specific document. Answer their question naturally and concisely using \
-                your training knowledge. Be helpful and informative. Do not fabricate specific \
-                case numbers, statutes, or citations — speak in general terms. At the end, mention \
-                that you can also help analyze their loaded documents if they have specific questions.".to_string(),
+                "You are Justice AI, a legal research assistant. \
+                The user is asking about general legal knowledge. Answer naturally and concisely \
+                using your training knowledge. Do not fabricate specific case numbers, statutes, \
+                or citations — speak in general terms.".to_string(),
             );
             let general_answer = pipeline::ask_llm(
                 &question,
@@ -1553,9 +1547,10 @@ pub async fn query(
         } else {
             retrieval_params.max_context_chars_no_jur
         };
-        // Worst-case overhead: system prompt (~800) + Extended-mode instructions (~600)
-        // + jurisdiction clause (~200) + 2-turn history (~1000) + formatting (~400) ≈ 3000
-        let prompt_overhead_chars = 3000;
+        // Overhead: system prompt (~500) + mode suffix (~200)
+        // + jurisdiction clause (~200) + formatting (~200) ≈ 1100
+        // History is now separate ChatML turns, not in the context budget.
+        let prompt_overhead_chars = 1200;
         base.saturating_sub(prompt_overhead_chars)
     };
     let separator = "\n\n---\n\n";
@@ -1661,8 +1656,8 @@ pub async fn query(
         }
     }
 
-    // Cap metadata at 40% of budget so at least 60% remains for document chunks
-    let max_metadata = max_context_chars * 2 / 5;
+    // Cap metadata at 25% of budget so at least 75% remains for document chunks
+    let max_metadata = max_context_chars / 4;
     if context.len() > max_metadata {
         context.truncate(max_metadata);
         // Avoid cutting mid-line
@@ -1756,15 +1751,12 @@ pub async fn query(
     // Add primary context chunks with budget enforcement
     for part in &context_parts {
         let addition = if context.is_empty() { part.len() } else { part.len() + separator.len() };
-        if context.len() + addition > context.len() + primary_budget.saturating_sub(context.len()) + separator.len() {
-            // Double-check against absolute max
-            if context.len() + addition > max_context_chars {
-                log::warn!(
-                    "Context budget exhausted at {} chars; skipping remaining chunks.",
-                    context.len()
-                );
-                break;
-            }
+        if context.len() + addition > max_context_chars {
+            log::warn!(
+                "Context budget exhausted at {} chars; skipping remaining chunks.",
+                context.len()
+            );
+            break;
         }
         if !context.is_empty() {
             context.push_str(separator);

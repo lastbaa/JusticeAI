@@ -272,7 +272,7 @@ impl InferenceParams {
         match mode {
             InferenceMode::Quick => Self {
                 max_new_tokens: 512,
-                temperature: 0.7,
+                temperature: 0.15,
                 system_prompt_suffix: "\nAnswer in 1-3 sentences. Start with the specific fact requested. Cite the source. Stop.",
                 system_prompt_override: None,
                 timeout_secs: 30,
@@ -280,7 +280,7 @@ impl InferenceParams {
             },
             InferenceMode::Balanced => Self {
                 max_new_tokens: 2048,
-                temperature: 0.7,
+                temperature: 0.3,
                 system_prompt_suffix: "\nProvide a thorough answer covering all relevant details. Use bullet points for multiple facts. Cite every claim. Do not add section headers unless the question has multiple distinct parts.",
                 system_prompt_override: None,
                 timeout_secs: 90,
@@ -288,7 +288,7 @@ impl InferenceParams {
             },
             InferenceMode::Extended => Self {
                 max_new_tokens: 3072,
-                temperature: 0.7,
+                temperature: 0.4,
                 system_prompt_suffix: "\nProvide a detailed legal analysis. Cross-reference documents where applicable. Cite every claim. Use section headers only when the question has 3+ distinct sub-topics.",
                 system_prompt_override: None,
                 timeout_secs: 180,
@@ -839,16 +839,19 @@ pub async fn embed_texts_batch(
 
 // ── LLM via llama-cpp-2 ───────────────────────────────────────────────────────
 
-/// Format prior conversation turns as labeled text for the model.
+/// Format prior conversation turns as proper ChatML multi-turn history.
+/// Returns a string of ChatML user/assistant turns to be injected BEFORE
+/// the current user turn in the prompt template.
 pub fn format_history(history: &[(String, String)]) -> String {
-    let mut s = String::from("[Prior conversation — for follow-up context only:]\n");
+    let mut s = String::new();
     // Cap to the last 2 turns so long conversations don't exhaust the context window.
     let recent = if history.len() > 2 { &history[history.len() - 2..] } else { history };
     for (user, assistant) in recent {
-        // Trim each side to avoid bloating the prompt with long prior answers
         let u = safe_truncate(user, 400);
         let a = safe_truncate(assistant, 600);
-        s.push_str(&format!("User: {u}\nAssistant: {a}\n\n"));
+        s.push_str(&format!(
+            "<|im_start|>user\n{u}<|im_end|>\n<|im_start|>assistant\n{a}<|im_end|>\n"
+        ));
     }
     s
 }
@@ -881,35 +884,19 @@ pub async fn ask_llm(
         format_history(history)
     };
 
-    // Context goes in the user turn (not the system prompt) because Llama 2 /
-    // Mistral-family models attend more strongly to user-turn content. This
-    // maximizes grounding fidelity for cited, page-level answers.
+    // Context goes in the user turn. Question is placed BEFORE context so the
+    // model knows what to look for while reading the excerpts (improves attention).
+    // History is injected as proper ChatML turns in the prompt template, not here.
     let user_content = if context.trim().is_empty() {
-        if history_prefix.is_empty() {
-            format!("Question: {user_question}")
-        } else {
-            format!("{history_prefix}Current question: {user_question}")
-        }
-    } else if history_prefix.is_empty() {
-        format!(
-            "Below are excerpts from the user's loaded legal documents. \
-Answer the question using ONLY these excerpts. \
-Address information from EVERY document listed below — do not skip any.\n\
-\n=== DOCUMENT CONTEXT ===\n\
-{context}\n\
-=== END CONTEXT ===\n\
-\nQUESTION: {user_question}"
-        )
+        format!("Question: {user_question}")
     } else {
         format!(
-            "{history_prefix}\
+            "QUESTION: {user_question}\n\n\
 Below are excerpts from the user's loaded legal documents. \
-Answer the current question using ONLY these excerpts. \
-Address information from EVERY document listed below — do not skip any.\n\
-\n=== DOCUMENT CONTEXT ===\n\
+Answer using ONLY these excerpts.\n\
+\n<documents>\n\
 {context}\n\
-=== END CONTEXT ===\n\
-\nQUESTION: {user_question}"
+</documents>"
         )
     };
 
@@ -932,7 +919,7 @@ Address information from EVERY document listed below — do not skip any.\n\
 
     // For multi-document queries, inject explicit instruction in the user turn
     // to address all documents (Qwen3 follows user-turn instructions well).
-    let user_content = if context.contains("DOCUMENTS PROVIDED (") {
+    let user_content = if user_content.contains("DOCUMENTS PROVIDED (") {
         let mut doc_names: Vec<String> = Vec::new();
         for line in context.lines() {
             if let Some(rest) = line.strip_prefix('[') {
@@ -957,11 +944,13 @@ Address information from EVERY document listed below — do not skip any.\n\
     };
 
     // Assemble ChatML prompt for Qwen3-8B.
+    // History is injected as proper multi-turn ChatML before the current user turn.
     // Empty <think></think> disables thinking mode (saves tokens, improves RAG speed).
     let prompt = format!(
         "<|im_start|>system\n{sys_prompt}<|im_end|>\n\
+         {history_prefix}\
          <|im_start|>user\n{user_content}<|im_end|>\n\
-         <|im_start|>assistant\n<think>\n\n</think>\n\n"
+         <|im_start|>assistant\n<think>\n\n</think>\n"
     );
 
     tokio::task::spawn_blocking(move || {
@@ -1015,9 +1004,11 @@ Address information from EVERY document listed below — do not skip any.\n\
         let system_tokens = pre_tokenize(model, &sys_prompt);
         let question_tokens = pre_tokenize(model, &user_content);
 
-        // Overhead: ChatML tags, newlines, BOS token
+        // Overhead: ChatML tags, newlines, think tags
         let overhead = 50;
-        let max_prompt_tokens = n_ctx_size as usize - 3072; // reserve 3072 for generation (matches Extended mode budget)
+        // Reserve generation budget based on mode: Quick needs less, Extended needs more.
+        let gen_reserve = inference_params.max_new_tokens + 128; // +128 for safety margin
+        let max_prompt_tokens = n_ctx_size as usize - gen_reserve;
         let component_cost = system_tokens.len() + question_tokens.len() + overhead;
 
         if component_cost > max_prompt_tokens {
@@ -1038,7 +1029,7 @@ Address information from EVERY document listed below — do not skip any.\n\
 
         // Tokenize the fully assembled prompt
         let mut tokens = model
-            .str_to_token(&prompt, AddBos::Always)
+            .str_to_token(&prompt, AddBos::Never)
             .map_err(|e| format!("Tokenize error: {e}"))?;
 
         let n_tokens = tokens.len();
@@ -1082,11 +1073,12 @@ Address information from EVERY document listed below — do not skip any.\n\
             chunk_start = chunk_end;
         }
 
-        // Sampling chain for Qwen3: top-k → top-p → temperature → dist.
-        // No penalties needed — Qwen3 doesn't need repeat_penalty.
+        // Sampling chain for Qwen3: penalties → top-k → top-p → temp → dist.
+        // Light repetition penalty (1.1) prevents loops without hurting factual recall.
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::top_k(20),
-            LlamaSampler::top_p(0.80, 1),
+            LlamaSampler::penalties(64, 1.1, 0.0, 0.0),
+            LlamaSampler::top_k(40),
+            LlamaSampler::top_p(0.90, 1),
             LlamaSampler::temp(inference_params.temperature),
             LlamaSampler::dist(42),
         ]);
@@ -1145,9 +1137,9 @@ Address information from EVERY document listed below — do not skip any.\n\
                 break;
             }
 
-            // Skip emitting empty/whitespace-only tokens to the UI —
-            // they cause cursor blinks with no visible content.
-            if !token_piece.trim().is_empty() {
+            // Skip truly empty tokens. Emit whitespace tokens normally —
+            // they are necessary for proper word spacing in the UI.
+            if !token_piece.is_empty() {
                 on_token(token_piece.clone());
             }
             response.push_str(&token_piece);
@@ -1175,19 +1167,20 @@ Address information from EVERY document listed below — do not skip any.\n\
                 let tail = &response[response.len().saturating_sub(200)..];
                 if tail.contains("<|im_start|>")
                     || tail.contains("<|im_end|>")
-                    || tail.contains("=== DOCUMENT CONTEXT ===")
-                    || tail.contains("=== END CONTEXT ===")
+                    || tail.contains("<documents>")
+                    || tail.contains("</documents>")
                     || tail.contains("QUESTION:")
                 {
                     log::warn!("Stop sequence detected in output — halting generation.");
                     break;
                 }
                 // Detect phrase-level repetition at multiple window sizes.
-                // Check 40, 60, and 80 char windows to catch repetition early.
-                if response.len() > 120 {
-                    let caught = [40_usize, 60, 80].iter().any(|&window| {
+                // Use 80, 100, 120 char windows to avoid false positives on
+                // common legal phrases like "the parties agree" or "pursuant to".
+                if response.len() > 200 {
+                    let caught = [80_usize, 100, 120].iter().any(|&window| {
                         let check_len = window.min(response.len() / 3);
-                        if check_len < 30 { return false; }
+                        if check_len < 60 { return false; }
                         let last_chunk = &response[response.len() - check_len..];
                         let earlier = &response[..response.len() - check_len];
                         earlier.contains(last_chunk)
@@ -2984,7 +2977,7 @@ mod tests {
     fn inference_params_quick() {
         let p = InferenceParams::from_mode(&InferenceMode::Quick);
         assert_eq!(p.max_new_tokens, 512);
-        assert!((p.temperature - 0.7).abs() < 0.01);
+        assert!((p.temperature - 0.15).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 30);
         assert!(p.is_quick);
@@ -2994,7 +2987,7 @@ mod tests {
     fn inference_params_balanced() {
         let p = InferenceParams::from_mode(&InferenceMode::Balanced);
         assert_eq!(p.max_new_tokens, 2048);
-        assert!((p.temperature - 0.7).abs() < 0.01);
+        assert!((p.temperature - 0.3).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 90);
     }
@@ -3003,7 +2996,7 @@ mod tests {
     fn inference_params_extended() {
         let p = InferenceParams::from_mode(&InferenceMode::Extended);
         assert_eq!(p.max_new_tokens, 3072);
-        assert!((p.temperature - 0.7).abs() < 0.01);
+        assert!((p.temperature - 0.4).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 180);
     }
