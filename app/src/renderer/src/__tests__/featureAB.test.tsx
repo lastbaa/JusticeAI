@@ -63,10 +63,10 @@ describe('Feature 4 – Enhanced Not-Found State', () => {
     // New: "Suggestions" heading
     expect(screen.getByText('Suggestions')).toBeTruthy()
 
-    // New: 3 actionable tips
+    // New: actionable tips — text must match what MessageBubble actually renders
     expect(screen.getByText('Rephrase your question with different keywords')).toBeTruthy()
     expect(screen.getByText('Check that the relevant documents are loaded')).toBeTruthy()
-    expect(screen.getByText('Try a broader or more specific question')).toBeTruthy()
+    expect(screen.getByText('Using specific terms from the document (names, dates, amounts)')).toBeTruthy()
 
     // New: gold left border styling (borderLeft: 3px solid var(--gold))
     const card = container.querySelector('.rounded-xl') as HTMLElement
@@ -504,7 +504,7 @@ describe('Cross-feature regression checks', () => {
     const msg = makeMsg({
       content: 'The rent is $2,500.',
       citations: [
-        { fileName: 'lease.pdf', filePath: '/docs/lease.pdf', pageNumber: 1, excerpt: 'rent is 2500', score: 0.95 },
+        { fileName: 'lease.pdf', filePath: '/docs/lease.pdf', pageNumber: 1, excerpt: 'rent is 2500', summary: '', score: 0.95 },
       ],
     })
     const { container } = render(<MessageBubble message={msg} isLastAssistant />)

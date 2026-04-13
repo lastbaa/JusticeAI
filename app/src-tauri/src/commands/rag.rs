@@ -471,6 +471,8 @@ pub async fn migrate_garbled_chunks(state: &mut RagState) {
         file_path: String,
         total_chars: usize,
         alpha_chars: usize,
+        image_width: Option<u32>,
+        image_height: Option<u32>,
     }
     let mut docs: HashMap<String, DocInfo> = HashMap::new();
     for entry in &state.embedded_chunks {
@@ -480,6 +482,8 @@ pub async fn migrate_garbled_chunks(state: &mut RagState) {
             file_path: m.file_path.clone(),
             total_chars: 0,
             alpha_chars: 0,
+            image_width: None,
+            image_height: None,
         });
         for ch in m.text.chars() {
             if ch.is_whitespace() { continue; }
@@ -574,6 +578,8 @@ pub async fn migrate_garbled_chunks(state: &mut RagState) {
             detected_jurisdiction: None,
             role: DocumentRole::default(),
             fact_sheet: None,
+            image_width: None,   
+            image_height: None,  
         });
 
         log::info!("Re-parsed '{}': {} pages, {} chunks", file_name, pages.len(), new_ids.len());
@@ -744,6 +750,14 @@ async fn process_file(
     let new_entities = extract_entities(&pages, &file_name);
     let auto_role = classify_document_role(&pages, &file_name);
 
+    let (image_width, image_height) = if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "tif" | "tiff") {
+    image::image_dimensions(file_path)
+        .map(|(w, h)| (Some(w), Some(h)))
+        .unwrap_or((None, None))
+    } else {
+        (None, None)
+    };
+
     emit_progress("chunking", None);
     let chunks = chunk_document(&pages, settings);
 
@@ -900,6 +914,8 @@ async fn process_file(
         detected_jurisdiction,
         role: auto_role,
         fact_sheet: Some(fact_sheet),
+        image_width,  
+        image_height,  
     };
 
     // Single lock acquisition: insert all chunks + registry entries + entities + save.

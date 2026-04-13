@@ -3,7 +3,7 @@ import { deduplicateCitations } from '../utils/citations'
 import { Citation } from '../../../../../../shared/src/types'
 
 function makeCitation(fileName: string, pageNumber: number, score: number): Citation {
-  return { fileName, filePath: `/docs/${fileName}`, pageNumber, score, excerpt: `chunk from ${fileName} p${pageNumber}` }
+  return { fileName, filePath: `/docs/${fileName}`, pageNumber, score, excerpt: `chunk from ${fileName} p${pageNumber}`, summary: '' }
 }
 
 describe('deduplicateCitations', () => {
