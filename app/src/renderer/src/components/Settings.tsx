@@ -456,9 +456,9 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
                   style={{ background: 'var(--success)', boxShadow: '0 0 6px rgba(63,185,80,0.5)' }}
                 />
                 <div>
-                  <p className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>Saul-7B-Instruct</p>
+                  <p className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>Qwen3-8B</p>
                   <p className="text-[11px] mt-0.5" style={{ color: 'rgb(var(--ov) / 0.35)' }}>
-                    BGE-small-en-v1.5 embeddings · 7 billion parameters · running on-device
+                    BGE-small-en-v1.5 embeddings · 8 billion parameters · running on-device
                   </p>
                 </div>
               </div>

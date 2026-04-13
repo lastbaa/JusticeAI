@@ -2,6 +2,16 @@
 
 const releases = [
   {
+    version: '2.0.0',
+    date: 'April 2026',
+    items: [
+      'Upgraded to Qwen3-8B for improved multi-document reasoning and reduced hallucinations',
+      '32K context window (up from 4K effective) — better handling of large documents',
+      'New legal RAG system prompt with structured analysis framework',
+      'ChatML prompt format for improved instruction following',
+    ],
+  },
+  {
     version: '1.5.0',
     date: 'April 2026',
     items: [

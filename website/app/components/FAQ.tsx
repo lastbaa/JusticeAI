@@ -7,7 +7,7 @@ import { WordReveal } from './WordReveal'
 const faqs = [
   {
     q: 'Does Justice AI work completely offline?',
-    a: 'Yes — after the one-time model download (~4.5 GB on first launch), everything runs 100% offline. Document parsing, vector search, and AI answer generation all happen on your machine. No internet connection required.',
+    a: 'Yes — after the one-time model download (~5 GB on first launch), everything runs 100% offline. Document parsing, vector search, and AI answer generation all happen on your machine. No internet connection required.',
   },
   {
     q: 'What file types are supported?',
@@ -15,7 +15,7 @@ const faqs = [
   },
   {
     q: 'How big is the model download?',
-    a: 'The Saul-7B legal AI model is approximately 4.5 GB and downloads once on first launch. The embedding model (used for search) is an additional ~22 MB and downloads automatically. After that, no further downloads are needed.',
+    a: 'The Qwen3-8B language model is approximately 5 GB and downloads once on first launch. The embedding model (used for search) is an additional ~22 MB and downloads automatically. After that, no further downloads are needed.',
   },
   {
     q: 'Do my documents ever leave my device?',

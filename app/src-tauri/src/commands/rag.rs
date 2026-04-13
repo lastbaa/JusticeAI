@@ -1,7 +1,7 @@
 use crate::pipeline::{
     self, chunk_document, embed_text, greeting_response,
     is_non_document_query, is_simple_greeting, RetrievalBackend, GGUF_MIN_SIZE,
-    SAUL_GGUF_URL, SCORE_THRESHOLD,
+    QWEN3_GGUF_URL, SCORE_THRESHOLD,
 };
 use crate::state::{
     AppSettings, Case, ChatSession, ChunkMetadata, Citation, DocumentRole, EmbeddedChunkEntry,
@@ -70,16 +70,24 @@ pub async fn check_models(
 ) -> Result<ModelStatus, String> {
     let (gguf_path, model_dir) = {
         let s = state.lock().await;
-        (s.model_dir.join("saul.gguf"), s.model_dir.clone())
+        (s.model_dir.join("qwen3.gguf"), s.model_dir.clone())
     };
     let size = gguf_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
     let ocr_dir = model_dir.join("ocr");
     let ocr_ready = ocr_dir.join("text-detection.rten").metadata().map(|m| m.len() > 1024).unwrap_or(false)
         && ocr_dir.join("text-recognition.rten").metadata().map(|m| m.len() > 1024).unwrap_or(false);
+
+    // Clean up old Saul model if Qwen3 is ready — no need to keep both.
+    let saul_path = model_dir.join("saul.gguf");
+    if size > GGUF_MIN_SIZE && saul_path.exists() {
+        log::info!("Qwen3 ready — deleting old saul.gguf to free disk space.");
+        let _ = std::fs::remove_file(&saul_path);
+    }
+
     Ok(ModelStatus {
         llm_ready: size > GGUF_MIN_SIZE,
         llm_size_gb: size as f32 / 1e9,
-        download_required_gb: 4.5,
+        download_required_gb: 5.0,
         ocr_ready,
         ocr_message: if ocr_ready {
             None
@@ -104,19 +112,19 @@ pub async fn download_models(
         .map_err(|e| e.to_string())?;
 
     // ── Disk space check ──────────────────────────────────────────────────────
-    // Require ~5 GB free to download models safely.
-    const REQUIRED_BYTES: u64 = 5_000_000_000;
+    // Require ~6 GB free to download Qwen3-8B safely.
+    const REQUIRED_BYTES: u64 = 6_000_000_000;
     if let Some(available) = available_disk_space(&model_dir) {
         if available < REQUIRED_BYTES {
             let avail_gb = available as f64 / 1e9;
             return Err(format!(
-                "Insufficient disk space: {avail_gb:.1} GB available, ~5 GB required. Free up space and try again."
+                "Insufficient disk space: {avail_gb:.1} GB available, ~6 GB required. Free up space and try again."
             ));
         }
     }
 
-    let gguf_path = model_dir.join("saul.gguf");
-    let tmp_path = model_dir.join("saul.gguf.tmp");
+    let gguf_path = model_dir.join("qwen3.gguf");
+    let tmp_path = model_dir.join("qwen3.gguf.tmp");
 
     // Already complete — emit done immediately
     if gguf_path
@@ -149,7 +157,7 @@ pub async fn download_models(
             .build()
             .map_err(|e| e.to_string())?;
 
-        let mut request = client.get(SAUL_GGUF_URL);
+        let mut request = client.get(QWEN3_GGUF_URL);
         if already_downloaded > 0 {
             request = request.header("Range", format!("bytes={}-", already_downloaded));
         }
@@ -1102,8 +1110,8 @@ pub async fn query(
         log::info!("Non-document query detected ('{}'); routing to general chat.", &question);
 
         // Simple greetings → hardcoded response, no LLM inference at all.
-        // Saul-7B regurgitates bullet-point instructions as numbered lists,
-        // so bypassing inference is the only reliable approach.
+        // Bypassing inference for simple greetings avoids wasting model time
+        // on trivial responses.
         if is_simple_greeting(&question) {
             log::info!("Simple greeting with docs loaded — hardcoded response.");
             let response = greeting_response(true);
@@ -1131,7 +1139,7 @@ pub async fn query(
             whenever they have questions. Do not reference or fabricate any document content, \
             court names, case details, or legal citations.".to_string(),
         );
-        let general_answer = pipeline::ask_saul(
+        let general_answer = pipeline::ask_llm(
             &question,
             "",
             &history,
@@ -1240,7 +1248,7 @@ pub async fn query(
                 Suggest they add documents to get cited, page-level answers from their own files. \
                 Do not fabricate case citations, statutes, or specific legal advice.".to_string(),
             );
-            let general_answer = pipeline::ask_saul(
+            let general_answer = pipeline::ask_llm(
                 &question,
                 "",
                 &history,
@@ -1310,13 +1318,71 @@ pub async fn query(
         let ranked = backend.retrieve(&question, &query_vec, &corpus, &config);
 
         // Map ScoredResult indices back via global_indices to (score, ChunkMetadata).
-        let results: Vec<(f32, ChunkMetadata)> = ranked
+        let mut results: Vec<(f32, ChunkMetadata)> = ranked
             .into_iter()
             .map(|r| {
                 let global_idx = global_indices[r.chunk_index];
                 (r.score, s.embedded_chunks[global_idx].meta.clone())
             })
             .collect();
+
+        // ── Document diversity guarantee (inside same lock) ─────────────────
+        // Ensure every loaded document contributes at least one chunk to the
+        // results. When the user asks about "these documents" or has multiple
+        // files loaded, missing a document entirely feels broken.
+        {
+            let represented_docs: std::collections::HashSet<String> =
+                results.iter().map(|(_, m)| m.document_id.clone()).collect();
+            let all_doc_ids: std::collections::HashSet<String> = if let Some(ref cid) = case_id {
+                s.file_registry.values()
+                    .filter(|f| f.case_id.as_deref() == Some(cid.as_str()))
+                    .map(|f| f.id.clone())
+                    .collect()
+            } else {
+                s.file_registry.values().map(|f| f.id.clone()).collect()
+            };
+            // Collect chunks to inject separately to avoid borrow conflict
+            let mut to_inject: Vec<(f32, ChunkMetadata)> = Vec::new();
+            for doc_id in &all_doc_ids {
+                if represented_docs.contains(doc_id) {
+                    continue;
+                }
+                let best_chunk = s.embedded_chunks.iter()
+                    .filter(|e| e.meta.document_id == *doc_id)
+                    .map(|e| {
+                        let cos = crate::state::RagState::cosine_similarity(&query_vec, &e.vector);
+                        (cos, e)
+                    })
+                    .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                if let Some((cos, entry)) = best_chunk {
+                    if cos > 0.05 {
+                        // Give diversity chunks a meaningful score so they get
+                        // adequate context budget in the proportional allocation.
+                        // Use the median of existing result scores as a baseline
+                        // to ensure they're interleaved, not buried at the tail.
+                        let median_score = if !results.is_empty() {
+                            let mut scores: Vec<f32> = results.iter().map(|(s, _)| *s).collect();
+                            scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                            scores[scores.len() / 2]
+                        } else {
+                            0.02
+                        };
+                        let injected_score = median_score * 0.8; // just below median
+                        to_inject.push((injected_score, entry.meta.clone()));
+                        log::info!(
+                            "Document diversity: injected chunk from '{}' (cosine={:.3}, score={:.4})",
+                            entry.meta.file_name, cos, injected_score
+                        );
+                    }
+                }
+            }
+            // Insert diversity chunks at position 2 (after top result) rather than
+            // appending to the end, so the model encounters them early in context.
+            let insert_pos = 2.min(results.len());
+            for (i, chunk) in to_inject.into_iter().enumerate() {
+                results.insert(insert_pos + i, chunk);
+            }
+        }
 
         // ── Cosine floor check (inside same lock) ────────────────────────────
         let best_cosine = if results.is_empty() {
@@ -1416,7 +1482,7 @@ pub async fn query(
                 case numbers, statutes, or citations — speak in general terms. At the end, mention \
                 that you can also help analyze their loaded documents if they have specific questions.".to_string(),
             );
-            let general_answer = pipeline::ask_saul(
+            let general_answer = pipeline::ask_llm(
                 &question,
                 "",
                 &history,
@@ -1463,7 +1529,7 @@ pub async fn query(
     }
 
     // ── Priority-weighted context assembly ────────────────────────────────────
-    // Saul-7B has an 8192-token context. Budget is mode-dependent (see RetrievalModeParams).
+    // Qwen3-8B has a 32K-token context. Budget is mode-dependent (see RetrievalModeParams).
     // When jurisdiction is active, reduce budget to account for extra prompt tokens.
     let max_context_chars: usize = {
         let base = if resolved_jurisdiction.is_some() {
@@ -1605,7 +1671,8 @@ pub async fn query(
     let chunk_budgets = allocate_chunk_budgets(&scores, primary_budget, 200);
 
     // Build per-chunk formatted strings with budget-aware truncation
-    let formatted_chunks: Vec<(DocumentRole, String)> = results
+    // Track file_name for per-document grouping
+    let formatted_chunks: Vec<(String, String)> = results
         .iter()
         .enumerate()
         .map(|(i, (_, meta))| {
@@ -1626,40 +1693,48 @@ pub async fn query(
             let text_budget = chunk_budgets.get(i).copied().unwrap_or(200).saturating_sub(overhead);
             let compressed = compress_chunk_text(&meta.text);
             let truncated_text = truncate_to_budget(&compressed, text_budget);
-            (meta.role.clone(), format!("{}{}{}", header, truncated_text, footer))
+            (meta.file_name.clone(), format!("{}{}{}", header, truncated_text, footer))
         })
         .collect();
 
-    // Group chunks by document role for role-aware context assembly
-    let mut client_parts = Vec::new();
-    let mut authority_parts = Vec::new();
-    let mut evidence_parts = Vec::new();
-    let mut reference_parts = Vec::new();
-    for (role, text) in &formatted_chunks {
-        match role {
-            DocumentRole::ClientDocument => client_parts.push(text.as_str()),
-            DocumentRole::LegalAuthority => authority_parts.push(text.as_str()),
-            DocumentRole::Evidence => evidence_parts.push(text.as_str()),
-            DocumentRole::Reference => reference_parts.push(text.as_str()),
+    // ── Round-robin interleave by document ─────────────────────────────────
+    // 7B models are recency-biased ("lost in the middle") — they attend most to
+    // content at the END of the context (closest to the question). Dumping all
+    // chunks from doc1 then doc2 means doc2 gets ignored. Round-robin interleaving
+    // ensures every document gets "prime real estate" in the context window.
+    let mut doc_order: Vec<String> = Vec::new();
+    let mut chunks_by_doc: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (file_name, text) in &formatted_chunks {
+        if !chunks_by_doc.contains_key(file_name) {
+            doc_order.push(file_name.clone());
         }
+        chunks_by_doc.entry(file_name.clone()).or_default().push(text.clone());
     }
 
+    // Add source checklist at the top — primes the model to expect all documents
+    if doc_order.len() > 1 {
+        let checklist: Vec<String> = doc_order.iter().enumerate()
+            .map(|(i, name)| format!("[{}] {}", i + 1, name))
+            .collect();
+        context.push_str(&format!(
+            "DOCUMENTS PROVIDED ({} total):\n{}\nYou MUST reference ALL documents listed above.\n\n",
+            doc_order.len(),
+            checklist.join("\n")
+        ));
+    }
+
+    // Round-robin: take one chunk from each doc in turn
     let mut context_parts: Vec<String> = Vec::new();
-    if !client_parts.is_empty() {
-        context_parts.push("--- CLIENT DOCUMENTS ---".to_string());
-        for p in &client_parts { context_parts.push(p.to_string()); }
-    }
-    if !authority_parts.is_empty() {
-        context_parts.push("--- LEGAL AUTHORITY ---".to_string());
-        for p in &authority_parts { context_parts.push(p.to_string()); }
-    }
-    if !evidence_parts.is_empty() {
-        context_parts.push("--- EVIDENCE ---".to_string());
-        for p in &evidence_parts { context_parts.push(p.to_string()); }
-    }
-    if !reference_parts.is_empty() {
-        context_parts.push("--- REFERENCE ---".to_string());
-        for p in &reference_parts { context_parts.push(p.to_string()); }
+    let max_rounds = chunks_by_doc.values().map(|v| v.len()).max().unwrap_or(0);
+    for round in 0..max_rounds {
+        for doc_name in &doc_order {
+            if let Some(chunks) = chunks_by_doc.get(doc_name) {
+                if let Some(chunk) = chunks.get(round) {
+                    context_parts.push(chunk.clone());
+                }
+            }
+        }
     }
 
     // Add primary context chunks with budget enforcement
@@ -1713,7 +1788,7 @@ pub async fn query(
         .emit("query-status", serde_json::json!({"phase": "generating"}))
         .ok();
     let window_clone = window.clone();
-    let answer: String = pipeline::ask_saul(
+    let answer: String = pipeline::ask_llm(
         &question,
         &context,
         &history,
@@ -1828,9 +1903,10 @@ pub async fn query(
     }
 
     // ── Layer 5: Output cleanup pipeline ─────────────────────────────────────
-    // Light cleanup only: collapse repetitions, strip excessive hedging,
-    // repair malformed citations. Do NOT strip sentences based on token
-    // matching — it causes false positives that mutilate correct answers.
+    // Strip sentences flagged as hallucinations/fabrications by assertions.
+    // This prevents showing content the model made up to the user.
+    final_answer = strip_hallucinated_sentences(&final_answer, &final_assertions);
+    // Light cleanup: collapse repetitions, strip excessive hedging, repair citations.
     final_answer = collapse_repetitions(&final_answer);
     final_answer = strip_excessive_hedging(&final_answer);
     final_answer = repair_citations(&final_answer);
@@ -1853,6 +1929,64 @@ pub async fn query(
 }
 
 // ── Output Cleanup Helpers ────────────────────────────────────────────────────
+
+/// Conservative post-processing: only strip sentences containing **fabricated entities**
+/// (court names, case numbers, jurisdictions) which are high-confidence fabrications.
+/// General hallucination flags have too many false positives to strip safely —
+/// the assertion notices in the UI are sufficient for those.
+fn strip_hallucinated_sentences(
+    answer: &str,
+    assertions: &[crate::assertions::AssertionResult],
+) -> String {
+    use regex::Regex;
+
+    // Only act on FabricatedEntity assertions — these are high-confidence
+    // (specific court names, case numbers, etc. that don't appear in sources)
+    let quote_re = Regex::new(r#""([^"]+)""#).unwrap();
+    let mut fabricated_terms: Vec<String> = Vec::new();
+    for a in assertions {
+        if a.passed {
+            continue;
+        }
+        if matches!(a.assertion_type, crate::assertions::AssertionType::FabricatedEntity) {
+            if let Some(cap) = quote_re.captures(&a.message) {
+                fabricated_terms.push(cap[1].to_string());
+            }
+        }
+    }
+
+    if fabricated_terms.is_empty() {
+        return answer.to_string();
+    }
+
+    // Only strip sentences that contain the exact fabricated entity string
+    let sentence_re = Regex::new(r"(?s)([^.!?\n]+[.!?])").unwrap();
+    let mut result = answer.to_string();
+    for term in &fabricated_terms {
+        let term_lower = term.to_lowercase();
+        let mut best_match: Option<(usize, usize)> = None;
+        for m in sentence_re.find_iter(&result) {
+            if m.as_str().to_lowercase().contains(&term_lower) {
+                best_match = Some((m.start(), m.end()));
+                break;
+            }
+        }
+        if let Some((start, end)) = best_match {
+            let before = result[..start].trim_end();
+            let after = result[end..].trim_start();
+            result = if before.is_empty() {
+                after.to_string()
+            } else if after.is_empty() {
+                before.to_string()
+            } else {
+                format!("{} {}", before, after)
+            };
+            log::info!("Stripped fabricated entity sentence containing: '{}'", term);
+        }
+    }
+
+    result
+}
 
 /// Extract a recognizable section header from the first line of a chunk.
 /// Detects ALL-CAPS headers, "Section N"/"Article N" patterns, and numbered headings.

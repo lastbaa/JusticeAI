@@ -13,8 +13,8 @@
 // │            (#[ignore] — requires fastembed ~33 MB auto-download)        │
 // │            Run with: cargo test -- --include-ignored retrieval          │
 // │                                                                         │
-// │  Tier 4 — E2E           full pipeline including Saul-7B LLM            │
-// │            (#[ignore] — requires 4.5 GB GGUF file)                     │
+// │  Tier 4 — E2E           full pipeline including Qwen3-8B LLM           │
+// │            (#[ignore] — requires ~5 GB GGUF file)                      │
 // │            Run with: cargo test -- --include-ignored e2e               │
 // │                                                                         │
 // │ Quick run:  cargo test                     (tier 1 + 2 only)           │
@@ -865,7 +865,7 @@ fn retrieval_w9_filled_address_found() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIER 4 — END-TO-END LLM TESTS
-// Requires Saul-7B GGUF model (~4.5 GB). Marked #[ignore]; run with:
+// Requires Qwen3-8B GGUF model (~5 GB). Marked #[ignore]; run with:
 //   cargo test -- --include-ignored e2e
 //
 // These tests use check_answer() with the full bartending_contract_test_cases()
@@ -877,9 +877,9 @@ fn retrieval_w9_filled_address_found() {
 /// If any assertion fails, the test prints the answer and the failing
 /// assertion(s) so the developer can diagnose the LLM response.
 #[test]
-#[ignore = "e2e: requires Saul-7B GGUF model (~4.5 GB) at {app_data}/models/saul.gguf"]
+#[ignore = "e2e: requires Qwen3-8B GGUF model (~5 GB) at {app_data}/models/qwen3.gguf"]
 fn e2e_high_priority_test_cases() {
-    // TODO: implement after pipeline refactor exposes ask_saul / query as
+    // TODO: implement after pipeline refactor exposes ask_llm / query as
     //       testable functions (currently they require tauri::State + Window).
     //
     // Pseudocode:
@@ -897,7 +897,7 @@ fn e2e_high_priority_test_cases() {
 
 /// Tier 4: run every test case (all priorities) through the full pipeline.
 #[test]
-#[ignore = "e2e: requires Saul-7B GGUF model (~4.5 GB) at {app_data}/models/saul.gguf"]
+#[ignore = "e2e: requires Qwen3-8B GGUF model (~5 GB) at {app_data}/models/qwen3.gguf"]
 fn e2e_all_test_cases() {
     // TODO: same as above but includes Medium + Low priority cases
     eprintln!("[e2e_all_test_cases] TODO: implement after pipeline refactor");

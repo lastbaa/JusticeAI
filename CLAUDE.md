@@ -4,7 +4,7 @@ This file provides guidance when working with code in this repository.
 
 ## Project Overview
 
-Justice AI is a privacy-first legal research desktop app built with Tauri 2 (Rust backend + React frontend). All processing runs locally — document parsing, embedding (fastembed BGE-small-en-v1.5), and LLM inference (Saul-7B-Instruct Q4_K_M via llama-cpp-2) happen on-device. No cloud services, no API keys required.
+Justice AI is a privacy-first legal research desktop app built with Tauri 2 (Rust backend + React frontend). All processing runs locally — document parsing, embedding (fastembed BGE-small-en-v1.5), and LLM inference (Qwen3-8B Q4_K_M via llama-cpp-2) happen on-device. No cloud services, no API keys required.
 
 ## Monorepo Structure
 
@@ -49,7 +49,7 @@ All business logic lives in Rust, exposed to the frontend via Tauri IPC commands
 
 Storage:
 - **Vector store** — In-memory `Vec<EmbeddedChunkEntry>` with cosine similarity, persisted to `{app_data}/chunks.json`
-- **Models** — Saul-7B GGUF (~4.5 GB) at `{app_data}/models/saul.gguf`, fastembed ONNX (~33 MB) at `{app_data}/models/fastembed-bge/`
+- **Models** — Qwen3-8B GGUF (~5 GB) at `{app_data}/models/qwen3.gguf`, fastembed ONNX (~33 MB) at `{app_data}/models/fastembed-bge/`
 - **Settings & chat history** — Tauri-managed app data directory
 
 ## Architecture: Frontend (`app/src/renderer/src/`)
@@ -80,5 +80,5 @@ Tailwind CSS with a Navy (`#0d1117`) + Gold (`#c9a84c`) color scheme. Both `app/
 - **Tauri security** — Commands are exposed via `invoke()`. No node integration. File dialogs use `@tauri-apps/plugin-dialog` on the JS side to avoid async deadlocks.
 - **TypeScript** — Vite + React with `@renderer` path alias resolving to `src/renderer/src` (configured in `vite.config.ts`).
 - **Retrieval pipeline** — Hybrid BM25 + cosine similarity with Reciprocal Rank Fusion (RRF). MMR reranking for diversity. Legal synonym expansion in BM25. Pluggable `RetrievalBackend` trait.
-- **Models auto-download** — On first launch, `ModelSetup.tsx` triggers `download_models` Tauri command. Saul-7B GGUF (~4.5 GB) + fastembed BGE ONNX (~33 MB). Progress reported via `download-progress` events.
+- **Models auto-download** — On first launch, `ModelSetup.tsx` triggers `download_models` Tauri command. Qwen3-8B GGUF (~5 GB) + fastembed BGE ONNX (~33 MB). Progress reported via `download-progress` events.
 - **Eval system** — `cargo run --bin harness` runs 77 eval cases across 8 fixtures. Metrics: MRR, P@1, recall, partial score. Design doc at `app/src-tauri/EVAL_SYSTEM_DESIGN.md`.

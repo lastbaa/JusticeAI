@@ -7,7 +7,7 @@ interface Props {
 export default function ModelSetup({ onComplete }: Props): JSX.Element {
   const [percent, setPercent] = useState(0)
   const [downloadedGb, setDownloadedGb] = useState(0)
-  const [totalGb, setTotalGb] = useState(4.5)
+  const [totalGb, setTotalGb] = useState(5.0)
   const [speed, setSpeed] = useState('')
   const [eta, setEta] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -40,7 +40,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
     // Pending values that get flushed to state at throttled intervals
     let pendingPct = 0
     let pendingGb = 0
-    let pendingTotalGb = 4.5
+    let pendingTotalGb = 5.0
     let pendingSpeed = ''
     let pendingEta = ''
 
@@ -178,9 +178,9 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
           Setting up Justice AI
         </h1>
         <p className="text-[13.5px] text-center mb-10 leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.35)' }}>
-          Downloading the Saul legal AI model.
+          Downloading the Qwen3-8B language model (~5 GB).
           <br />
-          <span style={{ color: 'rgb(var(--ov) / 0.45)' }}>This only happens once.</span>
+          <span style={{ color: 'rgb(var(--ov) / 0.45)' }}>This happens once — after this, everything runs locally on your device.</span>
         </p>
 
         {error ? (
@@ -316,7 +316,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
                 />
               </svg>
               <p className="text-[12.5px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
-                Saul runs entirely on your device. No accounts, no API keys, no data sent to the cloud.
+                Qwen3-8B runs entirely on your device. No accounts, no API keys, no data sent to the cloud.
               </p>
             </div>
           </div>

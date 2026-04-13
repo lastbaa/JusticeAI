@@ -159,7 +159,7 @@ export default function BentoCapabilities() {
               className="md:col-span-3"
               icon={<Cpu className="h-5 w-5" style={{ color: '#c9a84c' }} />}
               name="On-Device AI"
-              description="Saul-7B and all embeddings run on your hardware. No APIs, no subscriptions."
+              description="Qwen3-8B and all embeddings run on your hardware. No APIs, no subscriptions."
               cta="Technical details"
               background={
                 <svg className="absolute bottom-3 right-3 w-20 h-20 opacity-[0.07]" viewBox="0 0 80 80" fill="none">
