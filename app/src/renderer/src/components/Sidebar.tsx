@@ -171,9 +171,9 @@ function SessionItem({
             title="Rename (or double-click)"
             aria-label="Rename session"
             className="flex h-4 w-4 items-center justify-center rounded transition-colors"
-            style={{ color: 'rgb(var(--ov) / 0.18)' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.55)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.18)' }}
+            style={{ color: 'rgb(var(--ov) / 0.4)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.65)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)' }}
           >
             <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
               <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064l6.286-6.286zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086z" />
@@ -184,9 +184,9 @@ function SessionItem({
             title="Delete"
             aria-label="Delete session"
             className="flex h-4 w-4 items-center justify-center rounded transition-colors"
-            style={{ color: 'rgb(var(--ov) / 0.18)' }}
+            style={{ color: 'rgb(var(--ov) / 0.4)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.18)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)' }}
           >
             <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
               <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
@@ -303,9 +303,9 @@ function KnowledgeFileItem({
           title="Remove from project"
           aria-label="Remove file"
           className="flex h-4 w-4 items-center justify-center rounded transition-colors shrink-0"
-          style={{ color: 'rgb(var(--ov) / 0.18)' }}
+          style={{ color: 'rgb(var(--ov) / 0.4)' }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.18)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)' }}
         >
           <svg width="8" height="8" viewBox="0 0 12 12" fill="currentColor">
             <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
@@ -453,7 +453,7 @@ export default function Sidebar({
         >
           <ScalesIcon size={17} />
           {!collapsed && (
-            <span className="text-[14px] font-semibold tracking-[-0.015em]" style={{ color: 'var(--text)' }}>
+            <span className="text-[14px] font-semibold tracking-[-0.015em] whitespace-nowrap" style={{ color: 'var(--text)' }}>
               Justice <span style={{ color: '#c9a84c' }}>AI</span>
             </span>
           )}
@@ -463,9 +463,9 @@ export default function Sidebar({
           className="no-drag flex h-6 w-6 items-center justify-center rounded transition-opacity"
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          style={{ color: 'rgb(var(--ov) / 0.25)', flexShrink: 0 }}
+          style={{ color: 'rgb(var(--ov) / 0.45)', flexShrink: 0 }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.6)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.25)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.45)' }}
         >
           {collapsed ? (
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
@@ -520,7 +520,7 @@ export default function Sidebar({
                   className="flex items-center justify-center w-full py-1.5 rounded-lg transition-all"
                   style={{
                     background: session.id === currentSessionId ? 'rgb(var(--ov) / 0.06)' : 'transparent',
-                    color: session.id === currentSessionId ? 'rgb(var(--ov) / 0.85)' : 'rgb(var(--ov) / 0.35)',
+                    color: session.id === currentSessionId ? 'rgb(var(--ov) / 0.85)' : 'rgb(var(--ov) / 0.55)',
                   }}
                 >
                   <span
@@ -586,9 +586,9 @@ export default function Sidebar({
                 title="Delete project"
                 aria-label="Delete project"
                 className="no-drag flex h-5 w-5 items-center justify-center rounded transition-colors shrink-0"
-                style={{ color: 'rgb(var(--ov) / 0.2)' }}
+                style={{ color: 'rgb(var(--ov) / 0.4)' }}
                 onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.2)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)' }}
               >
                 <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15z" />
@@ -599,7 +599,7 @@ export default function Sidebar({
 
           {/* Case Context */}
           <div className="px-3 py-2" style={{ borderBottom: '1px solid rgb(var(--ov) / 0.04)' }}>
-            <label className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--ov) / 0.3)' }}>Case Background</label>
+            <label className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--ov) / 0.5)' }}>Case Background</label>
             <textarea
               value={caseContext}
               onChange={(e) => onCaseContextChange(e.target.value)}
@@ -621,8 +621,8 @@ export default function Sidebar({
           {entities.length > 0 && (
             <div className="px-3 py-2" style={{ borderBottom: '1px solid rgb(var(--ov) / 0.04)' }}>
               <div className="flex items-center justify-between">
-                <label className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--ov) / 0.3)' }}>Identified Parties</label>
-                <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.2)' }}>{entities.length}</span>
+                <label className="text-[10px] uppercase tracking-wider font-medium" style={{ color: 'rgb(var(--ov) / 0.5)' }}>Identified Parties</label>
+                <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>{entities.length}</span>
               </div>
               <div className="mt-1.5 space-y-1">
                 {entities.map((entity, i) => (
@@ -636,7 +636,7 @@ export default function Sidebar({
                       </span>
                     )}
                     <span className="truncate" style={{ color: 'var(--text)' }}>{entity.name}</span>
-                    <span className="text-[9px] truncate" style={{ color: 'rgb(var(--ov) / 0.2)' }}>({entity.sourceFile})</span>
+                    <span className="text-[9px] truncate" style={{ color: 'rgb(var(--ov) / 0.45)' }}>({entity.sourceFile})</span>
                   </div>
                 ))}
               </div>
@@ -651,7 +651,7 @@ export default function Sidebar({
               <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgba(201,168,76,0.5)' }}>
                 Knowledge
               </span>
-              <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+              <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                 {projectFiles.length} file{projectFiles.length !== 1 ? 's' : ''}
               </span>
             </div>
@@ -695,7 +695,7 @@ export default function Sidebar({
 
           {/* Conversations section header */}
           <div className="flex items-center justify-between px-5 mb-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
               Conversations
             </span>
           </div>
@@ -747,7 +747,7 @@ export default function Sidebar({
                   style={{ color: 'var(--text)' }}
                 />
                 {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} aria-label="Clear search" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+                  <button onClick={() => setSearchQuery('')} aria-label="Clear search" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                     <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
                       <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
                     </svg>
@@ -761,8 +761,8 @@ export default function Sidebar({
           <div className="flex-1 overflow-y-auto px-2 py-1">
             {visibleSessions.length === 0 ? (
               <div className="flex flex-col items-center py-8 text-center px-4">
-                <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.25)' }}>No matters on file</p>
-                <p className="mt-0.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.18)' }}>Start a chat to begin</p>
+                <p className="text-[11px]" style={{ color: 'rgb(var(--ov) / 0.5)' }}>No matters on file</p>
+                <p className="mt-0.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.4)' }}>Start a chat to begin</p>
               </div>
             ) : (
               <div className="flex flex-col gap-5 py-1">
@@ -770,7 +770,7 @@ export default function Sidebar({
                   <div key={group.label}>
                     <p
                       className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.1em]"
-                      style={{ color: 'rgb(var(--ov) / 0.18)' }}
+                      style={{ color: 'rgb(var(--ov) / 0.4)' }}
                     >
                       {group.label}
                     </p>
@@ -996,7 +996,7 @@ export default function Sidebar({
                             <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7z" />
                           </svg>
                           <span className="flex-1 truncate text-[12px] font-medium">{c.name}</span>
-                          <span className="text-[9px] shrink-0 group-hover:hidden" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+                          <span className="text-[9px] shrink-0 group-hover:hidden" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                             {docCount}d · {projectSessions.length}c
                           </span>
 
@@ -1004,9 +1004,9 @@ export default function Sidebar({
                           <button
                             onClick={(e) => { e.stopPropagation(); setProjectMenuOpen(projectMenuOpen === c.id ? null : c.id) }}
                             className="no-drag hidden group-hover:flex h-5 w-5 items-center justify-center rounded transition-colors shrink-0"
-                            style={{ color: 'rgb(var(--ov) / 0.25)' }}
+                            style={{ color: 'rgb(var(--ov) / 0.45)' }}
                             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.6)' }}
-                            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.25)' }}
+                            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.45)' }}
                             title="Project options"
                           >
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
@@ -1083,7 +1083,7 @@ export default function Sidebar({
                               Open project
                             </button>
                             {projectSessions.length === 0 ? (
-                              <p className="text-[10px] px-2 py-1" style={{ color: 'rgb(var(--ov) / 0.2)' }}>No matters on file</p>
+                              <p className="text-[10px] px-2 py-1" style={{ color: 'rgb(var(--ov) / 0.45)' }}>No matters on file</p>
                             ) : (
                               projectSessions.map((session) => (
                                 <SessionItem
@@ -1102,7 +1102,7 @@ export default function Sidebar({
                     )
                   })}
                   {cases.length === 0 && (
-                    <p className="text-[10px] px-3 py-1" style={{ color: 'rgb(var(--ov) / 0.2)' }}>No cases on the docket</p>
+                    <p className="text-[10px] px-3 py-1" style={{ color: 'rgb(var(--ov) / 0.45)' }}>No cases on the docket</p>
                   )}
                 </div>
               )}
@@ -1135,9 +1135,9 @@ export default function Sidebar({
                     title="Clear all"
                     aria-label="Clear all conversations"
                     className="no-drag mr-2 flex h-4 w-4 items-center justify-center rounded transition-colors"
-                    style={{ color: 'rgb(var(--ov) / 0.15)' }}
+                    style={{ color: 'rgb(var(--ov) / 0.4)' }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.15)' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)' }}
                   >
                     <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
                       <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15z" />
@@ -1164,7 +1164,7 @@ export default function Sidebar({
                       style={{ color: 'var(--text)' }}
                     />
                     {searchQuery && (
-                      <button onClick={() => setSearchQuery('')} aria-label="Clear search" style={{ color: 'rgb(var(--ov) / 0.25)' }}>
+                      <button onClick={() => setSearchQuery('')} aria-label="Clear search" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                         <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
                           <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
                         </svg>
@@ -1179,14 +1179,14 @@ export default function Sidebar({
                 <div className="flex flex-col gap-0.5 mt-0.5">
                   {sessions.filter((s) => !s.caseId).length === 0 && !searchQuery ? (
                     <div className="flex flex-col items-center py-6 text-center px-4">
-                      <p className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.2)' }}>The docket is clear</p>
+                      <p className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>The docket is clear</p>
                     </div>
                   ) : visibleSessions.length === 0 && searchQuery ? (
-                    <p className="text-[10px] px-3 py-2" style={{ color: 'rgb(var(--ov) / 0.18)' }}>No results for &ldquo;{searchQuery}&rdquo;</p>
+                    <p className="text-[10px] px-3 py-2" style={{ color: 'rgb(var(--ov) / 0.45)' }}>No results for &ldquo;{searchQuery}&rdquo;</p>
                   ) : (
                     groups.map((group) => (
                       <div key={group.label}>
-                        <p className="mb-0.5 mt-2 px-3 text-[9px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'rgb(var(--ov) / 0.15)' }}>
+                        <p className="mb-0.5 mt-2 px-3 text-[9px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'rgb(var(--ov) / 0.4)' }}>
                           {group.label}
                         </p>
                         {group.items.map((session) => (

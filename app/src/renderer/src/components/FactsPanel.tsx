@@ -135,7 +135,7 @@ export default function FactsPanel({ chunkTexts, onClickFact }: Props): JSX.Elem
         <div className="px-4 pb-3 flex flex-col gap-2.5" style={{ animation: 'fadeUp 0.2s ease both' }}>
           {facts.dates.length > 0 && (
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] mb-1.5" style={{ color: 'rgb(var(--ov) / 0.18)' }}>Dates</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] mb-1.5" style={{ color: 'rgb(var(--ov) / 0.45)' }}>Dates</p>
               <div className="flex flex-wrap gap-1.5">
                 {facts.dates.map((d) => (
                   <FactTag key={d} label={d} color="#58a6ff" onClick={() => onClickFact(`What is the significance of ${d}?`)} />
@@ -145,7 +145,7 @@ export default function FactsPanel({ chunkTexts, onClickFact }: Props): JSX.Elem
           )}
           {facts.amounts.length > 0 && (
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] mb-1.5" style={{ color: 'rgb(var(--ov) / 0.18)' }}>Amounts</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] mb-1.5" style={{ color: 'rgb(var(--ov) / 0.45)' }}>Amounts</p>
               <div className="flex flex-wrap gap-1.5">
                 {facts.amounts.map((a) => (
                   <FactTag key={a} label={a} color="#3fb950" onClick={() => onClickFact(`What is the ${a} for?`)} />
@@ -155,7 +155,7 @@ export default function FactsPanel({ chunkTexts, onClickFact }: Props): JSX.Elem
           )}
           {facts.terms.length > 0 && (
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] mb-1.5" style={{ color: 'rgb(var(--ov) / 0.18)' }}>Legal Terms</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] mb-1.5" style={{ color: 'rgb(var(--ov) / 0.45)' }}>Legal Terms</p>
               <div className="flex flex-wrap gap-1.5">
                 {facts.terms.map((t) => (
                   <FactTag key={t} label={t} color="#c9a84c" onClick={() => onClickFact(`What does the document say about ${t}?`)} />

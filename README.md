@@ -12,9 +12,15 @@ Private, citation-grounded legal document research on your local machine.
 - **Citation-grounded answers** — Every response includes file name, page number, and excerpt references.
 - **Hybrid retrieval** — BM25 keyword search + semantic cosine similarity, fused with Reciprocal Rank Fusion (RRF) for best-of-both-worlds accuracy.
 - **Local legal LLM** — Saul-7B-Instruct (Q4_K_M) runs entirely on your hardware via llama-cpp-2. No API keys, no cloud.
-- **Case management** — Organize documents into cases with scoped retrieval per case.
+- **Three inference modes** — Brief, Standard, and Discovery modes control answer depth and token budget per query.
+- **Case management** — Organize documents into cases with document roles (Client Document, Legal Authority, Evidence, Reference) and per-case context notes.
+- **Hallucination detection** — Automatic assertion checks verify citations, flag ungrounded claims, and detect fabricated entities.
+- **Fact sheets & entity registry** — Auto-extracted key figures (parties, dates, amounts, clauses) and a searchable entity registry across all loaded documents.
+- **Command palette** — Cmd+K (Mac) / Ctrl+K (Windows) for quick actions: new chat, export, toggle theme, open settings.
+- **Export** — Export conversations as legal memos (Markdown) or citation tables (CSV).
+- **Jurisdiction awareness** — Set federal, state, or county jurisdiction; auto-detected from documents when available.
 - **16 supported file types** — PDF, DOCX, TXT, MD, CSV, EML, HTML, HTM, MHTML, XML, XLSX, PNG, JPG, JPEG, TIF, TIFF — including OCR for images.
-- **Practice area presets** — Tailored retrieval settings for different legal domains.
+- **Practice area presets** — Tailored retrieval settings for different legal domains (Criminal, Family, Corporate, Immigration, and more).
 - **Dark / light theme** — Switch between themes in settings.
 - **Cross-platform** — macOS, Windows, and Linux.
 
@@ -55,7 +61,7 @@ Private, citation-grounded legal document research on your local machine.
 Justice AI uses a **Retrieval-Augmented Generation (RAG)** pipeline:
 
 1. **Parse** — Documents are parsed locally (PDF via `lopdf`, DOCX via `zip`/`roxmltree`, images via Tesseract OCR, and more).
-2. **Chunk** — Text is split into overlapping chunks (default: 500 tokens, 50 overlap) to preserve context across boundaries.
+2. **Chunk** — Text is split into overlapping chunks (default: 1000 characters, 150 overlap) to preserve context across boundaries.
 3. **Embed** — Each chunk is embedded using BGE-small-en-v1.5 (local ONNX model via fastembed). No network calls.
 4. **Retrieve** — When you ask a question, the query is matched against chunks using hybrid retrieval:
    - **BM25** keyword scoring with legal synonym expansion
@@ -136,7 +142,8 @@ Builds the Next.js marketing site for production.
 npm run app                        # Tauri dev (Rust + Vite HMR)
 npm run website                    # Next.js dev server at localhost:3000
 cd app/src-tauri && cargo check    # Type-check Rust backend
-cd app/src-tauri && cargo test     # Run Rust unit tests
+cd app/src-tauri && cargo test     # Run 267 unit + integration tests
+cd app/src-tauri && cargo run --bin harness -- --eval tests/fixtures/eval.json  # Run 77-case eval harness
 ```
 
 ## Project Structure

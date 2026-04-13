@@ -2840,6 +2840,7 @@ dependencies = [
  "ocrs",
  "pdf-extract",
  "pdf_oxide",
+ "rayon",
  "regex",
  "reqwest 0.12.28",
  "roxmltree",

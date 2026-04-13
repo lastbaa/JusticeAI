@@ -1,5 +1,5 @@
 use crate::pipeline::{
-    self, chunk_document, embed_text, greeting_response, is_general_knowledge_query,
+    self, chunk_document, embed_text, greeting_response,
     is_non_document_query, is_simple_greeting, RetrievalBackend, GGUF_MIN_SIZE,
     SAUL_GGUF_URL, SCORE_THRESHOLD,
 };
@@ -580,6 +580,7 @@ pub async fn migrate_garbled_chunks(state: &mut RagState) {
 
 #[tauri::command]
 pub async fn load_files(
+    window: tauri::Window,
     file_paths: Vec<String>,
     case_id: Option<String>,
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
@@ -623,8 +624,19 @@ pub async fn load_files(
 
     let mut results: Vec<FileInfo> = Vec::new();
     let mut last_error: Option<String> = None;
-    for file_path in expanded {
-        match process_file(&file_path, &settings, &model_dir, &state).await {
+    let total_files = expanded.len();
+    for (file_index, file_path) in expanded.iter().enumerate() {
+        let file_name = std::path::Path::new(&file_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| file_path.clone());
+        let _ = window.emit("file-load-progress", serde_json::json!({
+            "stage": "parsing",
+            "fileName": file_name,
+            "fileIndex": file_index,
+            "totalFiles": total_files,
+        }));
+        match process_file(&file_path, &settings, &model_dir, &state, &window, file_index, total_files).await {
             Ok(mut info) => {
                 if info.chunk_count == 0 {
                     let msg = format!("File loaded but embedding failed — check that the embedding model downloaded correctly: {}", info.file_name);
@@ -661,8 +673,31 @@ async fn process_file(
     settings: &AppSettings,
     model_dir: &PathBuf,
     state: &tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+    window: &tauri::Window,
+    file_index: usize,
+    total_files: usize,
 ) -> Result<FileInfo, String> {
     use super::doc_parser;
+
+    let file_name_short = std::path::Path::new(file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+
+    let emit_progress = |stage: &str, chunk_count: Option<usize>| {
+        let mut payload = serde_json::json!({
+            "stage": stage,
+            "fileName": file_name_short,
+            "fileIndex": file_index,
+            "totalFiles": total_files,
+        });
+        if let Some(cc) = chunk_count {
+            payload["chunkCount"] = serde_json::json!(cc);
+        }
+        let _ = window.emit("file-load-progress", payload);
+    };
+
+    emit_progress("parsing", None);
 
     let ext = doc_parser::detect_supported_extension(file_path)?;
     let pages = doc_parser::parse_by_extension(file_path, &ext, model_dir)?;
@@ -696,10 +731,12 @@ async fn process_file(
     });
 
     // Extract fact sheet, entities, and auto-classify document role
+    emit_progress("analyzing", None);
     let fact_sheet = extract_fact_sheet(&pages);
     let new_entities = extract_entities(&pages, &file_name);
     let auto_role = classify_document_role(&pages, &file_name);
 
+    emit_progress("chunking", None);
     let chunks = chunk_document(&pages, settings);
 
     // Embed all chunks first without holding the state lock, then insert atomically.
@@ -760,11 +797,53 @@ async fn process_file(
         })
         .collect();
 
-    // Batch-embed all surviving chunks in a single call for efficiency.
-    // We embed the contextualized text (with prefix) for better retrieval,
-    // but store the original text in metadata for display/citation.
+    // Batch-embed in groups of 64 chunks to limit peak memory and report
+    // granular progress for large documents.
+    const EMBED_BATCH_SIZE: usize = 64;
+    emit_progress("embedding", Some(good_chunks.len()));
     let ctx_refs: Vec<&str> = contextualized_texts.iter().map(|t| t.as_str()).collect();
-    let embeddings = pipeline::embed_texts_batch(&ctx_refs, false, model_dir).await?;
+    let mut embeddings: Vec<Vec<f32>> = Vec::with_capacity(ctx_refs.len());
+    let mut embed_error: Option<String> = None;
+    for (batch_idx, batch) in ctx_refs.chunks(EMBED_BATCH_SIZE).enumerate() {
+        match pipeline::embed_texts_batch(batch, false, model_dir).await {
+            Ok(batch_embeddings) => {
+                embeddings.extend(batch_embeddings);
+                // Emit granular progress after each batch
+                let chunks_embedded = ((batch_idx + 1) * EMBED_BATCH_SIZE).min(ctx_refs.len());
+                let payload = serde_json::json!({
+                    "stage": "embedding",
+                    "fileName": file_name_short,
+                    "fileIndex": file_index,
+                    "totalFiles": total_files,
+                    "chunkCount": good_chunks.len(),
+                    "chunksEmbedded": chunks_embedded,
+                });
+                let _ = window.emit("file-load-progress", payload);
+            }
+            Err(e) => {
+                log::warn!(
+                    "Embedding batch {} failed for {}: {}. {} chunks embedded so far.",
+                    batch_idx, file_name_short, e, embeddings.len()
+                );
+                embed_error = Some(e);
+                break;
+            }
+        }
+    }
+
+    // If no embeddings were produced at all and there was an error, propagate it.
+    if embeddings.is_empty() {
+        if let Some(e) = embed_error {
+            return Err(e);
+        }
+    }
+
+    if embed_error.is_some() {
+        log::warn!(
+            "Partial embedding for {}: {} of {} chunks embedded. Saving partial results.",
+            file_name_short, embeddings.len(), good_chunks.len()
+        );
+    }
 
     let mut new_entries: Vec<(String, EmbeddedChunkEntry)> = Vec::new();
     for (chunk, vector) in good_chunks.iter().zip(embeddings) {
@@ -788,6 +867,7 @@ async fn process_file(
     }
 
     let item_ids: Vec<String> = new_entries.iter().map(|(id, _)| id.clone()).collect();
+    let chunk_count = item_ids.len();
     let file_info = FileInfo {
         id: doc_id.clone(),
         file_name: file_name.clone(),
@@ -795,7 +875,7 @@ async fn process_file(
         total_pages,
         word_count,
         loaded_at: now,
-        chunk_count: item_ids.len(),
+        chunk_count,
         case_id: None,
         detected_jurisdiction,
         role: auto_role,
@@ -803,6 +883,7 @@ async fn process_file(
     };
 
     // Single lock acquisition: insert all chunks + registry entries + entities + save.
+    emit_progress("saving", Some(chunk_count));
     {
         let mut s = state.lock().await;
         for (item_id, entry) in new_entries {
@@ -820,6 +901,8 @@ async fn process_file(
         }
         s.save_chunks().await;
     }
+
+    emit_progress("complete", Some(chunk_count));
 
     Ok(file_info)
 }
@@ -1653,7 +1736,7 @@ pub async fn query(
     assertions.extend(crate::assertions::check_no_hallucination(&answer, &chunk_texts));
     assertions.extend(crate::assertions::check_fabricated_entities(&answer, &chunk_texts));
 
-    let (mut final_answer, mut final_not_found, mut final_assertions) =
+    let (mut final_answer, final_not_found, final_assertions) =
         (answer.clone(), not_found, assertions);
 
     // Log assertion results for diagnostics but do NOT retry inference.

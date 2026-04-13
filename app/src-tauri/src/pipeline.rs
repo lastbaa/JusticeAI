@@ -805,6 +805,8 @@ pub async fn embed_texts_batch(
     }
 
     let cache_dir = model_dir.join("fastembed-bge");
+    // BGE asymmetric retrieval: queries get a task-description prefix that shifts
+    // the embedding toward the retrieval space; document chunks are embedded raw.
     let processed: Vec<String> = if is_query {
         texts
             .iter()
@@ -814,7 +816,10 @@ pub async fn embed_texts_batch(
         texts.iter().map(|t| t.to_string()).collect()
     };
 
+    // Run on a blocking thread — ONNX inference is CPU-bound and would starve
+    // the async runtime if executed on a Tokio worker thread.
     tokio::task::spawn_blocking(move || {
+        // Lazy singleton: the model (~33 MB ONNX) is loaded once and reused.
         let model_arc = EMBED_MODEL.get_or_init(|| Arc::new(Mutex::new(None)));
 
         let mut guard = model_arc
@@ -886,9 +891,9 @@ pub async fn ask_saul(
         format_history(history)
     };
 
-    // Put context in the user turn — Llama 2 models pay far more attention to
-    // user-turn content than to the system prompt, so this is the reliable way
-    // to ground answers in the retrieved document chunks.
+    // Context goes in the user turn (not the system prompt) because Llama 2 /
+    // Mistral-family models attend more strongly to user-turn content. This
+    // maximizes grounding fidelity for cited, page-level answers.
     let user_content = if context.trim().is_empty() {
         if history_prefix.is_empty() {
             format!("Question: {user_question}")
@@ -933,10 +938,9 @@ Answer the current question using ONLY these excerpts.\n\
     let date_line = format!("Today's date is {}.", now.format("%B %d, %Y"));
     let sys_prompt = format!("{}\n{}", date_line, sys_prompt_cached);
 
-    // Saul-Instruct-v1 is fine-tuned from Mistral-7B — use Mistral chat format.
-    // System instructions go at the start of the user turn (no <<SYS>> wrapper).
-    // "Answer:" after [/INST] primes the assistant turn and helps the model
-    // understand it should produce a direct answer then stop.
+    // Assemble Mistral chat template: [INST] ... [/INST]
+    // "Answer:" after [/INST] primes the assistant turn to produce a direct
+    // response instead of echoing the prompt or asking clarifying questions.
     let prompt = format!("[INST] {sys_prompt}\n\n{user_content} [/INST] Answer:");
 
     tokio::task::spawn_blocking(move || {
@@ -1057,6 +1061,8 @@ Answer the current question using ONLY these excerpts.\n\
             chunk_start = chunk_end;
         }
 
+        // Sampling chain: repetition penalty → top-k → min-p → top-p → temperature → dist.
+        // Conservative settings (low temp, high top-p) to keep legal citations accurate.
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::penalties(64, 1.10, 0.3, 0.0),
             LlamaSampler::top_k(40),
@@ -1340,7 +1346,11 @@ pub fn split_at_char_boundaries(text: &str, max_bytes: usize) -> Vec<&str> {
 }
 
 /// Split parsed document pages into overlapping text chunks suitable for embedding.
-/// Respects `settings.chunkSize` and `settings.chunkOverlap` for window sizing.
+/// Uses a sentence-aware sliding window: sentences are accumulated until
+/// `chunkSize` is reached, then the window slides back by `chunkOverlap` bytes
+/// (measured in whole sentences) so adjacent chunks share context at their edges.
+/// Section headers are detected and kept with their following content to preserve
+/// document structure in each chunk.
 pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChunk> {
     let mut chunks = Vec::new();
     let mut global_idx = 0usize;
@@ -1351,6 +1361,7 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
             continue;
         }
 
+        // Split page text into sentence fragments, tagging paragraph breaks and headers.
         let frags = split_sentences(text);
         let mut current = String::new();
         let mut sentence_buf: Vec<&str> = Vec::new();
@@ -1438,6 +1449,8 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
                 if !current.is_empty() && current.len() + sub.len() + 1 > settings.chunk_size {
                     flush(&current, &mut global_idx, &mut chunks, page.page_number);
 
+                    // Sliding overlap: carry trailing sentences from the previous chunk
+                    // into the next one so retrieval doesn't miss facts near chunk boundaries.
                     let mut overlap_parts: Vec<&str> = Vec::new();
                     let mut overlap_len = 0usize;
                     for s in sentence_buf.iter().rev() {
@@ -1481,7 +1494,8 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
         }
     }
 
-    // B1: Merge any chunk < 100 bytes into the previous chunk.
+    // B1: Merge runt chunks (< 100 bytes) into the previous chunk to avoid
+    // tiny fragments that embed poorly and waste retrieval slots.
     let mut merged: Vec<TempChunk> = Vec::with_capacity(chunks.len());
     for chunk in chunks {
         if chunk.text.len() < 100 && !merged.is_empty() {
@@ -1684,7 +1698,8 @@ pub fn bm25_tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Precomputed BM25 corpus statistics for a set of chunks.
+/// Precomputed BM25 corpus statistics (IDF, doc lengths, tokenized docs).
+/// BM25 captures exact keyword matches that cosine embeddings miss (e.g. names, dates).
 pub struct Bm25Index {
     /// Number of documents containing each term.
     doc_freq: std::collections::HashMap<String, usize>,
@@ -1830,11 +1845,11 @@ pub fn hybrid_scores_with_boost(
         .collect()
 }
 
-/// Reciprocal Rank Fusion: merge multiple ranked lists by rank position.
-/// Each score list is sorted independently; the fused score for item `i` is:
-///   `sum over lists: 1 / (k + rank_of_i_in_list)`
-/// where `k` is a smoothing constant (standard: 60).
-/// This avoids score normalization issues and is robust across heterogeneous scorers.
+/// Reciprocal Rank Fusion (RRF): merges ranked lists without needing comparable
+/// score scales. Each item's fused score = sum of 1/(k + rank) across all lists.
+/// k=60 is the standard smoothing constant. This is more robust than linear
+/// blending (alpha * cosine + (1-alpha) * BM25) because it's invariant to
+/// the raw score distributions of each scorer.
 pub fn rrf_scores(
     score_lists: &[Vec<f32>],
     chunk_texts: &[&str],
@@ -2116,6 +2131,10 @@ pub fn expand_keywords(keywords: &std::collections::HashSet<String>) -> std::col
 /// Maximal Marginal Relevance — select `top_k` diverse, relevant chunks.
 /// Uses pre-computed norms for efficiency and early-exits when remaining
 /// candidates have very low MMR scores (< 0.1).
+/// Maximal Marginal Relevance: greedily picks chunks that balance relevance
+/// (high `score`) with diversity (low similarity to already-selected chunks).
+/// `lambda` controls the trade-off: 1.0 = pure relevance, 0.0 = pure diversity.
+/// This prevents returning N near-duplicate passages for the same fact.
 pub fn mmr_select(
     mut candidates: Vec<(f32, ChunkMetadata, Vec<f32>)>,
     top_k: usize,
@@ -2141,6 +2160,8 @@ pub fn mmr_select(
         let mut best_mmr_score = f32::NEG_INFINITY;
 
         for (i, (score, _, vec)) in candidates.iter().enumerate() {
+            // MMR score = lambda * relevance - (1 - lambda) * max_similarity_to_selected
+            // First candidate always wins on relevance alone (no selected set yet).
             let mmr = if selected.is_empty() {
                 *score
             } else {
@@ -2182,7 +2203,9 @@ pub fn mmr_select(
 // ── Query Expansion ──────────────────────────────────────────────────────────
 
 /// Generate alternative query phrasings for better retrieval coverage.
-/// Returns the original query plus up to 2 rewrites.
+/// Legal documents use varied terminology (e.g. "landlord" vs "lessor"),
+/// so synonym expansion + question-to-statement transforms help BM25
+/// match on terms the user didn't explicitly type.
 pub fn expand_query(query: &str) -> Vec<String> {
     let mut queries = vec![query.to_string()];
     let lower = query.to_lowercase();
@@ -2546,6 +2569,12 @@ fn deduplicate_by_jaccard(candidates: &mut Vec<(usize, f32)>, texts: &[&str], th
 }
 
 impl RetrievalBackend for HybridBm25Cosine {
+    /// Hybrid retrieval pipeline:
+    ///   1. BM25 (keyword match) + cosine similarity (semantic match)
+    ///   2. Reciprocal Rank Fusion merges both ranked lists by position
+    ///   3. Jaccard deduplication removes near-identical chunks
+    ///   4. Adaptive top-K finds natural score gaps to cut off noise
+    ///   5. MMR reranking ensures diversity in the final result set
     fn retrieve(
         &self,
         query_text: &str,
@@ -2596,9 +2625,10 @@ impl RetrievalBackend for HybridBm25Cosine {
             0.0
         };
 
-        // 3. Reciprocal Rank Fusion — merge BM25 and cosine by rank position.
-        // B6: Query-aware RRF — short queries (<=5 words) use k=40 for BM25
-        // to weight keyword matches more heavily.
+        // 3. Reciprocal Rank Fusion (RRF) — merge by rank, not raw score.
+        // RRF uses 1/(k+rank) per list, avoiding the need to normalize heterogeneous
+        // score distributions. Short queries use lower k for BM25 to amplify exact
+        // keyword matches (which matter more when the query is just a few words).
         let query_word_count = query_text.split_whitespace().count();
         let hybrid = if query_word_count <= 5 {
             // Short query: BM25 uses k=40 (keyword-heavy), cosine uses k=60
@@ -2631,7 +2661,8 @@ impl RetrievalBackend for HybridBm25Cosine {
         // B7: Duplicate chunk suppression — drop near-duplicate chunks (Jaccard > threshold)
         deduplicate_by_jaccard(&mut indexed, &corpus.texts, config.jaccard_threshold);
 
-        // B4: Adaptive top-K — find largest score gap > threshold before top_k, cut there.
+        // B4: Adaptive top-K — instead of a fixed cutoff, find the largest score gap
+        // in the ranked list and cut there. This naturally separates relevant from irrelevant.
         let adaptive_k = {
             let max_k = config.top_k.min(indexed.len());
             let mut cut = max_k;
@@ -3217,7 +3248,7 @@ mod tests {
         let texts = vec!["Intro chunk", "Very relevant body chunk"];
         let chunk_indices = vec![0, 10];
 
-        let fused = super::rrf_scores(&[cosine, bm25], &texts, 0.0, &chunk_indices, 0.08, 0.03, 2);
+        let _fused = super::rrf_scores(&[cosine, bm25], &texts, 0.0, &chunk_indices, 0.08, 0.03, 2);
         // chunk 1 gets rank 1 in both lists → 2 * 1/61 ≈ 0.0328
         // chunk 0 gets rank 2 in both lists → 2 * 1/62 ≈ 0.0323 + 0.08 intro = 0.1123
         // But chunk 1 raw ≈ 0.0328 ... hmm, actually intro can override in a 2-element list.
@@ -3227,7 +3258,7 @@ mod tests {
         let texts5 = vec!["Intro chunk", "Very relevant body chunk", "Also relevant", "Somewhat relevant", "Less relevant"];
         let indices5 = vec![0, 10, 11, 12, 13];
 
-        let fused5 = super::rrf_scores(&[cosine5, bm25_5], &texts5, 0.0, &indices5, 0.08, 0.03, 2);
+        let _fused5 = super::rrf_scores(&[cosine5, bm25_5], &texts5, 0.0, &indices5, 0.08, 0.03, 2);
         // chunk 1 ranks #1 in both: 2/61 ≈ 0.0328; chunk 0 ranks #5 in both: 2/65 ≈ 0.0308 + 0.08 = 0.1108
         // In a small list the boost is significant, but let's verify the *top* scorer still wins
         // when the rank gap is large enough.
@@ -3257,7 +3288,7 @@ mod tests {
         // to push early chunks into top-k. The safety property is that the boost is
         // small enough relative to the overall ranking that it only affects borderline cases.
         // Let's verify: chunk 0 should NOT be rank 1 when it's genuinely the worst chunk.
-        let rank_of_0 = fused20.iter().enumerate()
+        let _rank_of_0 = fused20.iter().enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .map(|(i, _)| i);
         // Actually... with 0.08 boost, chunk 0 gets 0.105 and chunk 1 gets 0.0328.

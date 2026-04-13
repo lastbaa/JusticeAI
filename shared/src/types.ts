@@ -149,6 +149,15 @@ export interface DownloadProgress {
   attempt?: number
 }
 
+export interface FileLoadProgress {
+  stage: 'parsing' | 'analyzing' | 'chunking' | 'embedding' | 'saving' | 'complete'
+  fileName: string
+  fileIndex: number
+  totalFiles: number
+  chunkCount?: number
+  timeMs?: number
+}
+
 // ── Document Roles ────────────────────────────────────────────
 export type DocumentRole = 'ClientDocument' | 'LegalAuthority' | 'Evidence' | 'Reference'
 

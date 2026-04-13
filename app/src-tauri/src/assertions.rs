@@ -63,9 +63,9 @@ pub fn check_citations(answer: &str, known_files: Option<&[&str]>) -> Vec<Assert
             passed: valid,
             assertion_type: AssertionType::CitationFormat,
             message: if valid {
-                format!("Valid citation format: {text}")
+                format!("Citation formatted correctly: {text}")
             } else {
-                format!("Malformed citation: {text}")
+                format!("Citation may be incomplete: {text}")
             },
         });
     }
@@ -78,9 +78,9 @@ pub fn check_citations(answer: &str, known_files: Option<&[&str]>) -> Vec<Assert
                 passed: found,
                 assertion_type: AssertionType::CitationFilename,
                 message: if found {
-                    format!("Cited file exists: {cited}")
+                    format!("Source document found: {cited}")
                 } else {
-                    format!("Cited file not in known documents: {cited}")
+                    format!("Referenced document not recognized: {cited}")
                 },
             });
         }
@@ -99,9 +99,9 @@ pub fn check_number_exactness(answer: &str, expected: &[&str]) -> Vec<AssertionR
                 passed: found,
                 assertion_type: AssertionType::NumberExactness,
                 message: if found {
-                    format!("Number appears verbatim: {num}")
+                    format!("Number matches source: {num}")
                 } else {
-                    format!("Expected number missing or altered: {num}")
+                    format!("Number may differ from source: {num}")
                 },
             }
         })
@@ -119,9 +119,9 @@ pub fn check_blocklist(answer: &str, blocked: &[&str]) -> Vec<AssertionResult> {
                 passed: !found,
                 assertion_type: AssertionType::Blocklist,
                 message: if found {
-                    format!("Blocked term detected: \"{term}\"")
+                    format!("Contains restricted term: \"{term}\"")
                 } else {
-                    format!("Blocked term absent: \"{term}\"")
+                    format!("No restricted terms found")
                 },
             }
         })
@@ -188,17 +188,11 @@ pub fn check_no_hallucination(answer: &str, chunks: &[&str]) -> Vec<AssertionRes
             passed: grounded,
             assertion_type: AssertionType::Hallucination,
             message: if grounded {
-                format!("Claim grounded in sources ({:.0}%): \"{}\"", ratio * 100.0, truncate(&clean, 80))
+                format!("Verified in sources: \"{}\"", truncate(&clean, 90))
             } else {
-                let missing: Vec<&&str> = tokens
-                    .iter()
-                    .filter(|t| !chunks.iter().any(|c| c.contains(**t)))
-                    .collect();
                 format!(
-                    "Possible hallucination — tokens {:?} not in sources ({:.0}%): \"{}\"",
-                    missing,
-                    ratio * 100.0,
-                    truncate(&clean, 80)
+                    "Could not fully verify this claim in your documents: \"{}\"",
+                    truncate(&clean, 90)
                 )
             },
         });
@@ -232,11 +226,11 @@ pub fn check_no_hallucination(answer: &str, chunks: &[&str]) -> Vec<AssertionRes
             passed,
             assertion_type: AssertionType::Hallucination,
             message: if passed {
-                format!("Qualifier claim grounded ({:.0}%): \"{}\"", ratio * 100.0, truncate(&clean, 80))
+                format!("Verified in sources: \"{}\"", truncate(&clean, 90))
             } else {
                 format!(
-                    "Possible hallucination — qualifier claim only {:.0}% grounded: \"{}\"",
-                    ratio * 100.0, truncate(&clean, 80)
+                    "Strong claim not fully supported by your documents: \"{}\"",
+                    truncate(&clean, 90)
                 )
             },
         });
@@ -276,11 +270,11 @@ pub fn check_no_hallucination(answer: &str, chunks: &[&str]) -> Vec<AssertionRes
             passed,
             assertion_type: AssertionType::Hallucination,
             message: if passed {
-                format!("Negation claim grounded ({:.0}%): \"{}\"", ratio * 100.0, truncate(&clean, 80))
+                format!("Verified in sources: \"{}\"", truncate(&clean, 90))
             } else {
                 format!(
-                    "Possible hallucination — negation claim only {:.0}% grounded: \"{}\"",
-                    ratio * 100.0, truncate(&clean, 80)
+                    "This statement could not be confirmed in your documents: \"{}\"",
+                    truncate(&clean, 90)
                 )
             },
         });
@@ -290,7 +284,7 @@ pub fn check_no_hallucination(answer: &str, chunks: &[&str]) -> Vec<AssertionRes
         results.push(AssertionResult {
             passed: true,
             assertion_type: AssertionType::Hallucination,
-            message: "No falsifiable claims extracted (nothing to check)".into(),
+            message: "No specific claims to verify".into(),
         });
     }
     results
@@ -318,7 +312,7 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
             results.push(AssertionResult {
                 passed: false,
                 assertion_type: AssertionType::FabricatedEntity,
-                message: format!("Court name not found in source documents: \"{}\"", truncate(full, 80)),
+                message: format!("Court name not found in your documents: \"{}\"", truncate(full, 80)),
             });
         }
     }
@@ -332,7 +326,7 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
             results.push(AssertionResult {
                 passed: false,
                 assertion_type: AssertionType::FabricatedEntity,
-                message: format!("Jurisdiction not found in source documents: \"{}\"", truncate(full, 80)),
+                message: format!("Jurisdiction not found in your documents: \"{}\"", truncate(full, 80)),
             });
         }
     }
@@ -346,7 +340,7 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
             results.push(AssertionResult {
                 passed: false,
                 assertion_type: AssertionType::FabricatedEntity,
-                message: format!("Case number not found in source documents: \"{}\"", text),
+                message: format!("Case number not found in your documents: \"{}\"", text),
             });
         }
     }
@@ -361,7 +355,7 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
             results.push(AssertionResult {
                 passed: false,
                 assertion_type: AssertionType::FabricatedEntity,
-                message: format!("Party name not found in source documents: \"{}\"", party_name),
+                message: format!("Party name not found in your documents: \"{}\"", party_name),
             });
         }
     }
@@ -376,7 +370,7 @@ pub fn check_fabricated_entities(answer: &str, chunks: &[&str]) -> Vec<Assertion
             results.push(AssertionResult {
                 passed: false,
                 assertion_type: AssertionType::FabricatedEntity,
-                message: format!("Statute citation not found in source documents: \"{}\"", text),
+                message: format!("Statute citation not found in your documents: \"{}\"", text),
             });
         }
     }

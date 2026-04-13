@@ -66,7 +66,7 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
       <div className="flex items-center justify-between mb-2">
         <p
           className="text-[10px] font-semibold uppercase tracking-[0.12em]"
-          style={{ color: 'rgb(var(--ov) / 0.18)' }}
+          style={{ color: 'rgb(var(--ov) / 0.45)' }}
         >
           Sources ({showAll ? citations.length : deduped.length})
         </p>
@@ -88,7 +88,7 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
         <div className="mb-2">
           <p
             className="text-[9px] font-bold uppercase tracking-[0.14em] mb-1.5"
-            style={{ color: 'rgba(201,168,76,0.45)' }}
+            style={{ color: 'rgba(201,168,76,0.65)' }}
           >
             Key Sources
           </p>
@@ -110,7 +110,7 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
           >
             <p
               className="text-[9px] font-bold uppercase tracking-[0.14em]"
-              style={{ color: 'rgb(var(--ov) / 0.18)' }}
+              style={{ color: 'rgb(var(--ov) / 0.45)' }}
             >
               Supporting Sources ({secondarySlice.length})
             </p>
@@ -119,7 +119,7 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
               height="8"
               viewBox="0 0 10 10"
               fill="none"
-              stroke="rgb(var(--ov) / 0.2)"
+              stroke="rgb(var(--ov) / 0.45)"
               strokeWidth="1.8"
               strokeLinecap="round"
               style={{
@@ -144,7 +144,20 @@ function CitationSources({ citations, onViewCitation }: { citations: Citation[];
 }
 
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const d = new Date(ts)
+  const now = new Date()
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const isToday = d.toDateString() === now.toDateString()
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const isYesterday = d.toDateString() === yesterday.toDateString()
+  if (isToday) return time
+  if (isYesterday) return `Yesterday ${time}`
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
+}
+
+function fullTimestamp(ts: number): string {
+  return new Date(ts).toLocaleString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function ScalesAvatar(): JSX.Element {
@@ -176,7 +189,7 @@ function CopyButton({ text, className, style }: { text: string; className?: stri
     e.stopPropagation()
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
-      setTimeout(() => setCopied(false), 1800)
+      setTimeout(() => setCopied(false), 1000)
     }).catch(() => {})
   }
 
@@ -187,14 +200,14 @@ function CopyButton({ text, className, style }: { text: string; className?: stri
       aria-label="Copy to clipboard"
       className={`flex items-center justify-center rounded transition-all ${className ?? ''}`}
       style={{
-        color: copied ? '#3fb950' : 'rgb(var(--ov) / 0.22)',
+        color: copied ? '#3fb950' : 'rgb(var(--ov) / 0.4)',
         ...style,
       }}
       onMouseEnter={(e) => {
         if (!copied) (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.55)'
       }}
       onMouseLeave={(e) => {
-        if (!copied) (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.22)'
+        if (!copied) (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)'
       }}
     >
       {copied ? (
@@ -584,11 +597,11 @@ function QualityBadges({ assertions }: { assertions: AssertionResult[] }): JSX.E
   const passed = assertions.filter((a) => a.passed).length
   const total = assertions.length
   const allPassed = passed === total
-  const hasHallucination = assertions.some((a) => !a.passed && a.assertionType === 'hallucination')
+  const notices = total - passed
 
-  const color = allPassed ? '#3fb950' : hasHallucination ? '#f85149' : '#d29922'
-  const bgColor = allPassed ? 'rgba(63,185,80,0.08)' : hasHallucination ? 'rgba(248,81,73,0.08)' : 'rgba(210,153,34,0.08)'
-  const borderColor = allPassed ? 'rgba(63,185,80,0.2)' : hasHallucination ? 'rgba(248,81,73,0.2)' : 'rgba(210,153,34,0.2)'
+  const color = allPassed ? '#3fb950' : 'rgb(var(--ov) / 0.4)'
+  const bgColor = allPassed ? 'rgba(63,185,80,0.08)' : 'rgb(var(--ov) / 0.03)'
+  const borderColor = allPassed ? 'rgba(63,185,80,0.2)' : 'rgb(var(--ov) / 0.08)'
 
   return (
     <div className="mt-2">
@@ -601,12 +614,9 @@ function QualityBadges({ assertions }: { assertions: AssertionResult[] }): JSX.E
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
           <path d="M8 1L2 4v4c0 3.5 2.5 6.5 6 7.5 3.5-1 6-4 6-7.5V4L8 1z" />
           {allPassed && <path d="M5.5 8l2 2 3.5-3.5" />}
-          {!allPassed && <>
-            <line x1="8" y1="5.5" x2="8" y2="9" />
-            <circle cx="8" cy="11" r="0.5" fill={color} />
-          </>}
+          {!allPassed && <circle cx="8" cy="8" r="1" fill={color} />}
         </svg>
-        {allPassed ? `${passed}/${total} checks passed` : `${total - passed} issue${total - passed !== 1 ? 's' : ''} found`}
+        {allPassed ? `${passed}/${total} checks passed` : `${notices} notice${notices !== 1 ? 's' : ''}`}
         <svg
           width="8" height="8" viewBox="0 0 10 10" fill="none"
           stroke={color} strokeWidth="1.8" strokeLinecap="round"
@@ -628,8 +638,8 @@ function QualityBadges({ assertions }: { assertions: AssertionResult[] }): JSX.E
                   <path d="M2 5l2 2 4-4" />
                 </svg>
               ) : (
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#f85149" strokeWidth="1.6" strokeLinecap="round" className="shrink-0 mt-0.5">
-                  <path d="M2.5 2.5l5 5M7.5 2.5l-5 5" />
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="rgb(var(--ov) / 0.5)" strokeWidth="1.6" strokeLinecap="round" className="shrink-0 mt-0.5">
+                  <circle cx="5" cy="5" r="1.5" fill="rgb(var(--ov) / 0.4)" stroke="none" />
                 </svg>
               )}
               <span style={{ color: a.passed ? 'rgb(var(--ov) / 0.45)' : 'rgb(var(--ov) / 0.7)' }}>{a.message}</span>
@@ -649,9 +659,9 @@ function ActionButton({ title, onClick, children }: { title: string; onClick: (e
       title={title}
       aria-label={title}
       className="flex items-center justify-center h-6 w-6 rounded transition-all"
-      style={{ color: 'rgb(var(--ov) / 0.22)' }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.55)' }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.22)' }}
+      style={{ color: 'rgb(var(--ov) / 0.4)' }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.65)' }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)' }}
     >
       {children}
     </button>
@@ -695,7 +705,7 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
               </div>
             )}
           </div>
-          <p className="mt-1.5 text-right text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
+          <p className="mt-1.5 text-right text-[10px] cursor-default" title={fullTimestamp(message.timestamp)} style={{ color: 'rgb(var(--ov) / 0.45)' }}>
             {formatTime(message.timestamp)}
           </p>
         </div>
@@ -824,14 +834,14 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
                       />
                     )}
                   </>
-                : <span style={{ color: 'rgb(var(--ov) / 0.2)', fontStyle: 'italic' }}>No response generated. Please try again.</span>
+                : <span style={{ color: 'rgb(var(--ov) / 0.5)', fontStyle: 'italic' }}>No response generated. Please try again.</span>
               }
             </div>
 
           </div>
         )}
 
-        <p className="mt-1.5 text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
+        <p className="mt-1.5 text-[10px] cursor-default" title={fullTimestamp(message.timestamp)} style={{ color: 'rgb(var(--ov) / 0.45)' }}>
           {formatTime(message.timestamp)}
         </p>
 
@@ -852,7 +862,7 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
             className="flex items-center gap-1.5 mt-2 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-all"
             style={{
               border: '1px solid rgb(var(--ov) / 0.08)',
-              color: 'rgb(var(--ov) / 0.3)',
+              color: 'rgb(var(--ov) / 0.45)',
               background: 'rgb(var(--ov) / 0.02)',
             }}
             onMouseEnter={(e) => {
@@ -863,7 +873,7 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
             }}
             onMouseLeave={(e) => {
               const el = e.currentTarget as HTMLButtonElement
-              el.style.color = 'rgb(var(--ov) / 0.3)'
+              el.style.color = 'rgb(var(--ov) / 0.45)'
               el.style.borderColor = 'rgb(var(--ov) / 0.08)'
               el.style.background = 'rgb(var(--ov) / 0.02)'
             }}
