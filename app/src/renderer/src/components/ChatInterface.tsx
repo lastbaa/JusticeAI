@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, KeyboardEvent } from 'react'
+import React, { useEffect, useRef, useState, KeyboardEvent } from 'react'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
-import { ChatMessage, Citation, FileInfo, InferenceMode, Theme } from '../../../../../shared/src/types'
+import { ChatMessage, Citation, FileInfo, FileLoadProgress, InferenceMode, Theme } from '../../../../../shared/src/types'
 import MessageBubble from './MessageBubble'
 import QueryTemplates from './QueryTemplates'
 import FactsPanel from './FactsPanel'
@@ -11,6 +11,7 @@ interface Props {
   queryPhase?: string
   files: FileInfo[]
   isLoading: boolean
+  fileLoadProgress: FileLoadProgress | null
   loadError: string | null
   chatMode: boolean
   sessionName: string
@@ -163,9 +164,48 @@ const THINKING_PHRASES = [
   'Preparing counsel',
   'Deliberating on findings',
   'Drafting the opinion',
+  'Approaching the bench',
+  'Sustained… thinking',
+  'Invoking stare decisis',
+  'Checking the docket',
+  'Filing a mental brief',
+  'Conferring with co-counsel',
+  'Entering chambers',
+  'Swearing in the facts',
+  'Polling the jury of neurons',
+  'Reading the fine print',
+  'Sequestering the evidence',
+  'Calling an expert witness',
+  'Sidebar conference in progress',
+  'Requesting a brief recess',
+  'Examining the witness',
+  'Searching for loopholes',
+  'Subpoenaing relevant facts',
+  'Applying the reasonable AI standard',
+  'Citing sources furiously',
+  'Marshalling the arguments',
+  'Deliberations are underway',
+  'Per curiam processing',
+  'Establishing chain of custody',
+  'Redacting irrelevant thoughts',
+  'Building the case',
+  'Your honor, one moment',
+  'Gaveling through the data',
+  'Reviewing amicus briefs',
+  'Motioning for more time',
 ]
 
+function shuffled<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
 function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
+  const [phrases] = useState(() => shuffled(THINKING_PHRASES))
   const [phraseIdx, setPhraseIdx] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const [phraseKey, setPhraseKey] = useState(0)
@@ -175,7 +215,7 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
     let phraseTimer: ReturnType<typeof setInterval> | undefined
     if (!phase) {
       phraseTimer = setInterval(() => {
-        setPhraseIdx((i) => (i + 1) % THINKING_PHRASES.length)
+        setPhraseIdx((i) => (i + 1) % phrases.length)
         setPhraseKey((k) => k + 1)
       }, 2800)
     }
@@ -189,7 +229,7 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
     }
   }, [phase])
 
-  const displayPhrase = phase || THINKING_PHRASES[phraseIdx]
+  const displayPhrase = phase || phrases[phraseIdx]
   const displayKey = phase ? phase : phraseKey
 
   return (
@@ -289,6 +329,7 @@ export default function ChatInterface({
   queryPhase,
   files,
   isLoading,
+  fileLoadProgress,
   loadError,
   chatMode,
   sessionName,
@@ -313,8 +354,10 @@ export default function ChatInterface({
   const [isDragging, setIsDragging] = useState(false)
   const [justLoaded, setJustLoaded] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
   const prevIsLoadingRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const hasFiles = files.length > 0
@@ -327,8 +370,18 @@ export default function ChatInterface({
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 128) + 'px'
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   }, [input])
+
+  // Escape key stops generation
+  useEffect(() => {
+    if (!isQuerying || !onStopQuery) return
+    function handleEsc(e: globalThis.KeyboardEvent): void {
+      if (e.key === 'Escape') onStopQuery!()
+    }
+    window.addEventListener('keydown', handleEsc)
+    return () => window.removeEventListener('keydown', handleEsc)
+  }, [isQuerying, onStopQuery])
 
   useEffect(() => {
     if (prevIsLoadingRef.current && !isLoading && hasFiles) {
@@ -440,7 +493,7 @@ export default function ChatInterface({
           {!isEmpty && (
             <span
               className="text-[11px] truncate"
-              style={{ color: 'rgb(var(--ov) / 0.35)', maxWidth: 250 }}
+              style={{ color: 'rgb(var(--ov) / 0.55)', maxWidth: 250 }}
             >
               {sessionName}
             </span>
@@ -455,7 +508,7 @@ export default function ChatInterface({
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px]"
               style={{
                 border: justLoaded ? '1px solid rgba(201,168,76,0.4)' : '1px solid rgb(var(--ov) / 0.06)',
-                color: justLoaded ? 'rgba(201,168,76,0.9)' : 'rgb(var(--ov) / 0.28)',
+                color: justLoaded ? 'rgba(201,168,76,0.9)' : 'rgb(var(--ov) / 0.5)',
                 background: justLoaded ? 'rgba(201,168,76,0.08)' : 'rgb(var(--ov) / 0.02)',
                 transition: 'all 0.4s ease',
               }}
@@ -473,7 +526,7 @@ export default function ChatInterface({
             className="flex items-center justify-center h-6 w-6 rounded-full text-[11px] font-bold transition-all"
             style={{
               border: '1px solid rgb(var(--ov) / 0.08)',
-              color: 'rgb(var(--ov) / 0.3)',
+              color: 'rgb(var(--ov) / 0.5)',
               background: 'rgb(var(--ov) / 0.02)',
             }}
             onMouseEnter={(e) => {
@@ -484,7 +537,7 @@ export default function ChatInterface({
             }}
             onMouseLeave={(e) => {
               const el = e.currentTarget as HTMLButtonElement
-              el.style.color = 'rgb(var(--ov) / 0.3)'
+              el.style.color = 'rgb(var(--ov) / 0.5)'
               el.style.borderColor = 'rgb(var(--ov) / 0.08)'
               el.style.background = 'rgb(var(--ov) / 0.02)'
             }}
@@ -498,7 +551,7 @@ export default function ChatInterface({
               title="Export conversation"
               aria-label="Export conversation"
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-all"
-              style={{ border: '1px solid rgb(var(--ov) / 0.06)', color: 'rgb(var(--ov) / 0.28)', background: 'rgb(var(--ov) / 0.02)' }}
+              style={{ border: '1px solid rgb(var(--ov) / 0.06)', color: 'rgb(var(--ov) / 0.5)', background: 'rgb(var(--ov) / 0.02)' }}
               onMouseEnter={(e) => {
                 const el = e.currentTarget as HTMLButtonElement
                 el.style.color = 'rgba(201,168,76,0.75)'
@@ -520,7 +573,17 @@ export default function ChatInterface({
       </div>
 
       {/* Messages */}
-      <div key={sessionId} className="flex-1 overflow-y-auto" style={{ animation: 'sessionFade 0.25s ease both' }}>
+      <div
+        key={sessionId}
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto relative"
+        style={{ animation: 'sessionFade 0.25s ease both' }}
+        onScroll={(e) => {
+          const el = e.currentTarget
+          const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+          setShowScrollBtn(distFromBottom > 200)
+        }}
+      >
         {isEmpty ? (
           <div className="flex h-full flex-col items-center justify-center px-8 py-16 text-center relative">
             {!hasFiles ? (
@@ -585,7 +648,8 @@ export default function ChatInterface({
                   Justice <span style={{ color: 'var(--gold)' }}>AI</span>
                 </h3>
                 <p className="mb-6 text-[13px] leading-relaxed relative z-10" style={{ color: 'rgb(var(--ov) / 0.45)', maxWidth: 340 }}>
-                  Ask anything — or add documents for cited, case-specific answers.
+                  {new Date().getHours() < 12 ? 'Good morning, counselor.' : new Date().getHours() < 17 ? 'Good afternoon, counselor.' : 'Good evening, counselor.'}{' '}
+                  Ask anything — or add documents for cited answers.
                 </p>
 
                 {/* Suggestion chips */}
@@ -649,7 +713,7 @@ export default function ChatInterface({
                   </svg>
                   Add documents for cited answers
                 </button>
-                <p className="mt-2.5 text-[11px] relative z-10" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
+                <p className="mt-2.5 text-[11px] relative z-10" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
                   Supports PDFs, Word, Excel, images,{' '}
                   <span
                     className="inline-block cursor-help relative group/tip"
@@ -698,20 +762,45 @@ export default function ChatInterface({
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-7 max-w-4xl mx-auto w-full px-6 py-8 pb-10">
+          <div role="log" aria-live="polite" className="flex flex-col gap-7 max-w-4xl mx-auto w-full px-6 py-8 pb-10">
             {messages.map((msg, idx) => {
               const isLastAssistant = msg.role === 'assistant' && !msg.isStreaming &&
                 !messages.slice(idx + 1).some((m) => m.role === 'assistant' && !m.isStreaming)
+
+              // Date separator between days
+              let dateSep: JSX.Element | null = null
+              if (msg.timestamp) {
+                const d = new Date(msg.timestamp)
+                const prev = idx > 0 ? messages[idx - 1] : null
+                const prevD = prev?.timestamp ? new Date(prev.timestamp) : null
+                if (!prevD || d.toDateString() !== prevD.toDateString()) {
+                  const now = new Date()
+                  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1)
+                  const label = d.toDateString() === now.toDateString() ? 'Today'
+                    : d.toDateString() === yesterday.toDateString() ? 'Yesterday'
+                    : d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
+                  dateSep = (
+                    <div key={`sep-${msg.id}`} className="flex items-center gap-3 my-1">
+                      <div className="flex-1 h-px" style={{ background: 'rgb(var(--ov) / 0.06)' }} />
+                      <span className="text-[10px] font-medium tracking-wide" style={{ color: 'rgb(var(--ov) / 0.5)' }}>{label}</span>
+                      <div className="flex-1 h-px" style={{ background: 'rgb(var(--ov) / 0.06)' }} />
+                    </div>
+                  )
+                }
+              }
+
               return (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  files={files}
-                  onViewCitation={onViewCitation}
-                  onDeleteMessage={onDeleteMessage}
-                  onRetryMessage={onRetryMessage}
-                  isLastAssistant={isLastAssistant}
-                />
+                <React.Fragment key={msg.id}>
+                  {dateSep}
+                  <MessageBubble
+                    message={msg}
+                    files={files}
+                    onViewCitation={onViewCitation}
+                    onDeleteMessage={onDeleteMessage}
+                    onRetryMessage={onRetryMessage}
+                    isLastAssistant={isLastAssistant}
+                  />
+                </React.Fragment>
               )
             })}
             {isQuerying && !messages.some((m) => m.isStreaming && m.content.length > 0) && (
@@ -719,6 +808,26 @@ export default function ChatInterface({
             )}
             <div ref={messagesEndRef} className="h-4" />
           </div>
+        )}
+
+        {/* Scroll to bottom button */}
+        {showScrollBtn && !isEmpty && (
+          <button
+            onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            aria-label="Scroll to bottom"
+            className="absolute left-1/2 -translate-x-1/2 bottom-4 z-10 flex items-center justify-center h-8 w-8 rounded-full transition-all"
+            style={{
+              background: 'var(--bg-alt)',
+              border: '1px solid rgb(var(--ov) / 0.12)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+              color: '#c9a84c',
+              animation: 'fadeUp 0.2s ease both',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3v10M4 9l4 4 4-4" />
+            </svg>
+          </button>
         )}
       </div>
 
@@ -728,6 +837,61 @@ export default function ChatInterface({
         style={{ borderTop: '1px solid rgb(var(--ov) / 0.05)', background: 'var(--bg)' }}
       >
         <div className="max-w-4xl mx-auto">
+          {fileLoadProgress && (
+            <div
+              className="flex items-center gap-3 rounded-xl px-4 py-2.5 mb-3"
+              style={{
+                background: 'rgba(201,168,76,0.06)',
+                border: '1px solid rgba(201,168,76,0.18)',
+                animation: 'fadeUp 0.25s ease both',
+              }}
+            >
+              <div className="shrink-0">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="animate-spin" style={{ animationDuration: '1.5s' }}>
+                  <circle cx="8" cy="8" r="6" stroke="rgba(201,168,76,0.3)" strokeWidth="2" />
+                  <path d="M14 8a6 6 0 0 0-6-6" stroke="rgba(201,168,76,0.8)" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-medium truncate" style={{ color: 'rgba(201,168,76,0.9)' }}>
+                    {fileLoadProgress.totalFiles > 1
+                      ? `${fileLoadProgress.fileName} (${fileLoadProgress.fileIndex + 1}/${fileLoadProgress.totalFiles})`
+                      : fileLoadProgress.fileName}
+                  </span>
+                  <span className="text-[10px] ml-2 shrink-0" style={{ color: 'rgba(201,168,76,0.6)' }}>
+                    {{
+                      parsing: 'Parsing…',
+                      analyzing: 'Analyzing…',
+                      chunking: 'Chunking…',
+                      embedding: fileLoadProgress.chunkCount
+                        ? `Embedding ${fileLoadProgress.chunkCount} chunks…`
+                        : 'Embedding…',
+                      saving: 'Saving…',
+                      complete: 'Done',
+                    }[fileLoadProgress.stage]}
+                  </span>
+                </div>
+                <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(201,168,76,0.12)' }}>
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      background: 'rgba(201,168,76,0.7)',
+                      transition: 'width 0.3s ease',
+                      width: (() => {
+                        const stageWeights: Record<string, number> = { parsing: 15, analyzing: 30, chunking: 45, embedding: 80, saving: 95, complete: 100 }
+                        const stagePercent = stageWeights[fileLoadProgress.stage] ?? 0
+                        if (fileLoadProgress.totalFiles <= 1) return `${stagePercent}%`
+                        const filePercent = (fileLoadProgress.fileIndex / fileLoadProgress.totalFiles) * 100
+                        const perFile = 100 / fileLoadProgress.totalFiles
+                        return `${filePercent + (stagePercent / 100) * perFile}%`
+                      })(),
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
           {loadError && (
             <div
               role="alert"
@@ -762,10 +926,10 @@ export default function ChatInterface({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isQuerying ? 'Generating… click stop to cancel' : 'Ask a question about your documents…'}
+                placeholder={isQuerying ? 'Generating… press Esc to stop' : 'Ask about your documents…    Shift + Enter for new line'}
                 rows={1}
                 className="flex-1 bg-transparent text-[13.5px] leading-6 outline-none placeholder:text-[var(--placeholder)] disabled:opacity-50"
-                style={{ maxHeight: 128, overflowY: 'auto', color: 'var(--text)' }}
+                style={{ maxHeight: 200, overflowY: 'auto', resize: 'none', color: 'var(--text)', transition: 'height 0.1s ease' }}
               />
               {isQuerying ? (
                 <button
@@ -789,11 +953,11 @@ export default function ChatInterface({
                   disabled={!input.trim()}
                   title="Send message"
                   aria-label="Send message"
-                  className="flex shrink-0 h-8 w-8 items-center justify-center rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="flex shrink-0 h-8 w-8 items-center justify-center rounded-xl disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
                   style={{
                     background: input.trim() ? 'var(--gold)' : 'rgb(var(--ov) / 0.06)',
-                    color: input.trim() ? 'var(--text-on-gold)' : 'rgb(var(--ov) / 0.3)',
-                    transition: 'background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease',
+                    color: input.trim() ? 'var(--text-on-gold)' : 'rgb(var(--ov) / 0.5)',
+                    transition: 'background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease',
                     boxShadow: input.trim() ? 'var(--shadow)' : 'none',
                   }}
                 >
@@ -830,6 +994,9 @@ export default function ChatInterface({
           onClick={() => setShowHelp(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Quick Reference"
             className="w-full max-w-md rounded-2xl overflow-hidden"
             style={{
               background: 'var(--modal-bg)',
@@ -849,7 +1016,7 @@ export default function ChatInterface({
                 onClick={() => setShowHelp(false)}
                 aria-label="Close help"
                 className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"
-                style={{ color: 'rgb(var(--ov) / 0.3)' }}
+                style={{ color: 'rgb(var(--ov) / 0.5)' }}
                 onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.7)' }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.3)' }}
               >
@@ -865,7 +1032,7 @@ export default function ChatInterface({
               <div>
                 <h3
                   className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-3 pb-2 border-b"
-                  style={{ color: 'rgb(var(--ov) / 0.3)', borderColor: 'rgb(var(--ov) / 0.06)' }}
+                  style={{ color: 'rgb(var(--ov) / 0.5)', borderColor: 'rgb(var(--ov) / 0.06)' }}
                 >
                   Keyboard Shortcuts
                 </h3>
@@ -894,13 +1061,13 @@ export default function ChatInterface({
               <div>
                 <h3
                   className="text-[10px] font-semibold uppercase tracking-[0.12em] mb-3 pb-2 border-b"
-                  style={{ color: 'rgb(var(--ov) / 0.3)', borderColor: 'rgb(var(--ov) / 0.06)' }}
+                  style={{ color: 'rgb(var(--ov) / 0.5)', borderColor: 'rgb(var(--ov) / 0.06)' }}
                 >
                   Usage Tips
                 </h3>
                 <ul className="flex flex-col gap-2">
                   {[
-                    'Load your documents first. Supports PDFs, Word, Excel, images, and more.',
+                    'Load your documents first. Supports PDF, Word, Excel, images, TXT, CSV, HTML, EML, and more.',
                     'Ask questions in plain, natural language.',
                     'Citations link directly to the source page in your documents.',
                     'Use cases to organize research across different matters.',

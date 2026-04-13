@@ -106,7 +106,13 @@ fn text_quality_score(text: &str) -> f64 {
         0.5
     };
 
-    ratio * word_score
+    // Penalize text that's mostly punctuation/symbols (failed CMap font decoding).
+    // Real text should be at least 25% alphabetic characters.
+    let alpha = text.chars().filter(|c| c.is_alphabetic()).count() as f64;
+    let alpha_ratio = alpha / total_chars;
+    let alpha_score = if alpha_ratio < 0.15 { 0.2 } else if alpha_ratio < 0.25 { 0.6 } else { 1.0 };
+
+    ratio * word_score * alpha_score
 }
 
 /// Filter out form fields whose values already appear in the page text.
@@ -199,12 +205,14 @@ fn format_tables(text: &str) -> String {
 ///    coordinates and re-interleave filled values next to their template labels.
 /// 4. Fall back to plain lopdf extract_text as a last resort.
 pub fn parse_pdf(path: &str) -> Result<Vec<DocumentPage>, String> {
+    use rayon::prelude::*;
+
     let mut pages = parse_pdf_parallel(path)?;
 
-    // Post-process: format table-like content
-    for page in &mut pages {
+    // Post-process: format table-like content (parallel across pages)
+    pages.par_iter_mut().for_each(|page| {
         page.text = format_tables(&page.text);
-    }
+    });
 
     Ok(pages)
 }
@@ -213,6 +221,13 @@ pub fn parse_pdf(path: &str) -> Result<Vec<DocumentPage>, String> {
 /// with good results. Falls back to lopdf synchronously.
 fn parse_pdf_parallel(path: &str) -> Result<Vec<DocumentPage>, String> {
     use std::thread;
+
+    // Quick check for password-protected PDFs before launching heavy parsers
+    if let Ok(doc) = lopdf::Document::load(path) {
+        if doc.is_encrypted() {
+            return Err("This PDF is password-protected. Please remove the password and try again.".to_string());
+        }
+    }
 
     let path1 = path.to_string();
     let path2 = path.to_string();
@@ -297,30 +312,49 @@ fn try_lopdf_parse(path: &str) -> Result<Vec<DocumentPage>, String> {
 /// Try extracting text using pdf_oxide. Returns None on any error,
 /// or Some(empty vec) if extraction succeeds but produces no content.
 fn try_pdf_oxide(path: &str) -> Option<Vec<DocumentPage>> {
+    use rayon::prelude::*;
+
     let mut doc = pdf_oxide::PdfDocument::open(path).ok()?;
     let page_count = doc.page_count().ok()?;
     if page_count == 0 {
         return Some(Vec::new());
     }
 
-    let mut pages = Vec::with_capacity(page_count);
-    let mut total_printable = 0usize;
-    let mut total_chars = 0usize;
+    // Step 1: Sequential raw text extraction (PdfDocument is !Sync)
+    let raw_texts: Vec<(usize, String)> = (0..page_count)
+        .map(|i| {
+            let text = doc.extract_text(i).unwrap_or_default();
+            (i, text)
+        })
+        .collect();
 
-    for i in 0..page_count {
-        let text = doc.extract_text(i).unwrap_or_default();
-        let cleaned = clean_pdf_text(&text);
-        for ch in cleaned.chars() {
-            total_chars += 1;
-            if is_printable_pdf_char(ch) {
-                total_printable += 1;
+    // Step 2: Parallel text cleaning and quality counting
+    let pages: Vec<(DocumentPage, usize, usize)> = raw_texts
+        .into_par_iter()
+        .map(|(i, text)| {
+            let cleaned = clean_pdf_text(&text);
+            let mut printable = 0usize;
+            let mut chars = 0usize;
+            for ch in cleaned.chars() {
+                chars += 1;
+                if is_printable_pdf_char(ch) {
+                    printable += 1;
+                }
             }
-        }
-        pages.push(DocumentPage {
-            page_number: (i + 1) as u32,
-            text: cleaned,
-        });
-    }
+            (
+                DocumentPage {
+                    page_number: (i + 1) as u32,
+                    text: cleaned,
+                },
+                printable,
+                chars,
+            )
+        })
+        .collect();
+
+    let total_printable: usize = pages.iter().map(|(_, p, _)| p).sum();
+    let total_chars: usize = pages.iter().map(|(_, _, c)| c).sum();
+    let pages: Vec<DocumentPage> = pages.into_iter().map(|(page, _, _)| page).collect();
 
     // Quality gate: reject if <60% printable (same threshold as pdf-extract path)
     if total_chars > 0 && (total_printable as f32 / total_chars as f32) < 0.60 {
@@ -338,21 +372,36 @@ fn try_pdf_oxide(path: &str) -> Option<Vec<DocumentPage>> {
 }
 
 /// Extract text per-page using lopdf.
+///
+/// lopdf's `Document` is not `Sync` (uses `Rc` internally), so we extract
+/// raw text sequentially (fast — just reading the internal object tree) and
+/// then run the expensive `clean_pdf_text` post-processing in parallel via
+/// rayon.
 fn extract_lopdf_pages(doc: &lopdf::Document) -> Vec<DocumentPage> {
+    use rayon::prelude::*;
+
     let page_map = doc.get_pages();
     let mut page_nums: Vec<u32> = page_map.keys().cloned().collect();
     page_nums.sort();
 
-    let mut pages = Vec::new();
-    for page_num in page_nums {
-        let raw = doc.extract_text(&[page_num]).unwrap_or_default();
-        let cleaned = clean_pdf_text(&raw);
-        pages.push(DocumentPage {
+    // Step 1: Sequential raw text extraction (cannot be parallelized — doc is !Sync)
+    let raw_pages: Vec<(u32, String)> = page_nums
+        .iter()
+        .map(|&page_num| {
+            let raw = doc.extract_text(&[page_num]).unwrap_or_default();
+            (page_num, raw)
+        })
+        .collect();
+
+    // Step 2: Parallel text cleaning (unicode normalization, ligature replacement,
+    // whitespace cleanup — this is the expensive part for large documents)
+    raw_pages
+        .into_par_iter()
+        .map(|(page_num, raw)| DocumentPage {
             page_number: page_num,
-            text: cleaned,
-        });
-    }
-    pages
+            text: clean_pdf_text(&raw),
+        })
+        .collect()
 }
 
 /// Read AcroForm widget annotation values and append them to page text.

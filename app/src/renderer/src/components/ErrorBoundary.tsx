@@ -54,7 +54,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
           <p style={{ fontSize: 15, fontWeight: 600, color: 'rgb(var(--ov) / 0.85)' }}>
             Something went wrong
           </p>
-          <p style={{ fontSize: 12.5, color: 'rgb(var(--ov) / 0.35)', maxWidth: 380 }}>
+          <p style={{ fontSize: 12.5, color: 'rgb(var(--ov) / 0.55)', maxWidth: 380 }}>
             {this.state.error?.message ?? 'An unexpected error occurred.'}
           </p>
           <button

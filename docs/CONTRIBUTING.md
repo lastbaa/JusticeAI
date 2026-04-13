@@ -23,7 +23,7 @@ See [INSTALLATION.md](INSTALLATION.md) for platform-specific prerequisites (Rust
 │   │   │   ├── commands/       # Tauri IPC commands
 │   │   │   │   ├── rag.rs      # RAG pipeline (embed, chunk, search, ask)
 │   │   │   │   ├── doc_parser.rs  # PDF/DOCX parsing
-│   │   │   │   └── ollama.rs   # Connectivity checks
+│   │   │   │   └── ollama.rs   # Local model status checks
 │   │   │   └── pipeline.rs     # Retrieval backends (BM25+Cosine, Reranker)
 │   │   ├── Cargo.toml
 │   │   └── tauri.conf.json

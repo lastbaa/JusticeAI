@@ -13,6 +13,7 @@ import type {
   DownloadProgress,
   EntityEntry,
   FileInfo,
+  FileLoadProgress,
   Jurisdiction,
   ModelStatus,
   OllamaStatus,
@@ -27,6 +28,9 @@ export const api = {
 
   onDownloadProgress: (cb: (p: DownloadProgress) => void): Promise<() => void> =>
     listen('download-progress', (e) => cb(e.payload as DownloadProgress)),
+
+  onFileLoadProgress: (cb: (p: FileLoadProgress) => void): Promise<() => void> =>
+    listen('file-load-progress', (e) => cb(e.payload as FileLoadProgress)),
 
   openFileDialog: async (): Promise<string[]> => {
     const result = await open({

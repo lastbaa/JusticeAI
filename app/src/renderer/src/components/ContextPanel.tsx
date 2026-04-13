@@ -96,7 +96,7 @@ function CitationRow({
           >
             {Math.round(citation.score * 100)}%
           </span>
-          <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.3)' }}>
+          <span className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
             p.{citation.pageNumber}
           </span>
           {hovered && (
@@ -121,7 +121,7 @@ function CitationRow({
       {/* Excerpt */}
       <p
         className="text-[11px] leading-relaxed italic"
-        style={{ color: 'rgb(var(--ov) / 0.35)' }}
+        style={{ color: 'rgb(var(--ov) / 0.5)' }}
       >
         "{expanded ? citation.excerpt : short}
         {!expanded && hasMore && '…'}"
@@ -178,7 +178,7 @@ function FileRow({
               title={file.fileName}
             >
               <span className="font-semibold" style={{ color: 'rgba(201,168,76,0.55)' }}>{exhibitLabel}</span>
-              <span style={{ color: 'rgb(var(--ov) / 0.15)', margin: '0 4px' }}>{'\u00B7'}</span>
+              <span style={{ color: 'rgb(var(--ov) / 0.35)', margin: '0 4px' }}>{'\u00B7'}</span>
               {file.fileName}
             </p>
             {/* Role badge — click to cycle through roles */}
@@ -204,7 +204,7 @@ function FileRow({
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">
-            <p className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.22)' }}>
+            <p className="text-[10px]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
               {file.totalPages} {file.totalPages === 1 ? 'page' : 'pages'}
             </p>
               {file.imageWidth !== undefined && file.imageHeight !== undefined &&
@@ -242,9 +242,9 @@ function FileRow({
             onClick={onRemove}
             aria-label={`Remove ${file.fileName}`}
             className="shrink-0 h-5 w-5 flex items-center justify-center rounded transition-colors"
-            style={{ color: 'rgb(var(--ov) / 0.2)' }}
+            style={{ color: 'rgb(var(--ov) / 0.4)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#f85149' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.2)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)' }}
           >
             <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor">
               <path d="M1.22 1.22a.75.75 0 0 1 1.06 0L6 4.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L7.06 6l3.72 3.72a.75.75 0 1 1-1.06 1.06L6 7.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L4.94 6 1.22 2.28a.75.75 0 0 1 0-1.06z" />
@@ -278,19 +278,19 @@ function FileRow({
             >
               {file.factSheet.amounts.length > 0 && (
                 <div className="flex items-start gap-1.5">
-                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.25)', minWidth: 52 }}>Amounts</span>
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.45)', minWidth: 52 }}>Amounts</span>
                   <span style={{ color: '#c9a84c' }}>{file.factSheet.amounts.slice(0, 4).join(' \u2022 ')}</span>
                 </div>
               )}
               {file.factSheet.dates.length > 0 && (
                 <div className="flex items-start gap-1.5">
-                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.25)', minWidth: 52 }}>Dates</span>
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.45)', minWidth: 52 }}>Dates</span>
                   <span style={{ color: 'rgb(var(--ov) / 0.55)' }}>{file.factSheet.dates.slice(0, 4).join(' \u2022 ')}</span>
                 </div>
               )}
               {file.factSheet.keyClauses.length > 0 && (
                 <div className="flex items-start gap-1.5">
-                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.25)', minWidth: 52 }}>Clauses</span>
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.45)', minWidth: 52 }}>Clauses</span>
                   <span style={{ color: 'rgb(var(--ov) / 0.55)' }}>
                     {file.factSheet.keyClauses.slice(0, 3).map(c =>
                       c.replace(/\b\w/g, l => l.toUpperCase())
@@ -300,8 +300,8 @@ function FileRow({
               )}
               {file.factSheet.summary && (
                 <div className="flex items-start gap-1.5">
-                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.25)', minWidth: 52 }}>Summary</span>
-                  <span className="leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
+                  <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'rgb(var(--ov) / 0.45)', minWidth: 52 }}>Summary</span>
+                  <span className="leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.55)' }}>
                     {file.factSheet.summary.length > 150 ? file.factSheet.summary.slice(0, 150) + '…' : file.factSheet.summary}
                   </span>
                 </div>
@@ -393,7 +393,7 @@ export default function ContextPanel({
         )}
 
         {/* Expand chevron at bottom */}
-        <div className="mt-auto mb-4" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+        <div className="mt-auto mb-4" style={{ color: 'rgb(var(--ov) / 0.4)' }}>
           <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
             <path d="M9.78 12.78a.75.75 0 0 1-1.06 0L4.47 8.53a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L6.06 8l3.72 3.72a.75.75 0 0 1 0 1.06z"/>
           </svg>
@@ -429,7 +429,7 @@ export default function ContextPanel({
           {files.length > 0 && (
             <span
               className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
-              style={{ background: 'rgb(var(--ov) / 0.06)', color: 'rgb(var(--ov) / 0.3)' }}
+              style={{ background: 'rgb(var(--ov) / 0.06)', color: 'rgb(var(--ov) / 0.5)' }}
             >
               {files.length}
             </span>
@@ -441,9 +441,9 @@ export default function ContextPanel({
           title="Minimize panel"
           aria-label="Minimize documents panel"
           className="no-drag flex h-5 w-5 items-center justify-center rounded transition-colors"
-          style={{ color: 'rgb(var(--ov) / 0.2)' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.5)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.2)' }}
+          style={{ color: 'rgb(var(--ov) / 0.4)' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.6)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgb(var(--ov) / 0.4)' }}
         >
           <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
             <path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/>
@@ -465,7 +465,7 @@ export default function ContextPanel({
           >
             <div className="shrink-0 flex items-center justify-between gap-2 px-4 pt-4 pb-2">
               <div className="flex items-center gap-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
                   Answer Sources
                 </p>
                 {isQuerying && (
@@ -492,7 +492,7 @@ export default function ContextPanel({
                   style={{
                     background: 'rgb(var(--ov) / 0.04)',
                     border: '1px solid rgb(var(--ov) / 0.08)',
-                    color: 'rgb(var(--ov) / 0.3)',
+                    color: 'rgb(var(--ov) / 0.5)',
                   }}
                   onMouseEnter={(e) => {
                     const el = e.currentTarget as HTMLButtonElement
@@ -501,7 +501,7 @@ export default function ContextPanel({
                   }}
                   onMouseLeave={(e) => {
                     const el = e.currentTarget as HTMLButtonElement
-                    el.style.color = 'rgb(var(--ov) / 0.3)'
+                    el.style.color = 'rgb(var(--ov) / 0.5)'
                     el.style.borderColor = 'rgb(var(--ov) / 0.08)'
                   }}
                 >
@@ -551,9 +551,17 @@ export default function ContextPanel({
           {files.length > 0 ? (
             <>
               <div className="shrink-0 px-4 pt-4 pb-2 flex items-center justify-between">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'rgb(var(--ov) / 0.2)' }}>
-                  Your Documents
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'rgb(var(--ov) / 0.45)' }}>
+                    Your Documents
+                  </p>
+                  {isLoading && (
+                    <div
+                      className="h-3 w-3 rounded-full animate-spin shrink-0"
+                      style={{ border: '1.5px solid rgba(201,168,76,0.2)', borderTopColor: '#c9a84c' }}
+                    />
+                  )}
+                </div>
                 <button
                   onClick={onClearFiles}
                   disabled={isLoading}
@@ -642,8 +650,8 @@ export default function ContextPanel({
                   />
                 </svg>
               </div>
-              <p className="text-[12px] font-medium" style={{ color: 'rgb(var(--ov) / 0.3)' }}>No documents loaded</p>
-              <p className="mt-1 text-[10.5px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.16)', maxWidth: 180 }}>
+              <p className="text-[12px] font-medium" style={{ color: 'rgb(var(--ov) / 0.5)' }}>No documents loaded</p>
+              <p className="mt-1 text-[10.5px] leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.4)', maxWidth: 180 }}>
                 Add PDF or DOCX files to start querying
               </p>
             </div>

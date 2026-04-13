@@ -1,6 +1,5 @@
 //! Temporary debug binary: compare PDF extraction engines on filled_form_simple.pdf
 use app_lib::commands::doc_parser;
-use std::path::Path;
 
 fn main() {
     let pdf_path = "tests/fixtures/filled_form_simple.pdf";

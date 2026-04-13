@@ -130,6 +130,8 @@ pub fn is_general_knowledge_query(query: &str) -> bool {
             "the document", "the file", "this document", "this file",
             "the contract", "this contract", "the lease", "this lease",
             "the agreement", "this agreement", "the pdf", "this pdf",
+            "these documents", "these files", "my documents", "my files",
+            "all documents", "both documents",
             "page ", "section ", "clause ", "paragraph ",
             "uploaded", "loaded",
         ];
@@ -227,30 +229,17 @@ pub const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instr
 pub const RULES_PROMPT: &str = "\
 You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\n\n\
 RULES:\n\
-1. GROUNDING: If the answer is not in the context, state: \"This information is not present in the provided documents.\" Never speculate or use outside knowledge.\n\
-2. CITATIONS: Cite every claim as [filename, p. N]. Example: The lease runs 12 months [lease.pdf, p. 3].\n\
-3. EXACTNESS: Reproduce numbers, dates, dollar amounts, and names EXACTLY as written. Never round or approximate.\n\
-4. NO FABRICATION: Never invent case numbers, court names, statutes, party names, or amounts not in the context.\n\
-5. FORMAT: Be direct. No preambles or sign-offs. Bold key terms. Bullets for multiple facts.\n\
-6. DOCUMENT ROLES: Context is organized by role. Apply LEGAL AUTHORITY to facts in CLIENT DOCUMENTS. Cite each document by its role.\n\
-7. REASONING: Before answering, identify which specific excerpts contain the answer. Then write your response using only those excerpts.\n\n\
-NEVER DO THIS:\n\
-- Never repeat the same fact twice in different words\n\
-- Never list the same item multiple times\n\
-- Never restate what you already said\n\
-- Never say \"as mentioned above\" or \"as stated previously\"\n\
-- Never add filler like \"I hope this helps\" or \"Let me know if you need anything\"\n\n\
-GOOD example:\n\
+1. Answer using ONLY the provided document excerpts. If the answer is not in the context, say: \"This information is not present in the provided documents.\"\n\
+2. Cite every claim as [filename, p. N]. Reproduce numbers, dates, and names EXACTLY as written.\n\
+3. Never invent facts, case numbers, statutes, or amounts not in the context.\n\
+4. Be direct. Bold key terms. Use bullets for multiple facts.\n\
+5. State each fact only once. Do not repeat yourself.\n\n\
+Example:\n\
 Q: What is the lease term?\n\
 A: The lease term is **12 months**, commencing **January 1, 2024** and ending **December 31, 2024** [residential_lease.pdf, p. 3].\n\n\
 Q: Who are the parties?\n\
 A: - **Landlord**: Robert James Smith [lease.pdf, p. 1]\n\
-- **Tenant**: Maria Garcia [lease.pdf, p. 1]\n\n\
-BAD example (do NOT do this):\n\
-Q: What is the rent?\n\
-A: The rent is $1,500 per month [lease.pdf, p. 2]. The monthly rental payment is $1,500 [lease.pdf, p. 2]. The tenant pays $1,500 each month.\n\n\
-Q: What is the penalty for early termination?\n\
-A: This information is not present in the provided documents.";
+- **Tenant**: Maria Garcia [lease.pdf, p. 1]";
 
 /// Shorter rules prompt for Quick mode — fewer examples, less preamble.
 pub const RULES_PROMPT_QUICK: &str = "\
@@ -282,7 +271,7 @@ impl InferenceParams {
     pub fn from_mode(mode: &InferenceMode) -> Self {
         match mode {
             InferenceMode::Quick => Self {
-                max_new_tokens: 256,
+                max_new_tokens: 384,
                 temperature: 0.05,
                 system_prompt_suffix: "\nStart your answer with the specific fact or value requested. Answer in 1-3 sentences. Cite the source. Then stop — do not add anything else.",
                 system_prompt_override: None,
@@ -290,17 +279,17 @@ impl InferenceParams {
                 is_quick: true,
             },
             InferenceMode::Balanced => Self {
-                max_new_tokens: 512,
+                max_new_tokens: 1024,
                 temperature: 0.15,
-                system_prompt_suffix: "\nProvide a complete answer with all relevant details. Use bullet points for multiple facts. Cite every claim. State each fact only once — do not repeat yourself. Once you have answered the question, stop immediately.",
+                system_prompt_suffix: "\nProvide a thorough answer covering all relevant details from the documents. Use bullet points for multiple facts. Cite every claim.",
                 system_prompt_override: None,
                 timeout_secs: 60,
                 is_quick: false,
             },
             InferenceMode::Extended => Self {
-                max_new_tokens: 768,
+                max_new_tokens: 1536,
                 temperature: 0.10,
-                system_prompt_suffix: "\nThink step by step:\n1. Identify which excerpts in the context answer the question.\n2. Extract the exact facts, numbers, and names from those excerpts.\n3. Write your structured response using ONLY those facts:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim. Do not repeat any fact more than once. When your analysis is complete, stop generating.",
+                system_prompt_suffix: "\nProvide a detailed analysis. Organize your response clearly with relevant sections. Cite every claim.",
                 system_prompt_override: None,
                 timeout_secs: 120,
                 is_quick: false,
@@ -339,7 +328,7 @@ impl RetrievalModeParams {
                 mmr_lambda: 0.85,
                 cosine_floor: 0.20,
                 jaccard_threshold: 0.70,
-                adaptive_k_gap: 0.12,
+                adaptive_k_gap: 0.01,
             },
             InferenceMode::Balanced => Self {
                 top_k: 6,
@@ -349,7 +338,7 @@ impl RetrievalModeParams {
                 mmr_lambda: 0.70,
                 cosine_floor: 0.15,
                 jaccard_threshold: 0.80,
-                adaptive_k_gap: 0.08,
+                adaptive_k_gap: 0.008,
             },
             InferenceMode::Extended => Self {
                 top_k: 10,
@@ -359,7 +348,7 @@ impl RetrievalModeParams {
                 mmr_lambda: 0.55,
                 cosine_floor: 0.12,
                 jaccard_threshold: 0.85,
-                adaptive_k_gap: 0.05,
+                adaptive_k_gap: 0.005,
             },
         }
     }
@@ -805,6 +794,8 @@ pub async fn embed_texts_batch(
     }
 
     let cache_dir = model_dir.join("fastembed-bge");
+    // BGE asymmetric retrieval: queries get a task-description prefix that shifts
+    // the embedding toward the retrieval space; document chunks are embedded raw.
     let processed: Vec<String> = if is_query {
         texts
             .iter()
@@ -814,7 +805,10 @@ pub async fn embed_texts_batch(
         texts.iter().map(|t| t.to_string()).collect()
     };
 
+    // Run on a blocking thread — ONNX inference is CPU-bound and would starve
+    // the async runtime if executed on a Tokio worker thread.
     tokio::task::spawn_blocking(move || {
+        // Lazy singleton: the model (~33 MB ONNX) is loaded once and reused.
         let model_arc = EMBED_MODEL.get_or_init(|| Arc::new(Mutex::new(None)));
 
         let mut guard = model_arc
@@ -851,8 +845,8 @@ pub fn format_history(history: &[(String, String)]) -> String {
     let recent = if history.len() > 2 { &history[history.len() - 2..] } else { history };
     for (user, assistant) in recent {
         // Trim each side to avoid bloating the prompt with long prior answers
-        let u = safe_truncate(user, 200);
-        let a = safe_truncate(assistant, 300);
+        let u = safe_truncate(user, 400);
+        let a = safe_truncate(assistant, 600);
         s.push_str(&format!("User: {u}\nAssistant: {a}\n\n"));
     }
     s
@@ -886,9 +880,9 @@ pub async fn ask_saul(
         format_history(history)
     };
 
-    // Put context in the user turn — Llama 2 models pay far more attention to
-    // user-turn content than to the system prompt, so this is the reliable way
-    // to ground answers in the retrieved document chunks.
+    // Context goes in the user turn (not the system prompt) because Llama 2 /
+    // Mistral-family models attend more strongly to user-turn content. This
+    // maximizes grounding fidelity for cited, page-level answers.
     let user_content = if context.trim().is_empty() {
         if history_prefix.is_empty() {
             format!("Question: {user_question}")
@@ -933,10 +927,9 @@ Answer the current question using ONLY these excerpts.\n\
     let date_line = format!("Today's date is {}.", now.format("%B %d, %Y"));
     let sys_prompt = format!("{}\n{}", date_line, sys_prompt_cached);
 
-    // Saul-Instruct-v1 is fine-tuned from Mistral-7B — use Mistral chat format.
-    // System instructions go at the start of the user turn (no <<SYS>> wrapper).
-    // "Answer:" after [/INST] primes the assistant turn and helps the model
-    // understand it should produce a direct answer then stop.
+    // Assemble Mistral chat template: [INST] ... [/INST]
+    // "Answer:" after [/INST] primes the assistant turn to produce a direct
+    // response instead of echoing the prompt or asking clarifying questions.
     let prompt = format!("[INST] {sys_prompt}\n\n{user_content} [/INST] Answer:");
 
     tokio::task::spawn_blocking(move || {
@@ -992,7 +985,7 @@ Answer the current question using ONLY these excerpts.\n\
 
         // Overhead: [INST], [/INST] tags, newlines, BOS token
         let overhead = 50;
-        let max_prompt_tokens = n_ctx_size as usize - 512; // reserve 512 for generation
+        let max_prompt_tokens = n_ctx_size as usize - 1536; // reserve 1536 for generation (matches Extended mode budget)
         let component_cost = system_tokens.len() + question_tokens.len() + overhead;
 
         if component_cost > max_prompt_tokens {
@@ -1057,6 +1050,8 @@ Answer the current question using ONLY these excerpts.\n\
             chunk_start = chunk_end;
         }
 
+        // Sampling chain: repetition penalty → top-k → min-p → top-p → temperature → dist.
+        // Conservative settings (low temp, high top-p) to keep legal citations accurate.
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::penalties(64, 1.10, 0.3, 0.0),
             LlamaSampler::top_k(40),
@@ -1340,7 +1335,11 @@ pub fn split_at_char_boundaries(text: &str, max_bytes: usize) -> Vec<&str> {
 }
 
 /// Split parsed document pages into overlapping text chunks suitable for embedding.
-/// Respects `settings.chunkSize` and `settings.chunkOverlap` for window sizing.
+/// Uses a sentence-aware sliding window: sentences are accumulated until
+/// `chunkSize` is reached, then the window slides back by `chunkOverlap` bytes
+/// (measured in whole sentences) so adjacent chunks share context at their edges.
+/// Section headers are detected and kept with their following content to preserve
+/// document structure in each chunk.
 pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<TempChunk> {
     let mut chunks = Vec::new();
     let mut global_idx = 0usize;
@@ -1351,6 +1350,7 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
             continue;
         }
 
+        // Split page text into sentence fragments, tagging paragraph breaks and headers.
         let frags = split_sentences(text);
         let mut current = String::new();
         let mut sentence_buf: Vec<&str> = Vec::new();
@@ -1438,6 +1438,8 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
                 if !current.is_empty() && current.len() + sub.len() + 1 > settings.chunk_size {
                     flush(&current, &mut global_idx, &mut chunks, page.page_number);
 
+                    // Sliding overlap: carry trailing sentences from the previous chunk
+                    // into the next one so retrieval doesn't miss facts near chunk boundaries.
                     let mut overlap_parts: Vec<&str> = Vec::new();
                     let mut overlap_len = 0usize;
                     for s in sentence_buf.iter().rev() {
@@ -1481,7 +1483,8 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
         }
     }
 
-    // B1: Merge any chunk < 100 bytes into the previous chunk.
+    // B1: Merge runt chunks (< 100 bytes) into the previous chunk to avoid
+    // tiny fragments that embed poorly and waste retrieval slots.
     let mut merged: Vec<TempChunk> = Vec::with_capacity(chunks.len());
     for chunk in chunks {
         if chunk.text.len() < 100 && !merged.is_empty() {
@@ -1684,7 +1687,8 @@ pub fn bm25_tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Precomputed BM25 corpus statistics for a set of chunks.
+/// Precomputed BM25 corpus statistics (IDF, doc lengths, tokenized docs).
+/// BM25 captures exact keyword matches that cosine embeddings miss (e.g. names, dates).
 pub struct Bm25Index {
     /// Number of documents containing each term.
     doc_freq: std::collections::HashMap<String, usize>,
@@ -1830,11 +1834,11 @@ pub fn hybrid_scores_with_boost(
         .collect()
 }
 
-/// Reciprocal Rank Fusion: merge multiple ranked lists by rank position.
-/// Each score list is sorted independently; the fused score for item `i` is:
-///   `sum over lists: 1 / (k + rank_of_i_in_list)`
-/// where `k` is a smoothing constant (standard: 60).
-/// This avoids score normalization issues and is robust across heterogeneous scorers.
+/// Reciprocal Rank Fusion (RRF): merges ranked lists without needing comparable
+/// score scales. Each item's fused score = sum of 1/(k + rank) across all lists.
+/// k=60 is the standard smoothing constant. This is more robust than linear
+/// blending (alpha * cosine + (1-alpha) * BM25) because it's invariant to
+/// the raw score distributions of each scorer.
 pub fn rrf_scores(
     score_lists: &[Vec<f32>],
     chunk_texts: &[&str],
@@ -2116,6 +2120,10 @@ pub fn expand_keywords(keywords: &std::collections::HashSet<String>) -> std::col
 /// Maximal Marginal Relevance — select `top_k` diverse, relevant chunks.
 /// Uses pre-computed norms for efficiency and early-exits when remaining
 /// candidates have very low MMR scores (< 0.1).
+/// Maximal Marginal Relevance: greedily picks chunks that balance relevance
+/// (high `score`) with diversity (low similarity to already-selected chunks).
+/// `lambda` controls the trade-off: 1.0 = pure relevance, 0.0 = pure diversity.
+/// This prevents returning N near-duplicate passages for the same fact.
 pub fn mmr_select(
     mut candidates: Vec<(f32, ChunkMetadata, Vec<f32>)>,
     top_k: usize,
@@ -2141,6 +2149,8 @@ pub fn mmr_select(
         let mut best_mmr_score = f32::NEG_INFINITY;
 
         for (i, (score, _, vec)) in candidates.iter().enumerate() {
+            // MMR score = lambda * relevance - (1 - lambda) * max_similarity_to_selected
+            // First candidate always wins on relevance alone (no selected set yet).
             let mmr = if selected.is_empty() {
                 *score
             } else {
@@ -2160,9 +2170,10 @@ pub fn mmr_select(
             }
         }
 
-        // Early exit: if the best remaining MMR score is < 0.1, the remaining
-        // candidates add negligible value (near-duplicates of selected chunks).
-        if best_mmr_score < 0.1 && !selected.is_empty() {
+        // Early exit: if the best remaining MMR score is negligible relative
+        // to the first selected candidate, the remaining candidates add no value.
+        // Use a relative threshold since RRF scores are much smaller than raw cosine.
+        if !selected.is_empty() && best_mmr_score < 0.1 * candidates.first().map(|(s, _, _)| *s).unwrap_or(0.0) {
             break;
         }
 
@@ -2182,7 +2193,40 @@ pub fn mmr_select(
 // ── Query Expansion ──────────────────────────────────────────────────────────
 
 /// Generate alternative query phrasings for better retrieval coverage.
-/// Returns the original query plus up to 2 rewrites.
+/// Legal documents use varied terminology (e.g. "landlord" vs "lessor"),
+/// so synonym expansion + question-to-statement transforms help BM25
+/// match on terms the user didn't explicitly type.
+/// Check whether `text` contains `word` as a whole word (surrounded by non-alphanumeric
+/// characters or string boundaries). This avoids dangerous substring matching where e.g.
+/// "sign" would match inside "signature".
+fn contains_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !c.is_alphanumeric())
+        .any(|w| w == word)
+}
+
+/// Replace `word` with `replacement` only at whole-word boundaries in `text`.
+fn replace_word(text: &str, word: &str, replacement: &str) -> String {
+    let mut result = String::with_capacity(text.len() + replacement.len());
+    let word_bytes = word.as_bytes();
+    let text_bytes = text.as_bytes();
+    let mut i = 0;
+    while i < text.len() {
+        if text_bytes[i..].starts_with(word_bytes) {
+            let before_ok = i == 0 || !text_bytes[i - 1].is_ascii_alphanumeric();
+            let after_idx = i + word.len();
+            let after_ok = after_idx >= text.len() || !text_bytes[after_idx].is_ascii_alphanumeric();
+            if before_ok && after_ok {
+                result.push_str(replacement);
+                i += word.len();
+                continue;
+            }
+        }
+        result.push(text.as_bytes()[i] as char);
+        i += 1;
+    }
+    result
+}
+
 pub fn expand_query(query: &str) -> Vec<String> {
     let mut queries = vec![query.to_string()];
     let lower = query.to_lowercase();
@@ -2223,12 +2267,12 @@ pub fn expand_query(query: &str) -> Vec<String> {
     let mut synonym_count = 0;
     for (term, replacement) in &substitutions {
         if synonym_count >= 2 { break; }
-        if lower.contains(term) && !lower.contains(replacement) {
-            let rewritten = lower.replace(term, replacement);
+        if contains_word(&lower, term) && !contains_word(&lower, replacement) {
+            let rewritten = replace_word(&lower, term, replacement);
             queries.push(rewritten);
             synonym_count += 1;
-        } else if lower.contains(replacement) && !lower.contains(term) {
-            let rewritten = lower.replace(replacement, term);
+        } else if contains_word(&lower, replacement) && !contains_word(&lower, term) {
+            let rewritten = replace_word(&lower, replacement, term);
             queries.push(rewritten);
             synonym_count += 1;
         }
@@ -2298,7 +2342,7 @@ pub fn rewrite_followup_query(query: &str, history: &[(String, String)]) -> Stri
     let pronoun_refs = ["it", "this", "that", "they", "them", "those", "these", "its"];
 
     let is_followup = followup_indicators.iter().any(|p| q.starts_with(p))
-        || (q.split_whitespace().count() <= 5
+        || (q.split_whitespace().count() <= 12
             && pronoun_refs.iter().any(|p| {
                 q.split_whitespace().any(|w| w.trim_matches(|c: char| !c.is_alphanumeric()) == *p)
             }));
@@ -2307,30 +2351,47 @@ pub fn rewrite_followup_query(query: &str, history: &[(String, String)]) -> Stri
         return query.to_string();
     }
 
-    // Extract key terms from the last user question to provide context
+    // Extract key terms from the last user question and assistant response
     let last_user = &history[history.len() - 1].0;
-    let last_lower = last_user.to_lowercase();
+    let last_assistant = &history[history.len() - 1].1;
+    let last_user_lower = last_user.to_lowercase();
+    let last_asst_lower = last_assistant.to_lowercase();
 
-    // Extract subject nouns from the last question (skip question words and stopwords)
+    // Extract subject nouns (skip question words and stopwords)
     let skip_words: std::collections::HashSet<&str> = [
         "what", "is", "the", "are", "was", "were", "who", "how", "much",
         "many", "does", "do", "did", "can", "could", "would", "should",
         "a", "an", "in", "of", "for", "to", "from", "with", "about",
         "this", "that", "these", "those", "it", "its",
+        "not", "but", "or", "and", "also", "just", "very", "been",
+        "has", "have", "had", "will", "may", "might", "here",
+        "there", "then", "than", "when", "where", "which",
     ].iter().cloned().collect();
 
-    let context_terms: Vec<&str> = last_lower
+    let user_terms: Vec<&str> = last_user_lower
         .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() > 2 && !skip_words.contains(w))
         .collect();
 
-    if context_terms.is_empty() {
+    // Also extract top keywords from the assistant's last response (limit to 4)
+    let asst_terms: Vec<&str> = last_asst_lower
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| w.len() > 3 && !skip_words.contains(w))
+        .filter(|w| !user_terms.contains(w)) // avoid duplicates with user terms
+        .take(4)
+        .collect();
+
+    let mut all_terms = user_terms;
+    all_terms.extend(asst_terms);
+
+    if all_terms.is_empty() {
         return query.to_string();
     }
 
     // Append context terms to make the query self-contained
-    let context_suffix = context_terms.join(" ");
+    let context_suffix = all_terms.join(" ");
     format!("{} (regarding: {})", query.trim(), context_suffix)
 }
 
@@ -2418,7 +2479,7 @@ impl Default for RetrievalConfig {
             mmr_lambda: 0.7,
             expand_keywords: true,
             jaccard_threshold: 0.80,
-            adaptive_k_gap: 0.08,
+            adaptive_k_gap: 0.008,
         }
     }
 }
@@ -2504,7 +2565,7 @@ const STOP_WORDS: &[&str] = &[
     "how","when","where","why","there","find","show","tell","explain","give",
     "please","provide","describe",
     // Legal stopwords — high-frequency legalese that adds noise to BM25
-    "shall","hereby","herein","hereof","thereof","therein","whereas","pursuant",
+    "hereby","herein","hereof","thereof","therein","whereas","pursuant",
     "notwithstanding","aforementioned","hereinafter","witnesseth","thereunder",
     "hereto","hereunder","thereto",
 ];
@@ -2546,6 +2607,12 @@ fn deduplicate_by_jaccard(candidates: &mut Vec<(usize, f32)>, texts: &[&str], th
 }
 
 impl RetrievalBackend for HybridBm25Cosine {
+    /// Hybrid retrieval pipeline:
+    ///   1. BM25 (keyword match) + cosine similarity (semantic match)
+    ///   2. Reciprocal Rank Fusion merges both ranked lists by position
+    ///   3. Jaccard deduplication removes near-identical chunks
+    ///   4. Adaptive top-K finds natural score gaps to cut off noise
+    ///   5. MMR reranking ensures diversity in the final result set
     fn retrieve(
         &self,
         query_text: &str,
@@ -2596,9 +2663,10 @@ impl RetrievalBackend for HybridBm25Cosine {
             0.0
         };
 
-        // 3. Reciprocal Rank Fusion — merge BM25 and cosine by rank position.
-        // B6: Query-aware RRF — short queries (<=5 words) use k=40 for BM25
-        // to weight keyword matches more heavily.
+        // 3. Reciprocal Rank Fusion (RRF) — merge by rank, not raw score.
+        // RRF uses 1/(k+rank) per list, avoiding the need to normalize heterogeneous
+        // score distributions. Short queries use lower k for BM25 to amplify exact
+        // keyword matches (which matter more when the query is just a few words).
         let query_word_count = query_text.split_whitespace().count();
         let hybrid = if query_word_count <= 5 {
             // Short query: BM25 uses k=40 (keyword-heavy), cosine uses k=60
@@ -2631,7 +2699,8 @@ impl RetrievalBackend for HybridBm25Cosine {
         // B7: Duplicate chunk suppression — drop near-duplicate chunks (Jaccard > threshold)
         deduplicate_by_jaccard(&mut indexed, &corpus.texts, config.jaccard_threshold);
 
-        // B4: Adaptive top-K — find largest score gap > threshold before top_k, cut there.
+        // B4: Adaptive top-K — instead of a fixed cutoff, find the largest score gap
+        // in the ranked list and cut there. This naturally separates relevant from irrelevant.
         let adaptive_k = {
             let max_k = config.top_k.min(indexed.len());
             let mut cut = max_k;
@@ -2863,7 +2932,7 @@ mod tests {
     #[test]
     fn inference_params_quick() {
         let p = InferenceParams::from_mode(&InferenceMode::Quick);
-        assert_eq!(p.max_new_tokens, 256);
+        assert_eq!(p.max_new_tokens, 384);
         assert!((p.temperature - 0.05).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 30);
@@ -2873,7 +2942,7 @@ mod tests {
     #[test]
     fn inference_params_balanced() {
         let p = InferenceParams::from_mode(&InferenceMode::Balanced);
-        assert_eq!(p.max_new_tokens, 512);
+        assert_eq!(p.max_new_tokens, 1024);
         assert!((p.temperature - 0.15).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 60);
@@ -2882,7 +2951,7 @@ mod tests {
     #[test]
     fn inference_params_extended() {
         let p = InferenceParams::from_mode(&InferenceMode::Extended);
-        assert_eq!(p.max_new_tokens, 768);
+        assert_eq!(p.max_new_tokens, 1536);
         assert!((p.temperature - 0.10).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 120);
@@ -3217,7 +3286,7 @@ mod tests {
         let texts = vec!["Intro chunk", "Very relevant body chunk"];
         let chunk_indices = vec![0, 10];
 
-        let fused = super::rrf_scores(&[cosine, bm25], &texts, 0.0, &chunk_indices, 0.08, 0.03, 2);
+        let _fused = super::rrf_scores(&[cosine, bm25], &texts, 0.0, &chunk_indices, 0.08, 0.03, 2);
         // chunk 1 gets rank 1 in both lists → 2 * 1/61 ≈ 0.0328
         // chunk 0 gets rank 2 in both lists → 2 * 1/62 ≈ 0.0323 + 0.08 intro = 0.1123
         // But chunk 1 raw ≈ 0.0328 ... hmm, actually intro can override in a 2-element list.
@@ -3227,7 +3296,7 @@ mod tests {
         let texts5 = vec!["Intro chunk", "Very relevant body chunk", "Also relevant", "Somewhat relevant", "Less relevant"];
         let indices5 = vec![0, 10, 11, 12, 13];
 
-        let fused5 = super::rrf_scores(&[cosine5, bm25_5], &texts5, 0.0, &indices5, 0.08, 0.03, 2);
+        let _fused5 = super::rrf_scores(&[cosine5, bm25_5], &texts5, 0.0, &indices5, 0.08, 0.03, 2);
         // chunk 1 ranks #1 in both: 2/61 ≈ 0.0328; chunk 0 ranks #5 in both: 2/65 ≈ 0.0308 + 0.08 = 0.1108
         // In a small list the boost is significant, but let's verify the *top* scorer still wins
         // when the rank gap is large enough.
@@ -3257,7 +3326,7 @@ mod tests {
         // to push early chunks into top-k. The safety property is that the boost is
         // small enough relative to the overall ranking that it only affects borderline cases.
         // Let's verify: chunk 0 should NOT be rank 1 when it's genuinely the worst chunk.
-        let rank_of_0 = fused20.iter().enumerate()
+        let _rank_of_0 = fused20.iter().enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .map(|(i, _)| i);
         // Actually... with 0.08 boost, chunk 0 gets 0.105 and chunk 1 gets 0.0328.

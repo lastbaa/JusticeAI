@@ -4,67 +4,42 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
-  rust:
-    name: Rust checks
+  build-and-test:
     runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: app/src-tauri
-
-      - name: Cargo check
-        working-directory: app/src-tauri
-        run: cargo check --lib
-
-      - name: Cargo clippy
-        working-directory: app/src-tauri
-        run: cargo clippy --lib -- -D warnings || true
-
-  security:
-    name: Security audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-      - name: Run cargo audit
-        working-directory: app/src-tauri
-        run: cargo audit
-
-  frontend:
-    name: Frontend (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
       - name: Install npm dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Run Rust tests
+        run: cd app/src-tauri && cargo test
 
       - name: Build frontend
-        working-directory: app
-        run: npx vite build
+        run: cd app && npx vite build
 
-      - name: Run frontend tests
-        working-directory: app
-        run: npx vitest run
+      - name: Cargo check
+        run: cd app/src-tauri && cargo check

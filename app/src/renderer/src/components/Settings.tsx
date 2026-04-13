@@ -102,6 +102,13 @@ function StyledSelect({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false) }
+          if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !open) { setOpen(true) }
+        }}
+        role="combobox"
+        aria-expanded={open}
+        aria-haspopup="listbox"
         className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-[12px] outline-none transition-colors"
         style={{
           background: 'var(--surface-dark)',
@@ -236,6 +243,7 @@ function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
+        aria-label={`${label}: ${value}`}
         className="slider-range w-full h-[6px] rounded-full appearance-none cursor-pointer outline-none"
         style={{
           background: `linear-gradient(to right, var(--gold) 0%, var(--gold) ${pct}%, rgb(var(--ov) / 0.1) ${pct}%, rgb(var(--ov) / 0.1) 100%)`,
@@ -371,6 +379,9 @@ export default function Settings({ settings, onSave, onClose, onReindex }: Props
       style={{ background: 'var(--backdrop)', backdropFilter: 'blur(8px)' }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
         className="w-full max-w-xl rounded-2xl overflow-hidden"
         style={{
           background: 'var(--modal-bg)',

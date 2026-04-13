@@ -202,11 +202,19 @@ export function makeSessionName(messages: ChatMessage[]): string {
 
   if (!firstUser) return 'New Chat'
 
-  // ── Extract signals ─────────────────────────────────────────
-  const docNames = extractDocNames(allText)
-  const entities = extractEntities(allText)
-  const properNouns = extractProperNouns(firstUser + ' ' + firstAssistant)
-  const concepts = extractConcepts(allText)
+  // ── Extract signals (prefer user text, fall back to allText) ──
+  const docNames = extractDocNames(userText).length > 0
+    ? extractDocNames(userText)
+    : extractDocNames(allText)
+  const entities = extractEntities(userText).length > 0
+    ? extractEntities(userText)
+    : extractEntities(allText)
+  const properNouns = extractProperNouns(firstUser).length > 0
+    ? extractProperNouns(firstUser)
+    : extractProperNouns(firstUser + ' ' + firstAssistant)
+  const concepts = extractConcepts(userText).length > 0
+    ? extractConcepts(userText)
+    : extractConcepts(allText)
   const dollars = extractDollarAmounts(firstUser)
   const questionPrefix = getQuestionPrefix(firstUser)
 

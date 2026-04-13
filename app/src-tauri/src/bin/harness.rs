@@ -53,6 +53,7 @@ struct EvalCase {
     #[serde(default)]
     label: Option<String>,
     #[serde(default = "default_top_k")]
+    #[allow(dead_code)]
     top_k: usize,
     #[serde(default = "default_case_type", rename = "type")]
     case_type: String,
@@ -1159,6 +1160,7 @@ enum DiffKind {
 #[derive(Debug)]
 struct DiffEntry {
     query: String,
+    #[allow(dead_code)]
     label: String,
     old_rank: Option<usize>,
     new_rank: Option<usize>,
@@ -1393,7 +1395,7 @@ async fn run_benchmark_modes(
     if let Some(path) = report_path {
         // Save extended report with all three modes
         let mut report_data = serde_json::Map::new();
-        for (label, results, summary) in &all_results {
+        for (label, results, _summary) in &all_results {
             let mode_report = build_report(&format!("{}-{}", backend.name(), label.to_lowercase()), results);
             report_data.insert(label.to_lowercase().to_string(),
                 serde_json::to_value(&mode_report).unwrap_or_default());

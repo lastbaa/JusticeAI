@@ -70,12 +70,12 @@ Access settings via the gear icon. Available options:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Chunk Size | Token count per document chunk | 500 |
-| Chunk Overlap | Overlap between consecutive chunks | 50 |
-| Top-K | Number of retrieved passages per query | 5 |
+| Chunk Size | Character count per document chunk | 1000 |
+| Chunk Overlap | Overlap between consecutive chunks | 150 |
+| Top-K | Number of retrieved passages per query | 6 |
 | Practice Area | Presets that tune retrieval for specific legal domains | General |
 | Jurisdiction | Auto-detected from documents or manually selectable — tailors prompts to jurisdiction-specific legal terminology | Auto |
-| Theme | Light or dark appearance | System |
+| Theme | Light or dark appearance | Dark |
 
 ## Keyboard Shortcuts
 
@@ -92,7 +92,7 @@ Justice AI is designed with privacy as a core principle:
 - **Documents never leave your machine.** Parsing, chunking, and embedding all happen locally.
 - **LLM inference is local.** The Saul-7B model runs on-device via llama.cpp -- no cloud API calls.
 - **No telemetry.** The app makes no network requests after the initial model download.
-- **Encrypted storage.** Chat history is stored with AES encryption on disk.
+- **Local storage only.** Chat history and settings are stored in your platform's app data directory.
 
 ## Troubleshooting
 

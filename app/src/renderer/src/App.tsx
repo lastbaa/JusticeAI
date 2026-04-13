@@ -12,6 +12,7 @@ import {
   DocumentRole,
   EntityEntry,
   FileInfo,
+  FileLoadProgress,
   InferenceMode,
 } from '../../../../shared/src/types'
 import { v4 as uuidv4 } from 'uuid'
@@ -60,6 +61,7 @@ export default function App(): JSX.Element {
   const [chatMode, setChatMode] = useState(false)
   const [sessionCreatedAt, setSessionCreatedAt] = useState<number>(() => Date.now())
   const [isLoading, setIsLoading] = useState(false)
+  const [fileLoadProgress, setFileLoadProgress] = useState<FileLoadProgress | null>(null)
   const [isQuerying, setIsQuerying] = useState(false)
   const [queryPhase, setQueryPhase] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -101,6 +103,20 @@ export default function App(): JSX.Element {
   useEffect(() => {
     isBusyRef.current = isQuerying || showModelSetup
   }, [isQuerying, showModelSetup])
+
+  // ── File load progress listener ─────────────────────────────────
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    window.api.onFileLoadProgress((p) => {
+      if (p.stage === 'complete' && p.fileIndex === p.totalFiles - 1) {
+        // Last file complete — clear progress after brief delay
+        setTimeout(() => setFileLoadProgress(null), 800)
+      } else {
+        setFileLoadProgress(p)
+      }
+    }).then((fn) => { unlisten = fn })
+    return () => { unlisten?.() }
+  }, [])
 
   // ── Toast helpers ──────────────────────────────────────────────
   function addToast(type: ToastMessage['type'], message: string): void {
@@ -298,6 +314,7 @@ export default function App(): JSX.Element {
   async function handleLoadPaths(paths: string[]): Promise<void> {
     setLoadError(null)
     setIsLoading(true)
+    setFileLoadProgress(null)
     try {
       const loaded = await window.api.loadFiles(paths, currentCaseId ?? undefined)
       if (loaded.length === 0) {
@@ -327,6 +344,7 @@ export default function App(): JSX.Element {
       }
     } finally {
       setIsLoading(false)
+      setFileLoadProgress(null)
     }
   }
 
@@ -990,6 +1008,10 @@ export default function App(): JSX.Element {
         e.preventDefault()
         setShowCommandPalette((v) => !v)
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault()
+        handleNewChat()
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
@@ -1078,6 +1100,7 @@ export default function App(): JSX.Element {
           isQuerying={isQuerying}
           queryPhase={queryPhase}
           isLoading={isLoading}
+          fileLoadProgress={fileLoadProgress}
           loadError={loadError}
           chatMode={chatMode}
           sessionName={sessionCustomName ?? makeSessionName(messages.filter((m) => !m.isGreeting))}

@@ -64,7 +64,7 @@
   --error: #d1242f;
   --success: #1a7f37;
 
-  --placeholder: rgb(0 0 0 / 0.4);
+  --placeholder: rgb(0 0 0 / 0.5);
 
   --backdrop: rgba(0, 0, 0, 0.3);
   --shadow: rgba(0, 0, 0, 0.1);
@@ -174,7 +174,7 @@ button {
 .btn-surface {
   background: var(--surface);
   border: 1px solid rgb(var(--ov) / 0.06);
-  color: rgb(var(--ov) / 0.38);
+  color: rgb(var(--ov) / 0.5);
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .btn-surface:hover {
@@ -186,13 +186,13 @@ button {
 .btn-outline {
   background: transparent;
   border: 1px solid rgb(var(--ov) / 0.10);
-  color: rgb(var(--ov) / 0.35);
+  color: rgb(var(--ov) / 0.5);
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .btn-outline:hover {
   background: rgb(var(--ov) / 0.03);
   border-color: rgb(var(--ov) / 0.16);
-  color: rgb(var(--ov) / 0.6);
+  color: rgb(var(--ov) / 0.7);
 }
 
 /* ── Keyframes ─────────────────────────────────────────────────────────────── */
