@@ -273,7 +273,7 @@ The confusable_lease and dense_nda fixtures are doing exactly what they were des
 Each returns `Vec<AssertionResult>` with pass/fail, type, and human-readable message.
 
 ### Tier 2: Live LLM Eval (manual, ~5-10 min)
-Run with `--mode full`. Calls `ask_saul` for each case, applies Tier 1 assertions on the actual generated answer. Slow but catches prompt regressions and LLM reasoning failures.
+Run with `--mode full`. Calls `ask_llm` for each case, applies Tier 1 assertions on the actual generated answer. Slow but catches prompt regressions and LLM reasoning failures.
 
 ### Tier 3: LLM-as-Judge (stretch goal, ~$0.30/run)
 For the 10 hardest open-ended cases, call an LLM judge with a rubric:

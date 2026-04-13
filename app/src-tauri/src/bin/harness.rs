@@ -1629,7 +1629,7 @@ async fn main() {
     if context.len() > 3000 { println!("\n... [truncated, {} total chars]", context.len()); }
 
     // -- LLM INFERENCE --------------------------------------------------------
-    let gguf_path = model_dir.join("saul.gguf");
+    let gguf_path = model_dir.join("qwen3.gguf");
     if skip_llm {
         println!("\n[--skip-llm flag set, skipping LLM]");
         return;
@@ -1640,14 +1640,14 @@ async fn main() {
     }
 
     print_banner("LLM RESPONSE");
-    println!("Running ask_saul...\n");
+    println!("Running ask_llm...\n");
 
     let model_cache: Arc<Mutex<Option<llama_cpp_2::model::LlamaModel>>> =
         Arc::new(Mutex::new(None));
     let history: Vec<(String, String)> = Vec::new();
 
     let inference_params = pipeline::InferenceParams::from_mode(&InferenceMode::Balanced);
-    match pipeline::ask_saul(&query, &context, &history, &model_dir, model_cache, |tok| {
+    match pipeline::ask_llm(&query, &context, &history, &model_dir, model_cache, |tok| {
         print!("{tok}");
         use std::io::Write;
         std::io::stdout().flush().ok();

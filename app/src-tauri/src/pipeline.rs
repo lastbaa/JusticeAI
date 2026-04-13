@@ -222,32 +222,35 @@ pub fn extract_chunk_section_header(text: &str) -> Option<String> {
 
 pub const GGUF_MIN_SIZE: u64 = 4_000_000_000;
 
-pub const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instruct-v1-GGUF/resolve/main/Saul-Instruct-v1.Q4_K_M.gguf";
+pub const QWEN3_GGUF_URL: &str = "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf";
 
-/// Rules-only system prompt — document context goes in the user turn so Llama 2
-/// pays full attention to it (system-prompt content is under-weighted by the model).
+/// Legal RAG system prompt for Qwen3-8B (Balanced/Extended modes).
+/// Document context goes in the user turn; system prompt contains only rules.
 pub const RULES_PROMPT: &str = "\
-You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\n\n\
-RULES:\n\
-1. Answer using ONLY the provided document excerpts. If the answer is not in the context, say: \"This information is not present in the provided documents.\"\n\
-2. Cite every claim as [filename, p. N]. Reproduce numbers, dates, and names EXACTLY as written.\n\
-3. Never invent facts, case numbers, statutes, or amounts not in the context.\n\
-4. Be direct. Bold key terms. Use bullets for multiple facts.\n\
-5. State each fact only once. Do not repeat yourself.\n\n\
-Example:\n\
-Q: What is the lease term?\n\
-A: The lease term is **12 months**, commencing **January 1, 2024** and ending **December 31, 2024** [residential_lease.pdf, p. 3].\n\n\
-Q: Who are the parties?\n\
-A: - **Landlord**: Robert James Smith [lease.pdf, p. 1]\n\
-- **Tenant**: Maria Garcia [lease.pdf, p. 1]";
+You are Justice AI, a legal document analyst. You answer questions using ONLY the document excerpts provided below.\n\n\
+LEGAL ANALYSIS FRAMEWORK:\n\
+When analyzing documents, follow this structure:\n\
+1. IDENTIFY the relevant legal elements: parties, obligations, dates, amounts, conditions, and defined terms\n\
+2. EXTRACT the specific language from the provided excerpts that answers the question\n\
+3. CITE every factual claim as [filename, p. N] — use the exact filename shown in the document headers\n\
+4. When multiple documents are provided, you MUST address ALL of them — organize your response by document or by topic\n\n\
+MANDATORY RULES:\n\
+- Answer ONLY from the provided document excerpts. If information is absent, state: \"This information is not present in the provided documents.\"\n\
+- Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written in the source — never round, paraphrase, or approximate\n\
+- NEVER fabricate case citations, statute numbers, court names, party names, or legal authorities not present in the context\n\
+- NEVER infer or assume facts not explicitly stated — if a detail is missing, acknowledge the gap\n\
+- When documents contain conflicting information, note the discrepancy and cite both sources\n\
+- Bold key terms and amounts. Use bullet points for multiple facts\n\
+- State each fact once — do not repeat yourself";
 
-/// Shorter rules prompt for Quick mode — fewer examples, less preamble.
+/// Shorter rules prompt for Quick mode.
 pub const RULES_PROMPT_QUICK: &str = "\
-You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\n\n\
-1. If the answer is not in the context, state: \"This information is not present in the provided documents.\"\n\
-2. Cite every claim as [filename, p. N].\n\
-3. Reproduce numbers, dates, and names EXACTLY as written.\n\
-4. Be direct. No preambles.\n";
+You are Justice AI, a legal document analyst. Answer ONLY from the provided document excerpts.\n\
+Rules:\n\
+1. If not in context: \"This information is not present in the provided documents.\"\n\
+2. Cite as [filename, p. N]. Reproduce numbers/dates/names EXACTLY.\n\
+3. Never fabricate citations, names, or legal authorities not in the context.\n\
+4. 1-3 sentences. Start with the fact. Cite. Stop.";
 
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
@@ -264,34 +267,34 @@ pub struct InferenceParams {
 }
 
 impl InferenceParams {
-    /// Context window budget notes (Saul-7B: n_ctx = 8192):
-    ///   prompt_tokens ≈ (sys_prompt + context + question + overhead) / 2.5
-    ///   gen_tokens = 8192 - prompt_tokens
-    /// A runtime cap in ask_saul ensures we never overshoot.
+    /// Context window budget notes (Qwen3-8B: n_ctx = 32768):
+    ///   prompt_tokens ≈ (sys_prompt + context + question + overhead)
+    ///   gen_tokens = 32768 - prompt_tokens
+    /// A runtime cap in ask_llm ensures we never overshoot.
     pub fn from_mode(mode: &InferenceMode) -> Self {
         match mode {
             InferenceMode::Quick => Self {
-                max_new_tokens: 384,
-                temperature: 0.05,
-                system_prompt_suffix: "\nStart your answer with the specific fact or value requested. Answer in 1-3 sentences. Cite the source. Then stop — do not add anything else.",
+                max_new_tokens: 512,
+                temperature: 0.7,
+                system_prompt_suffix: "\nAnswer in 1-3 sentences. Start with the specific fact requested. Cite the source. Stop.",
                 system_prompt_override: None,
                 timeout_secs: 30,
                 is_quick: true,
             },
             InferenceMode::Balanced => Self {
-                max_new_tokens: 1024,
-                temperature: 0.15,
-                system_prompt_suffix: "\nProvide a thorough answer covering all relevant details from the documents. Use bullet points for multiple facts. Cite every claim.",
+                max_new_tokens: 2048,
+                temperature: 0.7,
+                system_prompt_suffix: "\nProvide a thorough answer covering all relevant details. Use bullet points for multiple facts. Cite every claim.",
                 system_prompt_override: None,
-                timeout_secs: 60,
+                timeout_secs: 90,
                 is_quick: false,
             },
             InferenceMode::Extended => Self {
-                max_new_tokens: 1536,
-                temperature: 0.10,
-                system_prompt_suffix: "\nProvide a detailed analysis. Organize your response clearly with relevant sections. Cite every claim.",
+                max_new_tokens: 3072,
+                temperature: 0.7,
+                system_prompt_suffix: "\nProvide a detailed legal analysis. Organize with clear sections. Cross-reference documents where applicable. Cite every claim.",
                 system_prompt_override: None,
-                timeout_secs: 120,
+                timeout_secs: 180,
                 is_quick: false,
             },
         }
@@ -314,7 +317,8 @@ pub struct RetrievalModeParams {
 }
 
 impl RetrievalModeParams {
-    /// Budget = (8192 - max_new_tokens - ~600 sys/overhead) * 2.5 chars/token.
+    /// Budget = (32768 - max_new_tokens - ~600 sys/overhead) * 2.5 chars/token.
+    /// Qwen3-8B has 32K context so budgets are generous.
     /// Quick:    use 5000/5500 (fast, smaller context)
     /// Balanced: use 10000/11000
     /// Extended: use 10000/11000 (same gen budget, more sources)
@@ -327,7 +331,7 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 5_500,
                 mmr_lambda: 0.85,
                 cosine_floor: 0.20,
-                jaccard_threshold: 0.70,
+                jaccard_threshold: 0.90,
                 adaptive_k_gap: 0.01,
             },
             InferenceMode::Balanced => Self {
@@ -337,7 +341,7 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 11_000,
                 mmr_lambda: 0.70,
                 cosine_floor: 0.15,
-                jaccard_threshold: 0.80,
+                jaccard_threshold: 0.92,
                 adaptive_k_gap: 0.008,
             },
             InferenceMode::Extended => Self {
@@ -347,7 +351,7 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 11_000,
                 mmr_lambda: 0.55,
                 cosine_floor: 0.12,
-                jaccard_threshold: 0.85,
+                jaccard_threshold: 0.95,
                 adaptive_k_gap: 0.005,
             },
         }
@@ -852,8 +856,8 @@ pub fn format_history(history: &[(String, String)]) -> String {
     s
 }
 
-/// Run LLM inference on Saul-7B-Instruct with the given question, retrieved context, and chat history.
-pub async fn ask_saul(
+/// Run LLM inference on Qwen3-8B with the given question, retrieved context, and chat history.
+pub async fn ask_llm(
     user_question: &str,
     context: &str,
     history: &[(String, String)],
@@ -871,7 +875,7 @@ pub async fn ask_saul(
     };
     use std::num::NonZeroU32;
 
-    let gguf_path = model_dir.join("saul.gguf");
+    let gguf_path = model_dir.join("qwen3.gguf");
 
     // Build history prefix (empty string when there are no prior turns).
     let history_prefix = if history.is_empty() {
@@ -892,7 +896,8 @@ pub async fn ask_saul(
     } else if history_prefix.is_empty() {
         format!(
             "Below are excerpts from the user's loaded legal documents. \
-Answer the question using ONLY these excerpts.\n\
+Answer the question using ONLY these excerpts. \
+Address information from EVERY document listed below — do not skip any.\n\
 \n=== DOCUMENT CONTEXT ===\n\
 {context}\n\
 === END CONTEXT ===\n\
@@ -902,7 +907,8 @@ Answer the question using ONLY these excerpts.\n\
         format!(
             "{history_prefix}\
 Below are excerpts from the user's loaded legal documents. \
-Answer the current question using ONLY these excerpts.\n\
+Answer the current question using ONLY these excerpts. \
+Address information from EVERY document listed below — do not skip any.\n\
 \n=== DOCUMENT CONTEXT ===\n\
 {context}\n\
 === END CONTEXT ===\n\
@@ -927,10 +933,39 @@ Answer the current question using ONLY these excerpts.\n\
     let date_line = format!("Today's date is {}.", now.format("%B %d, %Y"));
     let sys_prompt = format!("{}\n{}", date_line, sys_prompt_cached);
 
-    // Assemble Mistral chat template: [INST] ... [/INST]
-    // "Answer:" after [/INST] primes the assistant turn to produce a direct
-    // response instead of echoing the prompt or asking clarifying questions.
-    let prompt = format!("[INST] {sys_prompt}\n\n{user_content} [/INST] Answer:");
+    // For multi-document queries, inject explicit instruction in the user turn
+    // to address all documents (Qwen3 follows user-turn instructions well).
+    let user_content = if context.contains("DOCUMENTS PROVIDED (") {
+        let mut doc_names: Vec<String> = Vec::new();
+        for line in context.lines() {
+            if let Some(rest) = line.strip_prefix('[') {
+                if let Some(name_part) = rest.split(']').nth(1) {
+                    let name = name_part.trim();
+                    if !name.is_empty() {
+                        doc_names.push(name.to_string());
+                    }
+                }
+            }
+        }
+        if doc_names.len() >= 2 {
+            let doc_list = doc_names.join(", ");
+            format!(
+                "{user_content}\n\nIMPORTANT: Your response MUST address information from ALL of the following documents: {doc_list}. Do not skip any document."
+            )
+        } else {
+            user_content
+        }
+    } else {
+        user_content
+    };
+
+    // Assemble ChatML prompt for Qwen3-8B.
+    // Empty <think></think> disables thinking mode (saves tokens, improves RAG speed).
+    let prompt = format!(
+        "<|im_start|>system\n{sys_prompt}<|im_end|>\n\
+         <|im_start|>user\n{user_content}<|im_end|>\n\
+         <|im_start|>assistant\n<think>\n\n</think>\n\n"
+    );
 
     tokio::task::spawn_blocking(move || {
         // Get (or lazily initialize) the global llama.cpp backend.
@@ -945,30 +980,30 @@ Answer the current question using ONLY these excerpts.\n\
             .map_err(|e| format!("Model mutex poisoned: {e}"))?;
 
         if model_guard.is_none() {
-            log::info!("Loading Saul model from disk (first query)…");
+            log::info!("Loading Qwen3 model from disk (first query)…");
             // Try GPU-accelerated first (Metal on macOS, Vulkan on Linux/Windows).
             // If GPU loading fails (e.g. no Vulkan driver), fall back to CPU-only.
             let model_params_gpu = LlamaModelParams::default().with_n_gpu_layers(100);
             let model = match LlamaModel::load_from_file(backend, &gguf_path, &model_params_gpu) {
                 Ok(m) => {
-                    log::info!("Saul model loaded with GPU acceleration.");
+                    log::info!("Qwen3 model loaded with GPU acceleration.");
                     m
                 }
                 Err(gpu_err) => {
                     log::warn!("GPU model load failed ({gpu_err}), retrying with CPU-only…");
                     let model_params_cpu = LlamaModelParams::default().with_n_gpu_layers(0);
                     LlamaModel::load_from_file(backend, &gguf_path, &model_params_cpu)
-                        .map_err(|e| format!("Failed to load Saul model (CPU fallback): {e}"))?
+                        .map_err(|e| format!("Failed to load Qwen3 model (CPU fallback): {e}"))?
                 }
             };
             *model_guard = Some(model);
-            log::info!("Saul model loaded and cached.");
+            log::info!("Qwen3 model loaded and cached.");
         }
 
         let model = model_guard.as_ref()
-            .ok_or_else(|| "Saul model unavailable after initialization".to_string())?;
+            .ok_or_else(|| "Qwen3 model unavailable after initialization".to_string())?;
 
-        let n_ctx_size: u32 = 8192;
+        let n_ctx_size: u32 = 32768;
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(n_ctx_size));
         let mut ctx = model
@@ -983,9 +1018,9 @@ Answer the current question using ONLY these excerpts.\n\
         let system_tokens = pre_tokenize(model, &sys_prompt);
         let question_tokens = pre_tokenize(model, &user_content);
 
-        // Overhead: [INST], [/INST] tags, newlines, BOS token
+        // Overhead: ChatML tags, newlines, BOS token
         let overhead = 50;
-        let max_prompt_tokens = n_ctx_size as usize - 1536; // reserve 1536 for generation (matches Extended mode budget)
+        let max_prompt_tokens = n_ctx_size as usize - 3072; // reserve 3072 for generation (matches Extended mode budget)
         let component_cost = system_tokens.len() + question_tokens.len() + overhead;
 
         if component_cost > max_prompt_tokens {
@@ -1050,13 +1085,11 @@ Answer the current question using ONLY these excerpts.\n\
             chunk_start = chunk_end;
         }
 
-        // Sampling chain: repetition penalty → top-k → min-p → top-p → temperature → dist.
-        // Conservative settings (low temp, high top-p) to keep legal citations accurate.
+        // Sampling chain for Qwen3: top-k → top-p → temperature → dist.
+        // No penalties needed — Qwen3 doesn't need repeat_penalty.
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(64, 1.10, 0.3, 0.0),
-            LlamaSampler::top_k(40),
-            LlamaSampler::min_p(0.10, 1),
-            LlamaSampler::top_p(0.90, 1),
+            LlamaSampler::top_k(20),
+            LlamaSampler::top_p(0.80, 1),
             LlamaSampler::temp(inference_params.temperature),
             LlamaSampler::dist(42),
         ]);
@@ -1110,7 +1143,7 @@ Answer the current question using ONLY these excerpts.\n\
             let token_piece = String::from_utf8_lossy(&output_bytes).into_owned();
 
             // 3. String-based EOS fallback
-            if token_piece.contains("</s>") || token_piece.contains("<|endoftext|>") {
+            if token_piece.contains("</s>") || token_piece.contains("<|endoftext|>") || token_piece.contains("<|im_end|>") {
                 log::info!("EOS detected via string match ('{}') — halting generation.", token_piece.trim());
                 break;
             }
@@ -1143,7 +1176,8 @@ Answer the current question using ONLY these excerpts.\n\
             // starting a new [INST] turn, or emitting the context delimiters).
             if response.len() > 100 {
                 let tail = &response[response.len().saturating_sub(200)..];
-                if tail.contains("[INST]")
+                if tail.contains("<|im_start|>")
+                    || tail.contains("<|im_end|>")
                     || tail.contains("=== DOCUMENT CONTEXT ===")
                     || tail.contains("=== END CONTEXT ===")
                     || tail.contains("QUESTION:")
@@ -1205,10 +1239,16 @@ Answer the current question using ONLY these excerpts.\n\
             .trim_start_matches("answer:")
             .trim()
             .trim_end_matches("</s>")
-            .trim_end_matches("[INST]")
-            .trim_end_matches("[/INST]")
+            .trim_end_matches("<|im_end|>")
+            .trim_end_matches("<|im_start|>")
+            .trim_end_matches("[INST]")    // keep for safety
+            .trim_end_matches("[/INST]")   // keep for safety
             .trim()
             .to_string();
+
+        // Strip any leaked <think>...</think> blocks from the response.
+        let think_re = Regex::new(r"(?s)<think>.*?</think>").unwrap();
+        let answer = think_re.replace_all(&answer, "").trim().to_string();
 
         let answer: String = answer
             .chars()
@@ -2932,8 +2972,8 @@ mod tests {
     #[test]
     fn inference_params_quick() {
         let p = InferenceParams::from_mode(&InferenceMode::Quick);
-        assert_eq!(p.max_new_tokens, 384);
-        assert!((p.temperature - 0.05).abs() < 0.01);
+        assert_eq!(p.max_new_tokens, 512);
+        assert!((p.temperature - 0.7).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 30);
         assert!(p.is_quick);
@@ -2942,19 +2982,19 @@ mod tests {
     #[test]
     fn inference_params_balanced() {
         let p = InferenceParams::from_mode(&InferenceMode::Balanced);
-        assert_eq!(p.max_new_tokens, 1024);
-        assert!((p.temperature - 0.15).abs() < 0.01);
+        assert_eq!(p.max_new_tokens, 2048);
+        assert!((p.temperature - 0.7).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
-        assert_eq!(p.timeout_secs, 60);
+        assert_eq!(p.timeout_secs, 90);
     }
 
     #[test]
     fn inference_params_extended() {
         let p = InferenceParams::from_mode(&InferenceMode::Extended);
-        assert_eq!(p.max_new_tokens, 1536);
-        assert!((p.temperature - 0.10).abs() < 0.01);
+        assert_eq!(p.max_new_tokens, 3072);
+        assert!((p.temperature - 0.7).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
-        assert_eq!(p.timeout_secs, 120);
+        assert_eq!(p.timeout_secs, 180);
     }
 
     #[test]

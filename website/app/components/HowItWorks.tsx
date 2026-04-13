@@ -126,7 +126,7 @@ export default function HowItWorks() {
             </div>
             <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
               <span className="text-white font-medium">Everything runs on your machine — nothing is ever sent anywhere.</span>{' '}
-              Document parsing, vector search, and AI answer generation all happen locally using the Saul-7B legal model. No accounts, no API keys, no network required after the one-time model download.
+              Document parsing, vector search, and AI answer generation all happen locally using the Qwen3-8B model. No accounts, no API keys, no network required after the one-time model download.
             </p>
           </div>
         </Reveal>

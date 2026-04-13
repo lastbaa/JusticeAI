@@ -23,7 +23,7 @@ const categories = [
     details: [
       'Hybrid retrieval: BM25 + cosine similarity with Reciprocal Rank Fusion',
       'MMR reranking for diverse, non-redundant results',
-      'On-device LLM inference (Saul-7B) — zero cloud dependency',
+      'On-device LLM inference (Qwen3-8B) — zero cloud dependency',
       'Legal synonym expansion for domain-aware keyword search',
       'Three inference modes (Brief, Standard, Discovery) with per-query depth control',
       'Auto-generated fact sheets, entity registry, and hallucination detection',

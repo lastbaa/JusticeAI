@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 
 const GGUF_MIN_SIZE: u64 = 4_000_000_000;
 
-/// Check whether the local Saul GGUF model is present and complete.
+/// Check whether the local Qwen3 GGUF model is present and complete.
 /// Reuses the OllamaStatus type for compatibility with existing IPC plumbing.
 #[tauri::command]
 pub async fn check_ollama(
@@ -12,7 +12,7 @@ pub async fn check_ollama(
 ) -> Result<OllamaStatus, String> {
     let gguf_path = {
         let s = state.lock().await;
-        s.model_dir.join("saul.gguf")
+        s.model_dir.join("qwen3.gguf")
     };
 
     let ready = gguf_path
@@ -25,7 +25,7 @@ pub async fn check_ollama(
         models: vec![],
         has_llm_model: ready,
         has_embed_model: ready,
-        llm_model_name: "Saul-7B-Instruct-v1 (local)".to_string(),
-        embed_model_name: "all-MiniLM-L6-v2 (local)".to_string(),
+        llm_model_name: "Qwen3-8B (local)".to_string(),
+        embed_model_name: "BGE-small-en-v1.5 (local)".to_string(),
     })
 }

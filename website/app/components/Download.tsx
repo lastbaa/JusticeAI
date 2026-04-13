@@ -24,7 +24,7 @@ const platforms: {
     installSteps: [
       'Open the .dmg and drag Justice AI into your Applications folder, then eject the disk image.',
       'macOS blocks apps not from the App Store on first launch. Double-click to open — if blocked, go to System Settings → Privacy & Security → scroll down → click "Open Anyway". On macOS 12–13 you can also right-click the icon and choose Open.',
-      'Justice AI automatically downloads the Saul legal AI model (~4.5 GB) on first open. This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
+      'Justice AI automatically downloads the Qwen3-8B language model (~5 GB) on first open. This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
       'Drag in your PDFs or Word documents, ask any legal question in plain English, and get cited answers grounded in your own files.',
     ],
     icon: (
@@ -42,7 +42,7 @@ const platforms: {
     installSteps: [
       'Run the installer (.exe). Windows SmartScreen may warn about an unrecognized publisher — click "More info" → "Run anyway".',
       'Justice AI installs to your Program Files folder. A desktop shortcut is created automatically.',
-      'On first launch the app downloads the Saul legal AI model (~4.5 GB). This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
+      'On first launch the app downloads the Qwen3-8B language model (~5 GB). This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
       'Drag in your PDFs or Word documents, ask any legal question in plain English, and get cited answers grounded in your own files.',
     ],
     icon: (
@@ -60,7 +60,7 @@ const platforms: {
     installSteps: [
       'Download the .AppImage file. Make it executable: chmod +x Justice.AI_1.4.0_amd64.AppImage, then double-click or run it from a terminal.',
       'If your desktop environment supports it, you can right-click the AppImage → Properties → Permissions → "Allow executing file as program".',
-      'On first launch the app downloads the Saul legal AI model (~4.5 GB). This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
+      'On first launch the app downloads the Qwen3-8B language model (~5 GB). This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
       'Drag in your PDFs or Word documents, ask any legal question in plain English, and get cited answers grounded in your own files.',
     ],
     icon: (
@@ -76,7 +76,7 @@ const requirements = [
   { label: 'Windows', value: 'Windows 10+ · x64 · Vulkan-compatible GPU recommended', highlight: false },
   { label: 'Linux', value: 'Ubuntu 22.04+ / Fedora 38+ · x64 · AppImage', highlight: false },
   { label: 'RAM', value: '8 GB minimum · 16 GB recommended for best performance', highlight: false },
-  { label: 'Storage', value: '~5 GB total (app + Saul model, downloaded once)', highlight: false },
+  { label: 'Storage', value: '~6 GB total (app + Qwen3 model, downloaded once)', highlight: false },
   { label: 'Network', value: 'Only on first launch to download the model — all AI runs fully offline after that', highlight: true },
   { label: 'Accounts', value: 'None required — no sign-up, no API keys, no subscriptions', highlight: false },
 ]
@@ -90,7 +90,7 @@ const setupSteps = [
   {
     number: '02',
     title: 'One-Time Model Download',
-    body: 'First launch downloads Saul-7B — the legal AI model (~4.5 GB). This happens once. After that, Justice AI runs fully offline, forever, with no internet required.',
+    body: 'First launch downloads Qwen3-8B — the language model (~5 GB). This happens once. After that, Justice AI runs fully offline, forever, with no internet required.',
   },
   {
     number: '03',
@@ -394,7 +394,7 @@ export default function Download() {
 
               <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.3)' }}>
                 <span className="text-white font-medium">Everything runs on your machine.</span>{' '}
-                The app installer is under 20 MB. First launch downloads Saul-7B once (~4.5 GB) — after that, document parsing, vector search, and AI answers run entirely offline. No accounts, no API keys, no data ever touches the cloud.
+                The app installer is under 20 MB. First launch downloads Qwen3-8B once (~5 GB) — after that, document parsing, vector search, and AI answers run entirely offline. No accounts, no API keys, no data ever touches the cloud.
               </p>
             </div>
           </div>

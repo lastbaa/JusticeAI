@@ -5,7 +5,7 @@ import { Typewriter } from './Typewriter'
 const stats = [
   { value: '100%', label: 'On-Device Processing' },
   { value: '17', label: 'File Formats Supported' },
-  { value: '7B', label: 'Parameter Legal AI Model' },
+  { value: '8B', label: 'Parameter Legal AI Model' },
 ]
 
 export default function Hero() {
