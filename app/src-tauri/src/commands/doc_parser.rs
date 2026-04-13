@@ -106,7 +106,13 @@ fn text_quality_score(text: &str) -> f64 {
         0.5
     };
 
-    ratio * word_score
+    // Penalize text that's mostly punctuation/symbols (failed CMap font decoding).
+    // Real text should be at least 25% alphabetic characters.
+    let alpha = text.chars().filter(|c| c.is_alphabetic()).count() as f64;
+    let alpha_ratio = alpha / total_chars;
+    let alpha_score = if alpha_ratio < 0.15 { 0.2 } else if alpha_ratio < 0.25 { 0.6 } else { 1.0 };
+
+    ratio * word_score * alpha_score
 }
 
 /// Filter out form fields whose values already appear in the page text.

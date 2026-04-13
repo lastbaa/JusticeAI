@@ -15,10 +15,12 @@ pub struct AssertionResult {
 pub enum AssertionType {
     CitationFormat,
     CitationFilename,
+    CitationPage,
     NumberExactness,
     Blocklist,
     Hallucination,
     FabricatedEntity,
+    Misattribution,
 }
 
 /// Common English stopwords used to filter key content words.

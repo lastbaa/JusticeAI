@@ -773,6 +773,18 @@ async fn process_file(
                 );
                 return false;
             }
+            // Second gate: reject chunks that are mostly punctuation/symbols
+            // (indicates failed CMap font decoding — glyph IDs mapped to wrong chars).
+            let alpha_count = chunk.text.chars().filter(|c| c.is_alphabetic()).count();
+            let alpha_ratio = alpha_count as f32 / total_chars as f32;
+            if alpha_ratio < 0.15 && total_chars > 20 {
+                log::warn!(
+                    "Skipping chunk {} — only {:.0}% alphabetic chars (likely garbled font encoding)",
+                    chunk.chunk_index,
+                    alpha_ratio * 100.0
+                );
+                return false;
+            }
             true
         })
         .collect();
@@ -925,11 +937,15 @@ fn allocate_chunk_budgets(
         return vec![];
     }
 
+    // Ensure minimums can't exceed the total budget when there are many chunks.
+    // E.g. 10 chunks with total_budget=1500 and min_per_chunk=200 → effective_min=150.
+    let effective_min = min_per_chunk.min(total_budget / scores.len().max(1));
+
     let total_score: f64 = scores.iter().map(|s| *s as f64).sum();
     if total_score <= 0.0 {
         // Equal allocation
         let per = total_budget / scores.len();
-        return vec![per.max(min_per_chunk); scores.len()];
+        return vec![per.max(effective_min); scores.len()];
     }
 
     let mut budgets: Vec<usize> = scores
@@ -937,7 +953,7 @@ fn allocate_chunk_budgets(
         .map(|s| {
             let ratio = *s as f64 / total_score;
             let budget = (ratio * total_budget as f64) as usize;
-            budget.max(min_per_chunk)
+            budget.max(effective_min)
         })
         .collect();
 
@@ -949,7 +965,7 @@ fn allocate_chunk_budgets(
             if excess == 0 {
                 break;
             }
-            let reduction = excess.min(budgets[i].saturating_sub(min_per_chunk));
+            let reduction = excess.min(budgets[i].saturating_sub(effective_min));
             budgets[i] -= reduction;
             excess -= reduction;
         }
@@ -1125,7 +1141,9 @@ pub async fn query(
             resolved_jurisdiction.as_ref(),
             chat_params,
         ).await?;
-        let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]);
+        // No chunks available (general question with docs loaded) — cap at 0.6
+        // so ungrounded answers don't report artificially high confidence.
+        let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]).min(0.6);
         return Ok(QueryResult {
             answer: general_answer,
             citations: vec![],
@@ -1235,7 +1253,9 @@ pub async fn query(
                 chat_params,
             )
             .await?;
-            let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]);
+            // No chunks available (no docs loaded) — cap at 0.6
+            // so ungrounded answers don't report artificially high confidence.
+            let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]).min(0.6);
             return Ok(QueryResult {
                 answer: general_answer,
                 citations: vec![],
@@ -1406,7 +1426,9 @@ pub async fn query(
                 resolved_jurisdiction.as_ref(),
                 chat_params,
             ).await?;
-            let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]);
+            // No chunks available (general knowledge fallback) — cap at 0.6
+            // so ungrounded answers don't report artificially high confidence.
+            let answer_confidence = crate::assertions::compute_confidence(&general_answer, &[]).min(0.6);
             return Ok(QueryResult {
                 answer: general_answer,
                 citations: vec![],
@@ -1441,7 +1463,7 @@ pub async fn query(
     }
 
     // ── Priority-weighted context assembly ────────────────────────────────────
-    // Saul-7B has a 4096-token context. Budget is mode-dependent (see RetrievalModeParams).
+    // Saul-7B has an 8192-token context. Budget is mode-dependent (see RetrievalModeParams).
     // When jurisdiction is active, reduce budget to account for extra prompt tokens.
     let max_context_chars: usize = {
         let base = if resolved_jurisdiction.is_some() {
@@ -1449,7 +1471,9 @@ pub async fn query(
         } else {
             retrieval_params.max_context_chars_no_jur
         };
-        let prompt_overhead_chars = 1800; // System prompt + question + history + formatting
+        // Worst-case overhead: system prompt (~800) + Extended-mode instructions (~600)
+        // + jurisdiction clause (~200) + 2-turn history (~1000) + formatting (~400) ≈ 3000
+        let prompt_overhead_chars = 3000;
         base.saturating_sub(prompt_overhead_chars)
     };
     let separator = "\n\n---\n\n";
@@ -1552,6 +1576,16 @@ pub async fn query(
         }
         if !doc_lines.is_empty() {
             context.push_str(&format!("LOADED DOCUMENTS:\n{}\n\n", doc_lines.join("\n")));
+        }
+    }
+
+    // Cap metadata at 40% of budget so at least 60% remains for document chunks
+    let max_metadata = max_context_chars * 2 / 5;
+    if context.len() > max_metadata {
+        context.truncate(max_metadata);
+        // Avoid cutting mid-line
+        if let Some(pos) = context.rfind('\n') {
+            context.truncate(pos + 1);
         }
     }
 
@@ -1699,13 +1733,13 @@ pub async fn query(
     let not_found = answer.is_empty()
         || answer_lower.contains("i could not find information")
         || answer_lower.contains("could not find information about this")
-        || answer_lower.contains("documents do not contain");
+        || answer_lower.starts_with("the documents do not contain")
+        || (answer_lower.contains("documents do not contain") && answer.len() < 150);
 
     // Always build citations from the retrieved chunks — even on not_found,
     // showing the sources lets the user investigate the document directly.
-    // Normalize scores to 0–1 so the frontend can display meaningful strength
-    // labels (raw RRF scores are tiny, ~0.01–0.03, which breaks threshold UIs).
-    let max_score = results.iter().map(|(s, _)| *s).fold(0.0f32, f32::max);
+    // Normalize scores against theoretical RRF max (0.035 for 2-list fusion)
+    // so the frontend gets a 0–1 scale proportional to actual retrieval quality.
     let citations: Vec<Citation> = results
         .iter()
         .map(|(score, meta)| Citation {
@@ -1714,7 +1748,7 @@ pub async fn query(
             page_number: meta.page_number,
             excerpt: RagState::best_excerpt(&meta.text, &question),
             summary: RagState::summarize_chunk(&meta.text),
-            score: if max_score > 0.0 { score / max_score } else { 0.0 },
+            score: (score / 0.035).min(1.0),
         })
         .collect();
 
@@ -1735,6 +1769,49 @@ pub async fn query(
     let mut assertions = crate::assertions::check_citations(&answer, Some(&known_files));
     assertions.extend(crate::assertions::check_no_hallucination(&answer, &chunk_texts));
     assertions.extend(crate::assertions::check_fabricated_entities(&answer, &chunk_texts));
+
+    // ── Citation page validation ─────────────────────────────────────────────
+    // Build filename → page count map from the file registry so we can flag
+    // citations that reference pages beyond the document's actual length.
+    {
+        let s = state.lock().await;
+        let file_page_counts: std::collections::HashMap<String, usize> = s
+            .file_registry
+            .values()
+            .map(|fi| (fi.file_name.clone(), fi.total_pages as usize))
+            .collect();
+        let page_violations = crate::assertions::check_citation_pages(&answer, &file_page_counts);
+        for msg in page_violations {
+            assertions.push(crate::assertions::AssertionResult {
+                passed: false,
+                assertion_type: crate::assertions::AssertionType::CitationPage,
+                message: msg,
+            });
+        }
+    }
+
+    // ── Misattribution check ─────────────────────────────────────────────────
+    // Group retrieved chunk texts by filename so we can verify that the content
+    // cited from a specific file actually appears in that file's chunks.
+    {
+        let mut chunks_by_file: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for (_, meta) in &results {
+            chunks_by_file
+                .entry(meta.file_name.clone())
+                .or_default()
+                .push(meta.text.clone());
+        }
+        let misattr_warnings =
+            crate::assertions::check_misattribution_default(&answer, &chunks_by_file);
+        for msg in misattr_warnings {
+            assertions.push(crate::assertions::AssertionResult {
+                passed: false,
+                assertion_type: crate::assertions::AssertionType::Misattribution,
+                message: msg,
+            });
+        }
+    }
 
     let (mut final_answer, final_not_found, final_assertions) =
         (answer.clone(), not_found, assertions);
@@ -1759,13 +1836,12 @@ pub async fn query(
     final_answer = repair_citations(&final_answer);
 
     // ── Confidence scoring ───────────────────────────────────────────────────
-    // Use the higher of answer-heuristic confidence and best source relevance.
-    // Short, direct answers without inline citations shouldn't be penalized
-    // when the source match is strong.
+    // Confidence is based purely on answer-quality heuristics (keyword overlap,
+    // length, assertion results). Citation display scores are on a separate
+    // scale (normalized against theoretical RRF max) and should NOT inflate
+    // the response-level confidence.
     let chunk_strings: Vec<String> = chunk_texts.iter().map(|s| s.to_string()).collect();
-    let heuristic_confidence = crate::assertions::compute_confidence(&final_answer, &chunk_strings);
-    let best_source_score = citations.iter().map(|c| c.score as f64).fold(0.0f64, f64::max);
-    let confidence = heuristic_confidence.max(best_source_score);
+    let confidence = crate::assertions::compute_confidence(&final_answer, &chunk_strings);
 
     Ok(QueryResult {
         answer: final_answer,
@@ -1822,8 +1898,10 @@ fn strip_excessive_hedging(answer: &str) -> String {
         "it may be",
         "it might be",
         "it could be",
-        "possibly",
-        "perhaps",
+        "it is possibly",
+        "this is possibly",
+        "perhaps it",
+        "perhaps the",
         "it is unclear",
         "it is uncertain",
         "this may not",
@@ -1885,14 +1963,14 @@ fn collapse_repetitions(answer: &str) -> String {
             continue;
         }
 
-        // Check for near-duplicates using word overlap (Jaccard > 0.80)
+        // Check for near-duplicates using word overlap (Jaccard > 0.92)
         let is_dup = seen_normalized.iter().any(|prev| {
             let prev_words: std::collections::HashSet<&str> = prev.split_whitespace().collect();
             let cur_words: std::collections::HashSet<&str> = normalized.split_whitespace().collect();
             let intersection = prev_words.intersection(&cur_words).count();
             let union = prev_words.union(&cur_words).count();
             if union == 0 { return false; }
-            (intersection as f64 / union as f64) > 0.80
+            (intersection as f64 / union as f64) > 0.92
         });
 
         if !is_dup {
@@ -1923,8 +2001,17 @@ fn collapse_repetitions(answer: &str) -> String {
         }
 
         let is_dup = seen_norms.iter().any(|prev| {
-            // Exact substring match
-            if prev.contains(&norm) || norm.contains(prev.as_str()) {
+            // Substring containment — only treat as duplicate if the shorter
+            // string is at least 80% of the longer one's length, so a short
+            // phrase cannot swallow a longer meaningful sentence.
+            let (shorter, longer) = if norm.len() <= prev.len() {
+                (norm.as_str(), prev.as_str())
+            } else {
+                (prev.as_str(), norm.as_str())
+            };
+            if longer.contains(shorter)
+                && shorter.len() as f64 >= longer.len() as f64 * 0.80
+            {
                 return true;
             }
             // Jaccard similarity
@@ -1933,7 +2020,7 @@ fn collapse_repetitions(answer: &str) -> String {
             let intersection = prev_words.intersection(&cur_words).count();
             let union = prev_words.union(&cur_words).count();
             if union == 0 { return false; }
-            (intersection as f64 / union as f64) > 0.75
+            (intersection as f64 / union as f64) > 0.90
         });
 
         if !is_dup {

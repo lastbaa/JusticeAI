@@ -130,6 +130,8 @@ pub fn is_general_knowledge_query(query: &str) -> bool {
             "the document", "the file", "this document", "this file",
             "the contract", "this contract", "the lease", "this lease",
             "the agreement", "this agreement", "the pdf", "this pdf",
+            "these documents", "these files", "my documents", "my files",
+            "all documents", "both documents",
             "page ", "section ", "clause ", "paragraph ",
             "uploaded", "loaded",
         ];
@@ -227,30 +229,17 @@ pub const SAUL_GGUF_URL: &str = "https://huggingface.co/MaziyarPanahi/Saul-Instr
 pub const RULES_PROMPT: &str = "\
 You are a legal document analyst. Answer ONLY using the PROVIDED CONTEXT below.\n\n\
 RULES:\n\
-1. GROUNDING: If the answer is not in the context, state: \"This information is not present in the provided documents.\" Never speculate or use outside knowledge.\n\
-2. CITATIONS: Cite every claim as [filename, p. N]. Example: The lease runs 12 months [lease.pdf, p. 3].\n\
-3. EXACTNESS: Reproduce numbers, dates, dollar amounts, and names EXACTLY as written. Never round or approximate.\n\
-4. NO FABRICATION: Never invent case numbers, court names, statutes, party names, or amounts not in the context.\n\
-5. FORMAT: Be direct. No preambles or sign-offs. Bold key terms. Bullets for multiple facts.\n\
-6. DOCUMENT ROLES: Context is organized by role. Apply LEGAL AUTHORITY to facts in CLIENT DOCUMENTS. Cite each document by its role.\n\
-7. REASONING: Before answering, identify which specific excerpts contain the answer. Then write your response using only those excerpts.\n\n\
-NEVER DO THIS:\n\
-- Never repeat the same fact twice in different words\n\
-- Never list the same item multiple times\n\
-- Never restate what you already said\n\
-- Never say \"as mentioned above\" or \"as stated previously\"\n\
-- Never add filler like \"I hope this helps\" or \"Let me know if you need anything\"\n\n\
-GOOD example:\n\
+1. Answer using ONLY the provided document excerpts. If the answer is not in the context, say: \"This information is not present in the provided documents.\"\n\
+2. Cite every claim as [filename, p. N]. Reproduce numbers, dates, and names EXACTLY as written.\n\
+3. Never invent facts, case numbers, statutes, or amounts not in the context.\n\
+4. Be direct. Bold key terms. Use bullets for multiple facts.\n\
+5. State each fact only once. Do not repeat yourself.\n\n\
+Example:\n\
 Q: What is the lease term?\n\
 A: The lease term is **12 months**, commencing **January 1, 2024** and ending **December 31, 2024** [residential_lease.pdf, p. 3].\n\n\
 Q: Who are the parties?\n\
 A: - **Landlord**: Robert James Smith [lease.pdf, p. 1]\n\
-- **Tenant**: Maria Garcia [lease.pdf, p. 1]\n\n\
-BAD example (do NOT do this):\n\
-Q: What is the rent?\n\
-A: The rent is $1,500 per month [lease.pdf, p. 2]. The monthly rental payment is $1,500 [lease.pdf, p. 2]. The tenant pays $1,500 each month.\n\n\
-Q: What is the penalty for early termination?\n\
-A: This information is not present in the provided documents.";
+- **Tenant**: Maria Garcia [lease.pdf, p. 1]";
 
 /// Shorter rules prompt for Quick mode — fewer examples, less preamble.
 pub const RULES_PROMPT_QUICK: &str = "\
@@ -282,7 +271,7 @@ impl InferenceParams {
     pub fn from_mode(mode: &InferenceMode) -> Self {
         match mode {
             InferenceMode::Quick => Self {
-                max_new_tokens: 256,
+                max_new_tokens: 384,
                 temperature: 0.05,
                 system_prompt_suffix: "\nStart your answer with the specific fact or value requested. Answer in 1-3 sentences. Cite the source. Then stop — do not add anything else.",
                 system_prompt_override: None,
@@ -290,17 +279,17 @@ impl InferenceParams {
                 is_quick: true,
             },
             InferenceMode::Balanced => Self {
-                max_new_tokens: 512,
+                max_new_tokens: 1024,
                 temperature: 0.15,
-                system_prompt_suffix: "\nProvide a complete answer with all relevant details. Use bullet points for multiple facts. Cite every claim. State each fact only once — do not repeat yourself. Once you have answered the question, stop immediately.",
+                system_prompt_suffix: "\nProvide a thorough answer covering all relevant details from the documents. Use bullet points for multiple facts. Cite every claim.",
                 system_prompt_override: None,
                 timeout_secs: 60,
                 is_quick: false,
             },
             InferenceMode::Extended => Self {
-                max_new_tokens: 768,
+                max_new_tokens: 1536,
                 temperature: 0.10,
-                system_prompt_suffix: "\nThink step by step:\n1. Identify which excerpts in the context answer the question.\n2. Extract the exact facts, numbers, and names from those excerpts.\n3. Write your structured response using ONLY those facts:\n**Answer**: [direct answer]\n**Key Provisions**: [relevant clauses and terms]\n**Analysis**: [legal implications]\n**Caveats**: [limitations or missing information]\nCite every claim. Do not repeat any fact more than once. When your analysis is complete, stop generating.",
+                system_prompt_suffix: "\nProvide a detailed analysis. Organize your response clearly with relevant sections. Cite every claim.",
                 system_prompt_override: None,
                 timeout_secs: 120,
                 is_quick: false,
@@ -339,7 +328,7 @@ impl RetrievalModeParams {
                 mmr_lambda: 0.85,
                 cosine_floor: 0.20,
                 jaccard_threshold: 0.70,
-                adaptive_k_gap: 0.12,
+                adaptive_k_gap: 0.01,
             },
             InferenceMode::Balanced => Self {
                 top_k: 6,
@@ -349,7 +338,7 @@ impl RetrievalModeParams {
                 mmr_lambda: 0.70,
                 cosine_floor: 0.15,
                 jaccard_threshold: 0.80,
-                adaptive_k_gap: 0.08,
+                adaptive_k_gap: 0.008,
             },
             InferenceMode::Extended => Self {
                 top_k: 10,
@@ -359,7 +348,7 @@ impl RetrievalModeParams {
                 mmr_lambda: 0.55,
                 cosine_floor: 0.12,
                 jaccard_threshold: 0.85,
-                adaptive_k_gap: 0.05,
+                adaptive_k_gap: 0.005,
             },
         }
     }
@@ -856,8 +845,8 @@ pub fn format_history(history: &[(String, String)]) -> String {
     let recent = if history.len() > 2 { &history[history.len() - 2..] } else { history };
     for (user, assistant) in recent {
         // Trim each side to avoid bloating the prompt with long prior answers
-        let u = safe_truncate(user, 200);
-        let a = safe_truncate(assistant, 300);
+        let u = safe_truncate(user, 400);
+        let a = safe_truncate(assistant, 600);
         s.push_str(&format!("User: {u}\nAssistant: {a}\n\n"));
     }
     s
@@ -996,7 +985,7 @@ Answer the current question using ONLY these excerpts.\n\
 
         // Overhead: [INST], [/INST] tags, newlines, BOS token
         let overhead = 50;
-        let max_prompt_tokens = n_ctx_size as usize - 512; // reserve 512 for generation
+        let max_prompt_tokens = n_ctx_size as usize - 1536; // reserve 1536 for generation (matches Extended mode budget)
         let component_cost = system_tokens.len() + question_tokens.len() + overhead;
 
         if component_cost > max_prompt_tokens {
@@ -2181,9 +2170,10 @@ pub fn mmr_select(
             }
         }
 
-        // Early exit: if the best remaining MMR score is < 0.1, the remaining
-        // candidates add negligible value (near-duplicates of selected chunks).
-        if best_mmr_score < 0.1 && !selected.is_empty() {
+        // Early exit: if the best remaining MMR score is negligible relative
+        // to the first selected candidate, the remaining candidates add no value.
+        // Use a relative threshold since RRF scores are much smaller than raw cosine.
+        if !selected.is_empty() && best_mmr_score < 0.1 * candidates.first().map(|(s, _, _)| *s).unwrap_or(0.0) {
             break;
         }
 
@@ -2206,6 +2196,37 @@ pub fn mmr_select(
 /// Legal documents use varied terminology (e.g. "landlord" vs "lessor"),
 /// so synonym expansion + question-to-statement transforms help BM25
 /// match on terms the user didn't explicitly type.
+/// Check whether `text` contains `word` as a whole word (surrounded by non-alphanumeric
+/// characters or string boundaries). This avoids dangerous substring matching where e.g.
+/// "sign" would match inside "signature".
+fn contains_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !c.is_alphanumeric())
+        .any(|w| w == word)
+}
+
+/// Replace `word` with `replacement` only at whole-word boundaries in `text`.
+fn replace_word(text: &str, word: &str, replacement: &str) -> String {
+    let mut result = String::with_capacity(text.len() + replacement.len());
+    let word_bytes = word.as_bytes();
+    let text_bytes = text.as_bytes();
+    let mut i = 0;
+    while i < text.len() {
+        if text_bytes[i..].starts_with(word_bytes) {
+            let before_ok = i == 0 || !text_bytes[i - 1].is_ascii_alphanumeric();
+            let after_idx = i + word.len();
+            let after_ok = after_idx >= text.len() || !text_bytes[after_idx].is_ascii_alphanumeric();
+            if before_ok && after_ok {
+                result.push_str(replacement);
+                i += word.len();
+                continue;
+            }
+        }
+        result.push(text.as_bytes()[i] as char);
+        i += 1;
+    }
+    result
+}
+
 pub fn expand_query(query: &str) -> Vec<String> {
     let mut queries = vec![query.to_string()];
     let lower = query.to_lowercase();
@@ -2246,12 +2267,12 @@ pub fn expand_query(query: &str) -> Vec<String> {
     let mut synonym_count = 0;
     for (term, replacement) in &substitutions {
         if synonym_count >= 2 { break; }
-        if lower.contains(term) && !lower.contains(replacement) {
-            let rewritten = lower.replace(term, replacement);
+        if contains_word(&lower, term) && !contains_word(&lower, replacement) {
+            let rewritten = replace_word(&lower, term, replacement);
             queries.push(rewritten);
             synonym_count += 1;
-        } else if lower.contains(replacement) && !lower.contains(term) {
-            let rewritten = lower.replace(replacement, term);
+        } else if contains_word(&lower, replacement) && !contains_word(&lower, term) {
+            let rewritten = replace_word(&lower, replacement, term);
             queries.push(rewritten);
             synonym_count += 1;
         }
@@ -2321,7 +2342,7 @@ pub fn rewrite_followup_query(query: &str, history: &[(String, String)]) -> Stri
     let pronoun_refs = ["it", "this", "that", "they", "them", "those", "these", "its"];
 
     let is_followup = followup_indicators.iter().any(|p| q.starts_with(p))
-        || (q.split_whitespace().count() <= 5
+        || (q.split_whitespace().count() <= 12
             && pronoun_refs.iter().any(|p| {
                 q.split_whitespace().any(|w| w.trim_matches(|c: char| !c.is_alphanumeric()) == *p)
             }));
@@ -2330,30 +2351,47 @@ pub fn rewrite_followup_query(query: &str, history: &[(String, String)]) -> Stri
         return query.to_string();
     }
 
-    // Extract key terms from the last user question to provide context
+    // Extract key terms from the last user question and assistant response
     let last_user = &history[history.len() - 1].0;
-    let last_lower = last_user.to_lowercase();
+    let last_assistant = &history[history.len() - 1].1;
+    let last_user_lower = last_user.to_lowercase();
+    let last_asst_lower = last_assistant.to_lowercase();
 
-    // Extract subject nouns from the last question (skip question words and stopwords)
+    // Extract subject nouns (skip question words and stopwords)
     let skip_words: std::collections::HashSet<&str> = [
         "what", "is", "the", "are", "was", "were", "who", "how", "much",
         "many", "does", "do", "did", "can", "could", "would", "should",
         "a", "an", "in", "of", "for", "to", "from", "with", "about",
         "this", "that", "these", "those", "it", "its",
+        "not", "but", "or", "and", "also", "just", "very", "been",
+        "has", "have", "had", "will", "may", "might", "here",
+        "there", "then", "than", "when", "where", "which",
     ].iter().cloned().collect();
 
-    let context_terms: Vec<&str> = last_lower
+    let user_terms: Vec<&str> = last_user_lower
         .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() > 2 && !skip_words.contains(w))
         .collect();
 
-    if context_terms.is_empty() {
+    // Also extract top keywords from the assistant's last response (limit to 4)
+    let asst_terms: Vec<&str> = last_asst_lower
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| w.len() > 3 && !skip_words.contains(w))
+        .filter(|w| !user_terms.contains(w)) // avoid duplicates with user terms
+        .take(4)
+        .collect();
+
+    let mut all_terms = user_terms;
+    all_terms.extend(asst_terms);
+
+    if all_terms.is_empty() {
         return query.to_string();
     }
 
     // Append context terms to make the query self-contained
-    let context_suffix = context_terms.join(" ");
+    let context_suffix = all_terms.join(" ");
     format!("{} (regarding: {})", query.trim(), context_suffix)
 }
 
@@ -2441,7 +2479,7 @@ impl Default for RetrievalConfig {
             mmr_lambda: 0.7,
             expand_keywords: true,
             jaccard_threshold: 0.80,
-            adaptive_k_gap: 0.08,
+            adaptive_k_gap: 0.008,
         }
     }
 }
@@ -2527,7 +2565,7 @@ const STOP_WORDS: &[&str] = &[
     "how","when","where","why","there","find","show","tell","explain","give",
     "please","provide","describe",
     // Legal stopwords — high-frequency legalese that adds noise to BM25
-    "shall","hereby","herein","hereof","thereof","therein","whereas","pursuant",
+    "hereby","herein","hereof","thereof","therein","whereas","pursuant",
     "notwithstanding","aforementioned","hereinafter","witnesseth","thereunder",
     "hereto","hereunder","thereto",
 ];
@@ -2894,7 +2932,7 @@ mod tests {
     #[test]
     fn inference_params_quick() {
         let p = InferenceParams::from_mode(&InferenceMode::Quick);
-        assert_eq!(p.max_new_tokens, 256);
+        assert_eq!(p.max_new_tokens, 384);
         assert!((p.temperature - 0.05).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 30);
@@ -2904,7 +2942,7 @@ mod tests {
     #[test]
     fn inference_params_balanced() {
         let p = InferenceParams::from_mode(&InferenceMode::Balanced);
-        assert_eq!(p.max_new_tokens, 512);
+        assert_eq!(p.max_new_tokens, 1024);
         assert!((p.temperature - 0.15).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 60);
@@ -2913,7 +2951,7 @@ mod tests {
     #[test]
     fn inference_params_extended() {
         let p = InferenceParams::from_mode(&InferenceMode::Extended);
-        assert_eq!(p.max_new_tokens, 768);
+        assert_eq!(p.max_new_tokens, 1536);
         assert!((p.temperature - 0.10).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 120);
