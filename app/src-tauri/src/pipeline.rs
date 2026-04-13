@@ -228,20 +228,17 @@ pub const QWEN3_GGUF_URL: &str = "https://huggingface.co/Qwen/Qwen3-8B-GGUF/reso
 /// Document context goes in the user turn; system prompt contains only rules.
 pub const RULES_PROMPT: &str = "\
 You are Justice AI, a legal document analyst. You answer questions using ONLY the document excerpts provided below.\n\n\
-LEGAL ANALYSIS FRAMEWORK:\n\
-When analyzing documents, follow this structure:\n\
-1. IDENTIFY the relevant legal elements: parties, obligations, dates, amounts, conditions, and defined terms\n\
-2. EXTRACT the specific language from the provided excerpts that answers the question\n\
-3. CITE every factual claim as [filename, p. N] — use the exact filename shown in the document headers\n\
-4. When multiple documents are provided, you MUST address ALL of them — organize your response by document or by topic\n\n\
-MANDATORY RULES:\n\
-- Answer ONLY from the provided document excerpts. If information is absent, state: \"This information is not present in the provided documents.\"\n\
-- Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written in the source — never round, paraphrase, or approximate\n\
-- NEVER fabricate case citations, statute numbers, court names, party names, or legal authorities not present in the context\n\
-- NEVER infer or assume facts not explicitly stated — if a detail is missing, acknowledge the gap\n\
-- When documents contain conflicting information, note the discrepancy and cite both sources\n\
-- Bold key terms and amounts. Use bullet points for multiple facts\n\
-- State each fact once — do not repeat yourself";
+RULES:\n\
+1. Answer ONLY from the provided document excerpts. If information is absent, state: \"This information is not present in the provided documents.\"\n\
+2. CITE every factual claim as [filename, p. N] — use the exact filename shown in the document headers.\n\
+3. Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written in the source — never round, paraphrase, or approximate.\n\
+4. NEVER fabricate case citations, statute numbers, court names, party names, or legal authorities not present in the context.\n\
+5. NEVER infer or assume facts not explicitly stated — if a detail is missing, acknowledge the gap.\n\
+6. When documents contain conflicting information, note the discrepancy and cite both sources.\n\
+7. When multiple documents are provided, address ALL of them.\n\
+8. Bold key terms and amounts. Use bullet points for multiple facts.\n\
+9. State each fact ONCE — do not repeat yourself. Do not restate information under different headings.\n\
+10. Answer the question directly. Do NOT add numbered section headers, frameworks, or organizational scaffolding unless the user explicitly asks for a structured analysis.";
 
 /// Shorter rules prompt for Quick mode.
 pub const RULES_PROMPT_QUICK: &str = "\
@@ -284,7 +281,7 @@ impl InferenceParams {
             InferenceMode::Balanced => Self {
                 max_new_tokens: 2048,
                 temperature: 0.7,
-                system_prompt_suffix: "\nProvide a thorough answer covering all relevant details. Use bullet points for multiple facts. Cite every claim.",
+                system_prompt_suffix: "\nProvide a thorough answer covering all relevant details. Use bullet points for multiple facts. Cite every claim. Do not add section headers unless the question has multiple distinct parts.",
                 system_prompt_override: None,
                 timeout_secs: 90,
                 is_quick: false,
@@ -292,7 +289,7 @@ impl InferenceParams {
             InferenceMode::Extended => Self {
                 max_new_tokens: 3072,
                 temperature: 0.7,
-                system_prompt_suffix: "\nProvide a detailed legal analysis. Organize with clear sections. Cross-reference documents where applicable. Cite every claim.",
+                system_prompt_suffix: "\nProvide a detailed legal analysis. Cross-reference documents where applicable. Cite every claim. Use section headers only when the question has 3+ distinct sub-topics.",
                 system_prompt_override: None,
                 timeout_secs: 180,
                 is_quick: false,
@@ -1321,19 +1318,33 @@ fn truncate_incomplete_sentence(text: &str) -> String {
         return String::new();
     }
 
-    let last_char = trimmed.chars().last().unwrap();
+    // First: clean up any incomplete citation bracket at the end.
+    // If there's an unclosed `[` (no matching `]`), backtrack to before the `[`.
+    let cleaned = if let Some(last_open) = trimmed.rfind('[') {
+        let after_open = &trimmed[last_open..];
+        if !after_open.contains(']') {
+            // Unclosed citation — remove it
+            trimmed[..last_open].trim_end_matches(&[' ', ',', ';', '-'][..]).trim_end()
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed
+    };
+
+    let last_char = cleaned.chars().last().unwrap_or(' ');
     if matches!(last_char, '.' | '!' | '?' | ')' | ']') {
-        return trimmed.to_string();
+        return cleaned.to_string();
     }
 
     // Find last sentence boundary
-    let boundary = trimmed.rfind(|c: char| matches!(c, '.' | '!' | '?'));
+    let boundary = cleaned.rfind(|c: char| matches!(c, '.' | '!' | '?'));
     if let Some(pos) = boundary {
-        if pos > trimmed.len() / 2 {
-            return trimmed[..=pos].to_string();
+        if pos > cleaned.len() / 2 {
+            return cleaned[..=pos].to_string();
         }
     }
-    trimmed.to_string()
+    cleaned.to_string()
 }
 
 // ── Chunking ──────────────────────────────────────────────────────────────────
