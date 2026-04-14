@@ -1712,9 +1712,13 @@ pub async fn query(
         });
     }
 
-    // Inject filled form data chunks AFTER cosine floor check passes.
-    for fc in form_chunks_to_inject {
-        results.insert(1.min(results.len()), fc);
+    // Inject filled form data chunks AFTER cosine floor check passes,
+    // but ONLY for form-related queries. For non-form queries (e.g., "Who
+    // are the parties?"), injecting form data displaces more relevant chunks.
+    if pipeline::is_form_related_query(&question) {
+        for fc in form_chunks_to_inject {
+            results.insert(1.min(results.len()), fc);
+        }
     }
 
     // ── Priority-weighted context assembly ────────────────────────────────────

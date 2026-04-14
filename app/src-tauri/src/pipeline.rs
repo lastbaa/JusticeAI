@@ -236,7 +236,8 @@ RULES:\n\
 4. Never fabricate case citations, statute numbers, court names, party names, or page numbers not explicitly in the excerpts.\n\
 5. When sources conflict, cite both and note the discrepancy.\n\
 6. State each fact ONCE. Never repeat a bullet point, sentence, or paragraph.\n\
-7. When multiple documents are provided, address EACH document. Organize by document or by topic.";
+7. When multiple documents are provided, address EACH document. Organize by document or by topic.\n\
+8. Excerpts are ranked by relevance (★★★ = highest, ★ = lowest). Prioritize higher-ranked excerpts when information overlaps.";
 
 /// Shorter rules prompt for Quick mode — same anti-hallucination rules, no formatting.
 pub const RULES_PROMPT_QUICK: &str = "\
