@@ -933,14 +933,19 @@ Answer using ONLY these excerpts.\n\
 
     // For multi-document queries, inject explicit instruction in the user turn
     // to address all documents (Qwen3 follows user-turn instructions well).
-    let user_content = if user_content.contains("DOCUMENTS PROVIDED (") {
+    // Detect multi-doc by looking for "Documents referenced below:" header
+    // (injected by context assembly in rag.rs).
+    let user_content = if context.contains("Documents referenced below:") {
+        // Extract document names from "[N] filename.pdf" patterns
         let mut doc_names: Vec<String> = Vec::new();
         for line in context.lines() {
-            if let Some(rest) = line.strip_prefix('[') {
-                if let Some(name_part) = rest.split(']').nth(1) {
-                    let name = name_part.trim();
-                    if !name.is_empty() {
-                        doc_names.push(name.to_string());
+            if line.starts_with("Documents referenced below:") {
+                // Parse "[1] doc1.pdf, [2] doc2.pdf" format
+                let re = regex::Regex::new(r"\[\d+\]\s+([^,\[]+)").unwrap();
+                for cap in re.captures_iter(line) {
+                    let name = cap[1].trim().to_string();
+                    if !name.is_empty() && !doc_names.contains(&name) {
+                        doc_names.push(name);
                     }
                 }
             }
