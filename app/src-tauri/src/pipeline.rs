@@ -1100,9 +1100,11 @@ Answer using ONLY these excerpts.\n\
         }
 
         // Sampling chain for Qwen3: penalties → top-k → top-p → temp → dist.
-        // Light repetition penalty (1.1) prevents loops without hurting factual recall.
+        // Repetition penalty 1.15 with 128-token window + frequency penalty 0.1
+        // to discourage repeating the same phrases. Presence penalty 0.1 nudges
+        // the model to introduce new topics rather than restating old ones.
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(64, 1.1, 0.0, 0.0),
+            LlamaSampler::penalties(128, 1.15, 0.1, 0.1),
             LlamaSampler::top_k(40),
             LlamaSampler::top_p(0.90, 1),
             LlamaSampler::temp(inference_params.temperature),
@@ -1124,6 +1126,13 @@ Answer using ONLY these excerpts.\n\
         let timeout_secs = inference_params.timeout_secs;
         let mut tokens_since_content: usize = 0;
 
+        // ── Line-buffered streaming for dedup ──────────────────────────
+        // Buffer tokens for the current line. Only flush to the UI (on_token)
+        // when we confirm the line is NOT a duplicate of a previous line.
+        // This prevents the user from ever seeing duplicate bullets during streaming.
+        let mut line_buffer = String::new();
+        let mut completed_lines: Vec<String> = Vec::new(); // normalized completed lines
+
         for _ in 0..max_new_tokens {
             if pos >= n_ctx_size as usize {
                 log::warn!("Generation stopped: reached context window limit ({n_ctx_size} tokens).");
@@ -1139,40 +1148,84 @@ Answer using ONLY these excerpts.\n\
             sampler.accept(token);
 
             // ── EOS detection (triple-check) ──────────────────────────
-            // 1. Crate API check
             if model.is_eog_token(token) {
                 log::info!("EOS detected via is_eog_token — halting generation.");
                 break;
             }
-            // 2. Direct token ID comparison
             if token == model.token_eos() {
                 log::info!("EOS detected via token_eos() match — halting generation.");
                 break;
             }
 
-            // Decode token to string — pass `true` for special tokens so
-            // EOS (`</s>`) is rendered as a visible string instead of empty bytes.
             let output_bytes = model
                 .token_to_piece_bytes(token, 128, true, None)
                 .map_err(|e| format!("Token decode error: {e}"))?;
             let token_piece = String::from_utf8_lossy(&output_bytes).into_owned();
 
-            // 3. String-based EOS fallback
             if token_piece.contains("</s>") || token_piece.contains("<|endoftext|>") || token_piece.contains("<|im_end|>") {
                 log::info!("EOS detected via string match ('{}') — halting generation.", token_piece.trim());
                 break;
             }
 
-            // Skip truly empty tokens. Emit whitespace tokens normally —
-            // they are necessary for proper word spacing in the UI.
-            if !token_piece.is_empty() {
-                on_token(token_piece.clone());
+            if token_piece.is_empty() {
+                // Skip empty tokens
+            } else if token_piece.contains('\n') {
+                // Token contains a newline — split it: content before \n completes
+                // the current line, content after \n starts a new line.
+                let parts: Vec<&str> = token_piece.splitn(2, '\n').collect();
+                line_buffer.push_str(parts[0]);
+
+                // Check if the completed line is a duplicate
+                let trimmed_line = line_buffer.trim().to_string();
+                let is_dup = if trimmed_line.len() > 40 {
+                    let normalized: String = trimmed_line.to_lowercase()
+                        .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+                    let dup = completed_lines.iter().any(|prev| *prev == normalized);
+                    if dup {
+                        log::warn!("Duplicate line suppressed during streaming: {}",
+                            &trimmed_line[..trimmed_line.len().min(80)]);
+                    } else {
+                        completed_lines.push(normalized);
+                    }
+                    dup
+                } else {
+                    false
+                };
+
+                if !is_dup {
+                    // Flush the completed line + newline to UI and response
+                    line_buffer.push('\n');
+                    on_token(line_buffer.clone());
+                    response.push_str(&line_buffer);
+                    line_buffer.clear();
+                } else {
+                    // Discard the duplicate line, but keep the newline for formatting
+                    line_buffer.clear();
+                    // Don't add to response — line is suppressed
+                }
+
+                // Start buffering the next line (content after \n)
+                if parts.len() > 1 && !parts[1].is_empty() {
+                    line_buffer.push_str(parts[1]);
+                }
+            } else {
+                // No newline in token — just buffer it
+                line_buffer.push_str(&token_piece);
+
+                // For long lines without newlines (e.g., paragraphs), flush
+                // periodically to avoid excessive buffering latency.
+                // Only buffer aggressively for short lines (bullet points).
+                if line_buffer.len() > 200 && !line_buffer.trim_start().starts_with('-')
+                    && !line_buffer.trim_start().starts_with('*')
+                    && !line_buffer.trim_start().starts_with('•')
+                {
+                    on_token(line_buffer.clone());
+                    response.push_str(&line_buffer);
+                    line_buffer.clear();
+                }
             }
-            response.push_str(&token_piece);
 
             // ── Stall detection ──────────────────────────────────────
-            // If 30+ tokens pass without any alphanumeric content, the
-            // model is stalling (producing only whitespace/punctuation).
             if token_piece.chars().any(|c| c.is_ascii_alphanumeric()) {
                 tokens_since_content = 0;
             } else {
@@ -1186,11 +1239,10 @@ Answer using ONLY these excerpts.\n\
                 }
             }
 
-            // Stop sequence detection: halt if the model starts looping or
-            // producing degenerate patterns (e.g. repeating the same sentence,
-            // starting a new [INST] turn, or emitting the context delimiters).
-            if response.len() > 100 {
-                let tail = &response[response.len().saturating_sub(200)..];
+            // Stop sequence detection
+            let check_text = format!("{}{}", response, line_buffer);
+            if check_text.len() > 100 {
+                let tail = &check_text[check_text.len().saturating_sub(200)..];
                 if tail.contains("<|im_start|>")
                     || tail.contains("<|im_end|>")
                     || tail.contains("<documents>")
@@ -1201,64 +1253,17 @@ Answer using ONLY these excerpts.\n\
                     break;
                 }
                 // Detect phrase-level repetition at multiple window sizes.
-                // Use 80, 100, 120 char windows to avoid false positives on
-                // common legal phrases like "the parties agree" or "pursuant to".
-                if response.len() > 200 {
+                if check_text.len() > 200 {
                     let caught = [80_usize, 100, 120].iter().any(|&window| {
-                        let check_len = window.min(response.len() / 3);
+                        let check_len = window.min(check_text.len() / 3);
                         if check_len < 60 { return false; }
-                        let last_chunk = &response[response.len() - check_len..];
-                        let earlier = &response[..response.len() - check_len];
+                        let last_chunk = &check_text[check_text.len() - check_len..];
+                        let earlier = &check_text[..check_text.len() - check_len];
                         earlier.contains(last_chunk)
                     });
                     if caught {
                         log::warn!("Repetition loop detected — halting generation.");
                         break;
-                    }
-                }
-                // Line-level duplicate detection: when a newline is emitted,
-                // check if the completed line duplicates any earlier line.
-                // This catches repeated bullet points (which end with `]` not `.`).
-                if response.ends_with('\n') && response.len() > 100 {
-                    let all_lines: Vec<&str> = response.trim_end().lines().collect();
-                    if all_lines.len() >= 2 {
-                        let last_line = all_lines.last().unwrap().trim();
-                        if last_line.len() > 40 {
-                            let norm_last: String = last_line.to_lowercase()
-                                .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
-                            let has_dup = all_lines[..all_lines.len() - 1].iter().any(|prev| {
-                                let norm_prev: String = prev.trim().to_lowercase()
-                                    .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
-                                norm_prev == norm_last
-                            });
-                            if has_dup {
-                                // Remove the duplicate line from the response
-                                if let Some(last_nl) = response[..response.len()-1].rfind('\n') {
-                                    response.truncate(last_nl + 1);
-                                }
-                                log::warn!("Duplicate line detected during generation — removed.");
-                                // Don't break — let the model continue with new content
-                            }
-                        }
-                    }
-                }
-                // Sentence-level duplicate detection: if a completed sentence
-                // has already appeared in the response, halt immediately.
-                if response.len() > 100 && response.ends_with('.') {
-                    // Find the start of the last sentence
-                    let trimmed = response.trim_end_matches('.');
-                    if let Some(prev_dot) = trimmed.rfind(". ") {
-                        let last_sentence = &response[prev_dot + 2..];
-                        let earlier_part = &response[..prev_dot + 2];
-                        // Normalize for comparison
-                        let norm_last: String = last_sentence.to_lowercase()
-                            .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
-                        let norm_earlier: String = earlier_part.to_lowercase()
-                            .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
-                        if norm_last.len() > 60 && norm_earlier.contains(&norm_last) {
-                            log::warn!("Duplicate sentence detected — halting generation.");
-                            break;
-                        }
                     }
                 }
             }
@@ -1270,6 +1275,25 @@ Answer using ONLY these excerpts.\n\
             ctx.decode(&mut batch)
                 .map_err(|e| format!("Gen decode error: {e}"))?;
             pos += 1;
+        }
+
+        // Flush any remaining buffered content (last line without trailing newline)
+        if !line_buffer.is_empty() {
+            let trimmed_line = line_buffer.trim().to_string();
+            let is_dup = if trimmed_line.len() > 40 {
+                let normalized: String = trimmed_line.to_lowercase()
+                    .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+                completed_lines.iter().any(|prev| *prev == normalized)
+            } else {
+                false
+            };
+            if !is_dup {
+                on_token(line_buffer.clone());
+                response.push_str(&line_buffer);
+                line_buffer.clear();
+            } else {
+                log::warn!("Duplicate final line suppressed: {}", &trimmed_line[..trimmed_line.len().min(80)]);
+            }
         }
 
         // Strip common generation artifacts before returning to the UI.
