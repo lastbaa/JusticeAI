@@ -2116,6 +2116,9 @@ pub async fn query(
     final_answer = collapse_repetitions(&final_answer);
     final_answer = strip_excessive_hedging(&final_answer);
     final_answer = repair_citations(&final_answer);
+    // Fix mangled filenames in citations — the LLM often truncates or corrupts
+    // long filenames. Match them back to the actual known filenames.
+    final_answer = fix_mangled_filenames(&final_answer, &known_files);
     // Remove label-only bullets: lines like "- Age:" or "* Schedule:" with no content
     final_answer = strip_label_only_bullets(&final_answer);
     // Normalize excessive whitespace: collapse 3+ newlines to 2
@@ -2418,6 +2421,61 @@ fn strip_label_only_bullets(answer: &str) -> String {
         result.push(line);
     }
     result.join("\n")
+}
+
+/// Fix mangled filenames in citations by fuzzy-matching against known files.
+/// The LLM often truncates long filenames: "DeerpathCapita" → "Deerpath Capital Offer Letter LN.pdf"
+fn fix_mangled_filenames(answer: &str, known_files: &[&str]) -> String {
+    if known_files.is_empty() {
+        return answer.to_string();
+    }
+
+    // Extract all citation filenames via regex: [FILENAME, p. N]
+    let cite_re = regex::Regex::new(r"\[([^\[\],]+),\s*pp?\.\s*\d+").unwrap();
+    let mut result = answer.to_string();
+
+    // Collect unique cited filenames first to avoid regex invalidation during replacement
+    let cited_names: Vec<String> = cite_re
+        .captures_iter(answer)
+        .map(|cap| cap[1].trim().to_string())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    for cited in &cited_names {
+        // Skip if it's already an exact match
+        if known_files.iter().any(|&f| f == cited) {
+            continue;
+        }
+
+        // Fuzzy match: find the known file whose name starts with the cited text
+        // (handles truncation like "DeerpathCapita" → "Deerpath Capital...")
+        // Also handle space removal ("BofAOffer" should match "BofA Offer")
+        let cited_lower = cited.to_lowercase().replace(' ', "");
+        let best_match = known_files.iter().find(|&&known| {
+            let known_lower = known.to_lowercase();
+            let known_nospace = known_lower.replace(' ', "");
+            // Prefix match (truncation)
+            known_nospace.starts_with(&cited_lower)
+                || cited_lower.starts_with(&known_nospace)
+                // Substring match (partial name)
+                || known_nospace.contains(&cited_lower)
+                || cited_lower.contains(&known_nospace)
+                // First N chars match (at least 6 chars to avoid false positives)
+                || (cited_lower.len() >= 6
+                    && known_nospace.len() >= 6
+                    && known_nospace[..known_nospace.len().min(cited_lower.len())]
+                        == cited_lower[..cited_lower.len().min(known_nospace.len())])
+        });
+
+        if let Some(&correct_name) = best_match {
+            if correct_name != cited {
+                log::info!("Fixed mangled filename: '{}' → '{}'", cited, correct_name);
+                result = result.replace(cited.as_str(), correct_name);
+            }
+        }
+    }
+    result
 }
 
 /// Fix incomplete or malformed citations in the output.

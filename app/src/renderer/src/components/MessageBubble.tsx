@@ -464,9 +464,9 @@ function renderMarkdown(text: string, ctx?: MarkdownCtx): JSX.Element {
       continue
     }
 
-    // Skip orphaned citation fragments (e.g., "1].", "23]") and label-only bullets
+    // Skip orphaned citation fragments (e.g., "1].", "23]", "pdf, p.", "p.")
     const trimmed = line.trim()
-    if (/^\d+\]\s*\.?\s*$/.test(trimmed)) {
+    if (/^\d+\]\s*\.?\s*$/.test(trimmed) || /^(?:pdf\s*,?\s*)?p\.\s*$/.test(trimmed) || /^pdf,?\s*$/.test(trimmed)) {
       i++
       continue
     }

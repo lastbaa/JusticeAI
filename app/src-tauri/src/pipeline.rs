@@ -1460,46 +1460,79 @@ fn deduplicate_lines(text: &str) -> String {
     result.join("\n")
 }
 
-/// Fix orphaned citation fragments that result from line-break splits.
+/// Fix citations that the LLM split across multiple lines.
 ///
-/// Handles several patterns observed in LLM output:
-/// 1. Lines that are just "N]." or "N]" — orphaned closing fragments
-/// 2. Lines ending with "N]." where there's no matching "[" — remove the fragment
-/// 3. Citations split across lines: "text [file, p.\n1]." — rejoin them
+/// The model often breaks long citations across 2-3 lines:
+///   "text [Deerpath Capital Offer Letter LN.\npdf, p.\n1]."
+/// This function rejoins them into a single inline citation, then
+/// removes any remaining orphaned fragments.
 fn fix_orphaned_citations(text: &str) -> String {
-    // Phase 1: Rejoin citations split across line breaks.
-    // Pattern: line ends with "[..., p." or "[..., p. " and next line starts with "N]"
-    let rejoin_re = Regex::new(r"(\[[^\]]*,\s*p\.)\s*\n\s*(\d+\].?)").unwrap();
-    let text = rejoin_re.replace_all(text, "$1 $2").to_string();
+    // Phase 1: Rejoin multi-line citations by collapsing lines between "[" and "]".
+    // Strategy: scan for unclosed "[", merge subsequent lines until "]" is found.
+    let mut lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let mut merged: Vec<String> = Vec::new();
+    let mut pending: Option<String> = None;
 
-    // Phase 2: Remove lines that are ONLY an orphaned fragment like "1]." or "1]"
-    let orphan_line_re = Regex::new(r"^\s*\d+\]\s*\.?\s*$").unwrap();
-    // Phase 3: Remove trailing orphaned "N]." from lines without matching "["
-    let trailing_re = Regex::new(r"\s+\d+\]\s*\.?\s*$").unwrap();
+    for line in &lines {
+        if let Some(ref mut buf) = pending {
+            // We're inside an unclosed citation — append this line
+            buf.push(' ');
+            buf.push_str(line.trim());
+            if buf.contains(']') {
+                // Citation closed — flush
+                merged.push(buf.clone());
+                pending = None;
+            }
+            // Safety: don't merge more than 4 lines (avoid runaway merging)
+            else if buf.matches('\n').count() > 3 {
+                merged.push(buf.clone());
+                pending = None;
+            }
+        } else {
+            // Check if this line has an unclosed "[" (more "[" than "]")
+            let opens = line.matches('[').count();
+            let closes = line.matches(']').count();
+            if opens > closes {
+                pending = Some(line.clone());
+            } else {
+                merged.push(line.clone());
+            }
+        }
+    }
+    if let Some(buf) = pending {
+        merged.push(buf);
+    }
+    lines = merged;
 
-    let lines: Vec<&str> = text.lines().collect();
+    // Phase 2: Remove lines that are ONLY an orphaned fragment like "1].", "pdf, p.", "1]"
+    let orphan_re = Regex::new(r"^\s*(?:pdf\s*,?\s*)?(?:p\.\s*)?\d*\]\s*\.?\s*$").unwrap();
+
     let mut result: Vec<String> = Vec::new();
-
-    for line in lines {
-        // Skip lines that are entirely an orphan fragment
-        if orphan_line_re.is_match(line) {
+    for line in &lines {
+        let trimmed = line.trim();
+        // Skip orphan-only lines
+        if orphan_re.is_match(trimmed) {
+            continue;
+        }
+        // Skip lines that are just "pdf, p." or "p." fragments
+        if trimmed == "pdf, p." || trimmed == "p." || trimmed == "pdf," {
             continue;
         }
 
-        // Check for trailing orphaned "N]." without matching "["
-        if let Some(m) = trailing_re.find(line) {
-            let before = &line[..m.start()];
-            let open_count = line.matches('[').count();
-            let close_count = line.matches(']').count();
-            if close_count > open_count {
-                let cleaned = before.trim_end();
+        // Remove trailing orphaned "N]." from lines without matching "["
+        let opens = line.matches('[').count();
+        let closes = line.matches(']').count();
+        if closes > opens {
+            let trailing_re = Regex::new(r"\s+\d+\]\s*\.?\s*$").unwrap();
+            if let Some(m) = trailing_re.find(line) {
+                let cleaned = line[..m.start()].trim_end();
                 if !cleaned.is_empty() {
                     result.push(cleaned.to_string());
+                    continue;
                 }
-                continue;
             }
         }
-        result.push(line.to_string());
+        result.push(line.clone());
     }
     result.join("\n")
 }
