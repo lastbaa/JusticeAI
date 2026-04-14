@@ -37,6 +37,87 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+// == Persistent embedding cache ================================================
+
+/// On-disk embedding cache keyed by blake3(text).
+/// Stored at `target/eval-cache/embed_cache.bin` (bincode-serialized).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct EmbedDiskCache {
+    entries: HashMap<String, Vec<f32>>,
+}
+
+impl EmbedDiskCache {
+    fn cache_dir() -> PathBuf {
+        // Walk up from the binary's location to find the workspace target/ dir.
+        // Fallback: use `CARGO_MANIFEST_DIR` at compile time or just `target/`.
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("eval-cache");
+        dir
+    }
+
+    fn cache_path() -> PathBuf {
+        Self::cache_dir().join("embed_cache.bin")
+    }
+
+    fn load() -> Self {
+        let path = Self::cache_path();
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                match bincode::deserialize::<EmbedDiskCache>(&bytes) {
+                    Ok(cache) => {
+                        eprintln!("[cache] Loaded {} cached embeddings from {}", cache.entries.len(), path.display());
+                        cache
+                    }
+                    Err(e) => {
+                        eprintln!("[cache] Corrupt cache file, starting fresh: {e}");
+                        Self::default()
+                    }
+                }
+            }
+            Err(_) => {
+                eprintln!("[cache] No cache file found, starting fresh.");
+                Self::default()
+            }
+        }
+    }
+
+    fn save(&self) {
+        let dir = Self::cache_dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("[cache] Cannot create cache dir: {e}");
+            return;
+        }
+        let path = Self::cache_path();
+        match bincode::serialize(self) {
+            Ok(bytes) => {
+                if let Err(e) = std::fs::write(&path, &bytes) {
+                    eprintln!("[cache] Failed to write cache: {e}");
+                } else {
+                    eprintln!("[cache] Saved {} embeddings to {}", self.entries.len(), path.display());
+                }
+            }
+            Err(e) => eprintln!("[cache] Serialization error: {e}"),
+        }
+    }
+
+    fn key(text: &str, is_query: bool) -> String {
+        // Include is_query in the hash since BGE uses a different prefix for queries
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(if is_query { b"q:" } else { b"d:" });
+        hasher.update(text.as_bytes());
+        hasher.finalize().to_hex().to_string()
+    }
+
+    fn get(&self, text: &str, is_query: bool) -> Option<&Vec<f32>> {
+        self.entries.get(&Self::key(text, is_query))
+    }
+
+    fn insert(&mut self, text: &str, is_query: bool, vec: Vec<f32>) {
+        self.entries.insert(Self::key(text, is_query), vec);
+    }
+}
+
 fn print_banner(title: &str) {
     println!("\n{}", "=".repeat(60));
     println!(" {title}");
@@ -408,6 +489,11 @@ async fn run_eval_cases(
     let retrieval_params = pipeline::RetrievalModeParams::from_mode(mode);
     let mut eval_results: Vec<EvalResult> = Vec::new();
 
+    // -- Persistent disk cache for embeddings ---------------------------------
+    let mut disk_cache = EmbedDiskCache::load();
+    let mut cache_hits: usize = 0;
+    let mut cache_misses: usize = 0;
+
     // -- Per-PDF deduplication: parse + embed each PDF only once ---------------
     let mut pdf_cache: HashMap<String, (Vec<DocumentPage>, Vec<pipeline::TempChunk>)> = HashMap::new();
     let mut embed_cache: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
@@ -435,16 +521,25 @@ async fn run_eval_cases(
                 if verbose {
                     println!("OK ({} pages, {} chunks)", result.0.len(), result.1.len());
                 }
-                // Pre-embed all chunks for this PDF
+                // Pre-embed all chunks for this PDF (with disk cache)
                 let mut chunk_vecs: Vec<Vec<f32>> = Vec::with_capacity(result.1.len());
                 let mut embed_ok = true;
                 for chunk in &result.1 {
-                    match pipeline::embed_text(&chunk.text, false, model_dir).await {
-                        Ok(v) => chunk_vecs.push(v),
-                        Err(e) => {
-                            if verbose { println!("    EMBED ERROR: {e}"); }
-                            embed_ok = false;
-                            break;
+                    if let Some(cached) = disk_cache.get(&chunk.text, false) {
+                        chunk_vecs.push(cached.clone());
+                        cache_hits += 1;
+                    } else {
+                        match pipeline::embed_text(&chunk.text, false, model_dir).await {
+                            Ok(v) => {
+                                disk_cache.insert(&chunk.text, false, v.clone());
+                                chunk_vecs.push(v);
+                                cache_misses += 1;
+                            }
+                            Err(e) => {
+                                if verbose { println!("    EMBED ERROR: {e}"); }
+                                embed_ok = false;
+                                break;
+                            }
                         }
                     }
                 }
@@ -457,6 +552,10 @@ async fn run_eval_cases(
                 if verbose { println!("ERROR: {e}"); }
             }
         }
+    }
+
+    if verbose {
+        println!("Embedding cache: {} hits, {} misses", cache_hits, cache_misses);
     }
 
     if verbose { println!("\nRunning {} eval cases...\n", cases.len()); }
@@ -505,20 +604,27 @@ async fn run_eval_cases(
             }
         };
 
-        // Embed query (unique per case)
-        let query_vec = match pipeline::embed_text(&case.query, true, model_dir).await {
-            Ok(v) => v,
-            Err(e) => {
-                if verbose { println!("EMBED ERROR (query): {e}"); }
-                eval_results.push(EvalResult {
-                    query: case.query.clone(), pdf: case.pdf.clone(), label,
-                    case_type: case.case_type.clone(), difficulty: case.difficulty.clone(),
-                    recall: 0.0, partial_score: 0.0, mrr: 0.0, precision_at_1: false,
-                    answer_rank: None, passed: false,
-                    missed: case.expected.clone(), must_not_violations: vec![],
-                    top_scores: vec![], tags: case.tags.clone(), notes: case.notes.clone(),
-                });
-                continue;
+        // Embed query (unique per case, with disk cache)
+        let query_vec = if let Some(cached) = disk_cache.get(&case.query, true) {
+            cached.clone()
+        } else {
+            match pipeline::embed_text(&case.query, true, model_dir).await {
+                Ok(v) => {
+                    disk_cache.insert(&case.query, true, v.clone());
+                    v
+                }
+                Err(e) => {
+                    if verbose { println!("EMBED ERROR (query): {e}"); }
+                    eval_results.push(EvalResult {
+                        query: case.query.clone(), pdf: case.pdf.clone(), label,
+                        case_type: case.case_type.clone(), difficulty: case.difficulty.clone(),
+                        recall: 0.0, partial_score: 0.0, mrr: 0.0, precision_at_1: false,
+                        answer_rank: None, passed: false,
+                        missed: case.expected.clone(), must_not_violations: vec![],
+                        top_scores: vec![], tags: case.tags.clone(), notes: case.notes.clone(),
+                    });
+                    continue;
+                }
             }
         };
 
@@ -670,6 +776,9 @@ async fn run_eval_cases(
             });
         }
     }
+
+    // Persist embedding cache to disk for next run
+    disk_cache.save();
 
     eval_results
 }
