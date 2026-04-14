@@ -1837,19 +1837,26 @@ pub async fn query(
     // phenomenon: LLMs attend best to the first and last chunks, weakest in the
     // middle. Place highest-relevance first, second-highest last, weakest in middle.
     // (Liu et al. 2023; confirmed for Qwen3 by community benchmarks)
+    // Compute max score for normalization (relevance labels)
+    let max_score = results.iter().map(|(s, _)| *s).fold(0.0f32, f32::max);
+
     let mut context_parts: Vec<String> = results
         .iter()
         .enumerate()
-        .map(|(i, (_, meta))| {
+        .map(|(i, (score, meta))| {
+            // Relevance label: normalize score to 1-5 stars so LLM knows
+            // which chunks are most trustworthy for answering.
+            let rel = if max_score > 0.0 { score / max_score } else { 0.0 };
+            let stars = if rel > 0.85 { "★★★" } else if rel > 0.60 { "★★" } else { "★" };
             let section = extract_section_header(&meta.text);
             let header = match section {
                 Some(ref hdr) => format!(
-                    "[{}: {}, p. {}, §{}]\n",
-                    i + 1, meta.file_name, meta.page_number, hdr
+                    "[{} {}: {}, p. {}, §{}]\n",
+                    i + 1, stars, meta.file_name, meta.page_number, hdr
                 ),
                 None => format!(
-                    "[{}: {}, p. {}]\n",
-                    i + 1, meta.file_name, meta.page_number
+                    "[{} {}: {}, p. {}]\n",
+                    i + 1, stars, meta.file_name, meta.page_number
                 ),
             };
             let overhead = header.len();
@@ -1873,7 +1880,9 @@ pub async fn query(
         context_parts = sandwiched;
     }
 
-    // For multi-document queries, add a brief document list header
+    // For multi-document queries, add a brief document list header.
+    // Also note loaded-but-not-retrieved docs so the LLM won't hallucinate
+    // references to documents it can't see.
     {
         let mut seen_docs: Vec<String> = Vec::new();
         for (_, meta) in &results {
@@ -1881,12 +1890,36 @@ pub async fn query(
                 seen_docs.push(meta.file_name.clone());
             }
         }
+        // Collect all loaded doc names for this case/session
+        let all_loaded_docs: Vec<String> = {
+            let s = state.lock().await;
+            s.file_registry
+                .values()
+                .filter(|fi| fi.case_id.as_ref() == case_id.as_ref())
+                .map(|fi| fi.file_name.clone())
+                .collect()
+        };
         if seen_docs.len() > 1 {
             let doc_list = seen_docs.iter().enumerate()
                 .map(|(i, name)| format!("[{}] {}", i + 1, name))
                 .collect::<Vec<_>>()
                 .join(", ");
-            context.push_str(&format!("Documents: {}\n\n", doc_list));
+            context.push_str(&format!("Documents referenced below: {}\n", doc_list));
+        }
+        // Note docs that are loaded but not relevant to this query
+        let not_retrieved: Vec<&String> = all_loaded_docs
+            .iter()
+            .filter(|name| !seen_docs.contains(name))
+            .collect();
+        if !not_retrieved.is_empty() {
+            let names = not_retrieved.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", ");
+            context.push_str(&format!(
+                "Note: {} also loaded but not relevant to this query — do not reference.\n",
+                names
+            ));
+        }
+        if seen_docs.len() > 1 || !not_retrieved.is_empty() {
+            context.push('\n');
         }
     }
 
