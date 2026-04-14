@@ -2109,6 +2109,9 @@ pub async fn query(
     // Strip sentences flagged as hallucinations/fabrications by assertions.
     // This prevents showing content the model made up to the user.
     final_answer = strip_hallucinated_sentences(&final_answer, &final_assertions);
+    // Strip sentences containing proper nouns or numbers not grounded in source chunks.
+    let chunk_strings: Vec<String> = results.iter().map(|(_, m)| m.text.clone()).collect();
+    final_answer = crate::assertions::strip_ungrounded_claims(&final_answer, &chunk_strings);
     // Light cleanup: collapse repetitions, strip excessive hedging, repair citations.
     final_answer = collapse_repetitions(&final_answer);
     final_answer = strip_excessive_hedging(&final_answer);
