@@ -3121,7 +3121,7 @@ mod tests {
         let history: Vec<(String, String)> = (0..8)
             .map(|i| (format!("user{i}"), format!("assistant{i}")))
             .collect();
-        let result = format_history(&history);
+        let result = format_history(&history, false);
         // Turns 0-5 should be absent; turns 6-7 should be present
         assert!(!result.contains("user0"), "Turn 0 should be excluded");
         assert!(!result.contains("user5"), "Turn 5 should be excluded");
@@ -3135,7 +3135,7 @@ mod tests {
             ("q1".to_string(), "a1".to_string()),
             ("q2".to_string(), "a2".to_string()),
         ];
-        let result = format_history(&history);
+        let result = format_history(&history, false);
         assert!(result.contains("q1"));
         assert!(result.contains("q2"));
     }

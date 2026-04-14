@@ -840,13 +840,25 @@ pub async fn embed_texts_batch(
 /// Format prior conversation turns as proper ChatML multi-turn history.
 /// Returns a string of ChatML user/assistant turns to be injected BEFORE
 /// the current user turn in the prompt template.
-pub fn format_history(history: &[(String, String)]) -> String {
+/// `is_quick` controls truncation aggressiveness — Quick mode gets shorter history
+/// to preserve context budget for document chunks.
+pub fn format_history(history: &[(String, String)], is_quick: bool) -> String {
     let mut s = String::new();
-    // Cap to the last 2 turns so long conversations don't exhaust the context window.
-    let recent = if history.len() > 2 { &history[history.len() - 2..] } else { history };
+    // Quick mode: only last turn with shorter truncation to preserve context budget.
+    // Balanced/Extended: last 2 turns with more room.
+    let (max_turns, user_max, asst_max) = if is_quick {
+        (1, 200, 300)
+    } else {
+        (2, 400, 600)
+    };
+    let recent = if history.len() > max_turns {
+        &history[history.len() - max_turns..]
+    } else {
+        history
+    };
     for (user, assistant) in recent {
-        let u = safe_truncate(user, 400);
-        let a = safe_truncate(assistant, 600);
+        let u = safe_truncate(user, user_max);
+        let a = safe_truncate(assistant, asst_max);
         s.push_str(&format!(
             "<|im_start|>user\n{u}<|im_end|>\n<|im_start|>assistant\n{a}<|im_end|>\n"
         ));
@@ -879,7 +891,7 @@ pub async fn ask_llm(
     let history_prefix = if history.is_empty() {
         String::new()
     } else {
-        format_history(history)
+        format_history(history, inference_params.is_quick)
     };
 
     // Context goes in the user turn. Question is placed BEFORE context so the
@@ -1035,22 +1047,36 @@ Answer using ONLY these excerpts.\n\
             return Err("Empty token sequence".to_string());
         }
 
-        // Safety fallback: if the prompt still exceeds the budget (e.g. context
-        // was very large), fall back to head+tail reshuffling. With pre-allocation
-        // budgeting above, this should rarely trigger.
+        // Safety fallback: if the prompt still exceeds the budget, truncate
+        // from the END of tokens (which is the middle of the user turn / context).
+        // This preserves the system prompt at the start AND the assistant tag +
+        // question at the end, maintaining valid ChatML structure. The old
+        // head+tail splice could create broken tags — this approach only removes
+        // interior context tokens while keeping the prompt structurally valid.
         if n_tokens > max_prompt_tokens {
+            let excess = n_tokens - max_prompt_tokens;
             log::warn!(
-                "Prompt ({} tokens) exceeds safe limit ({}) despite pre-allocation. \
-                 Falling back to head+tail preservation.",
-                n_tokens,
-                max_prompt_tokens
+                "Prompt ({} tokens) exceeds safe limit ({}). Trimming {} tokens from context interior.",
+                n_tokens, max_prompt_tokens, excess
             );
-            let head = 180usize.min(max_prompt_tokens / 2);
-            let tail = max_prompt_tokens - head;
-            let tail_start = n_tokens - tail;
-            let mut kept: Vec<_> = tokens[..head].to_vec();
-            kept.extend_from_slice(&tokens[tail_start..]);
-            tokens = kept;
+            // Find the boundary: system prompt ends, user content begins.
+            // We want to remove tokens from the middle of the user turn (context),
+            // not from the system prompt or the trailing assistant tag.
+            // Heuristic: system prompt is ~first 15% of tokens; assistant tag is last ~30 tokens.
+            let system_end = (n_tokens * 15 / 100).max(100);
+            let assistant_start = n_tokens.saturating_sub(30);
+            // Remove excess tokens from just before the assistant tag
+            let cut_end = assistant_start;
+            let cut_start = cut_end.saturating_sub(excess);
+            // Ensure we don't cut into the system prompt
+            let cut_start = cut_start.max(system_end);
+            let actual_cut = cut_end - cut_start;
+            if actual_cut > 0 {
+                let mut kept: Vec<_> = tokens[..cut_start].to_vec();
+                kept.extend_from_slice(&tokens[cut_end..]);
+                tokens = kept;
+                log::info!("Trimmed {} tokens from context (positions {}..{})", actual_cut, cut_start, cut_end);
+            }
         }
         let n_tokens = tokens.len();
 
@@ -3514,7 +3540,7 @@ mod tests {
         let history: Vec<(String, String)> = (0..8)
             .map(|i| (format!("user{i}"), format!("assistant{i}")))
             .collect();
-        let result = format_history(&history);
+        let result = format_history(&history, false);
         assert!(!result.contains("user0"), "Turn 0 should be excluded");
         assert!(!result.contains("user5"), "Turn 5 should be excluded");
         assert!(result.contains("user6"), "Turn 6 should be included");
