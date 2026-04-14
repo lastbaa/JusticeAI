@@ -1099,14 +1099,30 @@ Answer using ONLY these excerpts.\n\
             chunk_start = chunk_end;
         }
 
-        // Sampling chain for Qwen3: penalties → top-k → top-p → temp → dist.
-        // Repetition penalty 1.15 with 128-token window + frequency penalty 0.1
-        // to discourage repeating the same phrases. Presence penalty 0.1 nudges
-        // the model to introduce new topics rather than restating old ones.
-        let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(128, 1.15, 0.1, 0.1),
+        // Sampling chain for Qwen3:
+        //   penalties → DRY → top-k → top-p → min-p → temp → dist
+        //
+        // DRY (Don't Repeat Yourself) sampler penalizes repeating *sequences*
+        // of tokens — catches phrase/sentence-level repetition that token-level
+        // repeat_penalty misses. This is the primary defense against duplicate
+        // bullet points and restated sentences.
+        //
+        // Penalties: repeat_penalty=1.15, freq=0.1, presence=0.3
+        // DRY: multiplier=0.8, base=1.75, allowed_length=2 (common 2-token
+        //   phrases like "the court" can repeat freely), full context scan
+        let mut sampler = LlamaSampler::chain_simple(vec![
+            LlamaSampler::penalties(128, 1.15, 0.1, 0.3),
+            LlamaSampler::dry(
+                model,
+                0.8,   // multiplier (strength)
+                1.75,  // base (exponential growth)
+                2,     // allowed_length (short phrases OK)
+                -1,    // penalty_last_n (-1 = full context)
+                ["\n", ":", "\"", "*", "-", "."],  // sequence breakers
+            ),
             LlamaSampler::top_k(40),
             LlamaSampler::top_p(0.90, 1),
+            LlamaSampler::min_p(0.05, 1),
             LlamaSampler::temp(inference_params.temperature),
             LlamaSampler::dist(42),
         ]);
