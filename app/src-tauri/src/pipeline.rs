@@ -237,11 +237,11 @@ ACCURACY RULES:\n\
 5. When sources conflict, cite both and note the discrepancy.\n\
 6. State each fact ONCE. Never repeat information even if it appears in multiple excerpts.\n\
 7. If information is ambiguous or incomplete in the documents, say so explicitly rather than guessing.\n\n\
-LEGAL WRITING STRUCTURE (follow this order):\n\
-1. **Conclusion first**: Lead with the direct answer to the question in 1-2 sentences.\n\
-2. **Supporting provisions**: Quote or cite the specific clause, section, or language that governs the answer.\n\
-3. **Application**: If the question requires interpretation, explain how the provision applies.\n\
-4. **Caveats**: Note any limitations, missing information, or ambiguities.\n\n\
+RESPONSE STRUCTURE (follow this order, but never output these labels):\n\
+1. Lead with the direct answer in 1-2 sentences.\n\
+2. Cite the specific clause, section, or language that supports your answer.\n\
+3. If interpretation is needed, explain how the provision applies.\n\
+4. Note any limitations, missing information, or ambiguities at the end.\n\n\
 FORMATTING:\n\
 - Identify parties by name and role on first mention: \"**Jane Thompson** (Landlord)\".\n\
 - **Bold** all monetary amounts, dates, deadlines, and party names.\n\
@@ -294,7 +294,7 @@ impl InferenceParams {
             InferenceMode::Balanced => Self {
                 max_new_tokens: 2048,
                 temperature: 0.6,
-                system_prompt_suffix: "\nFollow the Conclusion → Supporting Provisions → Application structure. Be thorough but concise. Use a flat bullet list for 3+ items — each bullet is a complete fact with citation. Use a table when comparing parties or obligations. No nested bullets, no repeated sections.",
+                system_prompt_suffix: "\nBe thorough but concise. Lead with the answer, then support with provisions. Use a flat bullet list for 3+ items — each bullet is a complete fact with citation. Use a table when comparing parties or obligations. Never repeat information. No nested bullets.",
                 system_prompt_override: None,
                 timeout_secs: 90,
                 is_quick: false,
@@ -302,7 +302,7 @@ impl InferenceParams {
             InferenceMode::Extended => Self {
                 max_new_tokens: 3072,
                 temperature: 0.7,
-                system_prompt_suffix: "\nFollow the Conclusion → Supporting Provisions → Application → Caveats structure. Provide detailed legal analysis. Cross-reference documents where applicable. Use ### headers to separate 3+ distinct topics. Use tables for multi-party or multi-clause comparisons. Flat bullet lists for provisions. Note any ambiguities or gaps in the documents.",
+                system_prompt_suffix: "\nProvide detailed legal analysis. Lead with the answer, then cite supporting provisions, then note caveats. Cross-reference documents where applicable. Use ### headers to separate 3+ distinct topics. Use tables for multi-party or multi-clause comparisons. Flat bullet lists for provisions. Never repeat information.",
                 system_prompt_override: None,
                 timeout_secs: 180,
                 is_quick: false,

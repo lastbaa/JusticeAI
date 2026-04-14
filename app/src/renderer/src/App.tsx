@@ -957,8 +957,8 @@ export default function App(): JSX.Element {
     if (files.length === 0) return
     setIsLoading(true)
     try {
-      // Snapshot current files with their case assignments
-      const snapshot = files.map((f) => ({ id: f.id, filePath: f.filePath, caseId: f.caseId }))
+      // Snapshot current files with their case assignments and roles
+      const snapshot = files.map((f) => ({ id: f.id, filePath: f.filePath, caseId: f.caseId, role: f.role }))
 
       // Remove all files (clears old chunks)
       await Promise.all(snapshot.map((f) => window.api.removeFile(f.id)))
@@ -969,10 +969,12 @@ export default function App(): JSX.Element {
       // Re-load all files (re-chunks with new settings)
       const reloaded = await window.api.loadFiles(paths)
 
-      // Re-assign case IDs based on original file paths
+      // Re-assign case IDs and roles based on original file paths
       const pathToCaseId = new Map<string, string>()
+      const pathToRole = new Map<string, string>()
       for (const f of snapshot) {
         if (f.caseId) pathToCaseId.set(f.filePath, f.caseId)
+        if (f.role) pathToRole.set(f.filePath, f.role)
       }
 
       for (const file of reloaded) {
@@ -980,6 +982,11 @@ export default function App(): JSX.Element {
         if (caseId) {
           await window.api.assignFileToCase(file.id, caseId)
           file.caseId = caseId
+        }
+        const role = pathToRole.get(file.filePath)
+        if (role) {
+          await window.api.setDocumentRole(file.id, role as any)
+          file.role = role as any
         }
       }
 

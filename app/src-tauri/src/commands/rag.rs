@@ -2121,6 +2121,8 @@ pub async fn query(
     final_answer = fix_mangled_filenames(&final_answer, &known_files);
     // Remove label-only bullets: lines like "- Age:" or "* Schedule:" with no content
     final_answer = strip_label_only_bullets(&final_answer);
+    // Strip structural labels the model may echo from the prompt (e.g., "Conclusion first:", "Caveats:")
+    final_answer = strip_prompt_echo_labels(&final_answer);
     // Normalize excessive whitespace: collapse 3+ newlines to 2
     let newline_re = regex::Regex::new(r"\n{3,}").unwrap();
     final_answer = newline_re.replace_all(&final_answer, "\n\n").trim().to_string();
@@ -2334,14 +2336,16 @@ fn collapse_repetitions(answer: &str) -> String {
             continue;
         }
 
-        // Check for near-duplicates using word overlap (Jaccard > 0.80)
+        // Check for near-duplicates using word overlap (Jaccard > 0.65).
+        // Threshold is intentionally low because the LLM often repeats
+        // the same fact with slightly different citations or wording.
         let is_dup = seen_normalized.iter().any(|prev| {
             let prev_words: std::collections::HashSet<&str> = prev.split_whitespace().collect();
             let cur_words: std::collections::HashSet<&str> = normalized.split_whitespace().collect();
             let intersection = prev_words.intersection(&cur_words).count();
             let union = prev_words.union(&cur_words).count();
             if union == 0 { return false; }
-            (intersection as f64 / union as f64) > 0.80
+            (intersection as f64 / union as f64) > 0.65
         });
 
         if !is_dup {
@@ -2421,6 +2425,67 @@ fn strip_label_only_bullets(answer: &str) -> String {
         result.push(line);
     }
     result.join("\n")
+}
+
+/// Strip structural labels the model may echo from the system prompt.
+/// E.g., "Conclusion first: The rent is..." → "The rent is..."
+///       "**Caveats**: There is no..." → "There is no..."
+fn strip_prompt_echo_labels(answer: &str) -> String {
+    let labels = [
+        "conclusion first:",
+        "conclusion:",
+        "supporting provisions:",
+        "application:",
+        "caveats:",
+        "caveat:",
+        "response structure:",
+        "legal analysis:",
+        "short answer:",
+        "answer:",
+    ];
+    let mut result = answer.to_string();
+    for label in &labels {
+        // Handle both plain and bold versions: "**Conclusion first**:" or "Conclusion first:"
+        let bold_pattern = format!("**{}**", label.trim_end_matches(':'));
+        // Case-insensitive line-start replacement
+        let lines: Vec<String> = result.lines().map(|line| {
+            let trimmed = line.trim();
+            let lower = trimmed.to_lowercase();
+            // Check if line starts with the label (with optional bold)
+            if lower.starts_with(label) {
+                let rest = &trimmed[label.len()..].trim_start();
+                if rest.is_empty() {
+                    String::new() // Remove label-only line
+                } else {
+                    // Capitalize first letter of remaining text
+                    let mut chars = rest.chars();
+                    match chars.next() {
+                        Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+                        None => String::new(),
+                    }
+                }
+            } else if lower.starts_with(&bold_pattern.to_lowercase()) {
+                // Strip "**Label**:" prefix
+                let after_bold = &trimmed[bold_pattern.len()..];
+                let rest = after_bold.trim_start_matches(':').trim_start();
+                if rest.is_empty() {
+                    String::new()
+                } else {
+                    let mut chars = rest.chars();
+                    match chars.next() {
+                        Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+                        None => String::new(),
+                    }
+                }
+            } else {
+                line.to_string()
+            }
+        }).collect();
+        result = lines.join("\n");
+    }
+    // Remove empty lines left by label stripping
+    let newline_re = regex::Regex::new(r"\n{3,}").unwrap();
+    newline_re.replace_all(&result, "\n\n").trim().to_string()
 }
 
 /// Fix mangled filenames in citations by fuzzy-matching against known files.
