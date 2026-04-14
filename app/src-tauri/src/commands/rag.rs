@@ -1745,11 +1745,11 @@ pub async fn query(
     let scores: Vec<f32> = results.iter().map(|(s, _)| *s).collect();
     let chunk_budgets = allocate_chunk_budgets(&scores, primary_budget, 200);
 
-    // Build per-chunk formatted strings with budget-aware truncation
-    // Format chunks with compact source labels to save token budget.
-    // Qwen3-8B has strong long-context attention — no need for round-robin
-    // interleaving (that was a workaround for 7B "lost in the middle" bias).
-    // Chunks are kept in relevance order (highest-scoring first).
+    // Build per-chunk formatted strings with budget-aware truncation.
+    // Apply "sandwich ordering" to counter the "lost in the middle" attention
+    // phenomenon: LLMs attend best to the first and last chunks, weakest in the
+    // middle. Place highest-relevance first, second-highest last, weakest in middle.
+    // (Liu et al. 2023; confirmed for Qwen3 by community benchmarks)
     let mut context_parts: Vec<String> = results
         .iter()
         .enumerate()
@@ -1772,6 +1772,19 @@ pub async fn query(
             format!("{}{}", header, truncated_text)
         })
         .collect();
+
+    // Sandwich reorder: [best, worst, ..., second-worst, second-best]
+    // Keeps chunk #1 (highest relevance) first and #2 last for maximum attention.
+    if context_parts.len() >= 3 {
+        let mut sandwiched = Vec::with_capacity(context_parts.len());
+        sandwiched.push(context_parts[0].clone());          // best → first
+        // Middle chunks in reverse order (weakest in the center)
+        for i in (2..context_parts.len()).rev() {
+            sandwiched.push(context_parts[i].clone());
+        }
+        sandwiched.push(context_parts[1].clone());          // second-best → last
+        context_parts = sandwiched;
+    }
 
     // For multi-document queries, add a brief document list header
     {

@@ -228,26 +228,24 @@ pub const QWEN3_GGUF_URL: &str = "https://huggingface.co/Qwen/Qwen3-8B-GGUF/reso
 /// Document context goes in the user turn; system prompt contains only rules.
 /// Formatting instructions are in mode-specific suffixes, not here.
 pub const RULES_PROMPT: &str = "\
-You are Justice AI, a legal document analyst. You answer questions using ONLY the document excerpts provided.\n\n\
+You are Justice AI, a legal document analyst. You answer questions using ONLY the document excerpts provided below. The excerpts are your sole source of truth — your training knowledge is irrelevant.\n\n\
 RULES:\n\
-1. Answer ONLY from the provided document excerpts. Never use your training data or external knowledge.\n\
+1. Answer ONLY from the provided document excerpts. If information is absent, state: \"This information is not present in the provided documents.\" Do NOT guess or infer.\n\
 2. CITE every factual claim as [filename, p. N] using the exact filename and page number from the excerpt headers.\n\
-3. Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written. Never round, paraphrase, or approximate.\n\
-4. Never fabricate or infer case citations, statute numbers, court names, party names, or page numbers not in the excerpts.\n\
+3. Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written — never round, paraphrase, or approximate.\n\
+4. Never fabricate case citations, statute numbers, court names, party names, or page numbers not explicitly in the excerpts.\n\
 5. When sources conflict, cite both and note the discrepancy.\n\
-6. When information is absent, state: \"This information is not present in the provided documents.\"\n\
-7. State each fact ONCE. Never repeat a bullet point, sentence, or paragraph — even when rephrased.";
+6. State each fact ONCE. Never repeat a bullet point, sentence, or paragraph.\n\
+7. When multiple documents are provided, address EACH document. Organize by document or by topic.";
 
 /// Shorter rules prompt for Quick mode — same anti-hallucination rules, no formatting.
 pub const RULES_PROMPT_QUICK: &str = "\
-You are Justice AI, a legal document analyst.\n\n\
+You are Justice AI, a legal document analyst. Answer ONLY from the provided excerpts.\n\n\
 RULES:\n\
-1. Answer ONLY from the provided document excerpts. Do NOT use training data.\n\
-2. Cite as [filename, p. N] using exact filenames and page numbers from excerpt headers.\n\
-3. Reproduce numbers, dates, and names EXACTLY. Never round or guess page numbers.\n\
-4. Never fabricate citations, authorities, or parties not in the excerpts.\n\
-5. If not in documents: \"This information is not present in the provided documents.\"\n\
-6. State each fact ONCE. Never repeat.";
+1. If not in excerpts: \"This information is not present in the provided documents.\"\n\
+2. Cite as [filename, p. N]. Reproduce numbers, dates, and names EXACTLY.\n\
+3. Never fabricate citations, authorities, or parties not in the excerpts.\n\
+4. State each fact ONCE. Never repeat.";
 
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
@@ -270,9 +268,12 @@ impl InferenceParams {
     /// A runtime cap in ask_llm ensures we never overshoot.
     pub fn from_mode(mode: &InferenceMode) -> Self {
         match mode {
+            // Qwen3-8B official non-thinking mode: temp=0.7, top_p=0.8, top_k=20.
+            // We use slightly lower temps for factual RAG accuracy but stay above 0.4
+            // to avoid repetition/degeneration that Qwen3 exhibits at low temps.
             InferenceMode::Quick => Self {
                 max_new_tokens: 512,
-                temperature: 0.15,
+                temperature: 0.5,
                 system_prompt_suffix: "\nAnswer in 1-3 sentences. State the fact, cite the source, stop. No bold, no bullets, no headers.",
                 system_prompt_override: None,
                 timeout_secs: 30,
@@ -280,7 +281,7 @@ impl InferenceParams {
             },
             InferenceMode::Balanced => Self {
                 max_new_tokens: 2048,
-                temperature: 0.3,
+                temperature: 0.6,
                 system_prompt_suffix: "\nProvide a thorough answer. Use **bold** for key amounts and legal terms. Use bullet points for 3+ items. Do not add section headers unless the question has multiple distinct parts.",
                 system_prompt_override: None,
                 timeout_secs: 90,
@@ -288,7 +289,7 @@ impl InferenceParams {
             },
             InferenceMode::Extended => Self {
                 max_new_tokens: 3072,
-                temperature: 0.4,
+                temperature: 0.7,
                 system_prompt_suffix: "\nProvide a detailed legal analysis. Cross-reference documents where applicable. Use **bold** for key terms, bullet points for lists, and section headers only for 3+ distinct sub-topics.",
                 system_prompt_override: None,
                 timeout_secs: 180,
@@ -1099,30 +1100,34 @@ Answer using ONLY these excerpts.\n\
             chunk_start = chunk_end;
         }
 
-        // Sampling chain for Qwen3:
+        // Sampling chain for Qwen3 — follows official llama.cpp order:
         //   penalties → DRY → top-k → top-p → min-p → temp → dist
         //
-        // DRY (Don't Repeat Yourself) sampler penalizes repeating *sequences*
-        // of tokens — catches phrase/sentence-level repetition that token-level
-        // repeat_penalty misses. This is the primary defense against duplicate
-        // bullet points and restated sentences.
+        // Qwen3 official guidance (non-thinking mode):
+        //   - repeat_penalty=1.0 (DISABLED — Qwen team says don't use it)
+        //   - presence_penalty=1.5 (primary anti-repetition mechanism)
+        //   - top_k=20, top_p=0.80 (official recommended values)
         //
-        // Penalties: repeat_penalty=1.15, freq=0.1, presence=0.3
-        // DRY: multiplier=0.8, base=1.75, allowed_length=2 (common 2-token
-        //   phrases like "the court" can repeat freely), full context scan
+        // DRY sampler catches phrase/sentence-level repetition that
+        // presence_penalty alone can't prevent (e.g., repeated bullet points).
         let mut sampler = LlamaSampler::chain_simple(vec![
-            LlamaSampler::penalties(128, 1.15, 0.1, 0.3),
+            LlamaSampler::penalties(
+                128,   // last_n tokens to consider
+                1.0,   // repeat_penalty (1.0 = disabled per Qwen guidance)
+                0.0,   // frequency_penalty
+                1.5,   // presence_penalty (Qwen official recommendation)
+            ),
             LlamaSampler::dry(
                 model,
                 0.8,   // multiplier (strength)
                 1.75,  // base (exponential growth)
-                2,     // allowed_length (short phrases OK)
-                -1,    // penalty_last_n (-1 = full context)
+                2,     // allowed_length (common 2-token phrases can repeat)
+                -1,    // penalty_last_n (-1 = full context scan)
                 ["\n", ":", "\"", "*", "-", "."],  // sequence breakers
             ),
-            LlamaSampler::top_k(40),
-            LlamaSampler::top_p(0.90, 1),
-            LlamaSampler::min_p(0.05, 1),
+            LlamaSampler::top_k(20),         // Qwen3 official: 20
+            LlamaSampler::top_p(0.80, 1),    // Qwen3 official: 0.80
+            LlamaSampler::min_p(0.05, 1),    // community consensus for quality floor
             LlamaSampler::temp(inference_params.temperature),
             LlamaSampler::dist(42),
         ]);
@@ -3191,7 +3196,7 @@ mod tests {
     fn inference_params_quick() {
         let p = InferenceParams::from_mode(&InferenceMode::Quick);
         assert_eq!(p.max_new_tokens, 512);
-        assert!((p.temperature - 0.15).abs() < 0.01);
+        assert!((p.temperature - 0.5).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 30);
         assert!(p.is_quick);
@@ -3201,7 +3206,7 @@ mod tests {
     fn inference_params_balanced() {
         let p = InferenceParams::from_mode(&InferenceMode::Balanced);
         assert_eq!(p.max_new_tokens, 2048);
-        assert!((p.temperature - 0.3).abs() < 0.01);
+        assert!((p.temperature - 0.6).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 90);
     }
@@ -3210,7 +3215,7 @@ mod tests {
     fn inference_params_extended() {
         let p = InferenceParams::from_mode(&InferenceMode::Extended);
         assert_eq!(p.max_new_tokens, 3072);
-        assert!((p.temperature - 0.4).abs() < 0.01);
+        assert!((p.temperature - 0.7).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 180);
     }
