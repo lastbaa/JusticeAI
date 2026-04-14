@@ -489,9 +489,9 @@ impl RagState {
                         chunk_count: count,
                         case_id: None,
                         detected_jurisdiction: None,
-                        role: DocumentRole::default(),
+                        role: meta.role,  // Preserve role from saved chunk metadata
                         fact_sheet: None,
-                        image_width: None, 
+                        image_width: None,
                         image_height: None,
                     },
                 );

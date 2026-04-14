@@ -2336,16 +2336,28 @@ fn collapse_repetitions(answer: &str) -> String {
             continue;
         }
 
-        // Check for near-duplicates using word overlap (Jaccard > 0.65).
-        // Threshold is intentionally low because the LLM often repeats
-        // the same fact with slightly different citations or wording.
+        // Check for near-duplicates using word overlap (Jaccard > 0.70).
+        // Also check substring containment for lines that are subsets of
+        // previously seen lines (common with repeated bullets).
         let is_dup = seen_normalized.iter().any(|prev| {
+            // Substring containment: if one is 80%+ of the other and contained in it
+            let (shorter, longer) = if normalized.len() <= prev.len() {
+                (normalized.as_str(), prev.as_str())
+            } else {
+                (prev.as_str(), normalized.as_str())
+            };
+            if shorter.len() > 15 && shorter.len() as f64 / longer.len() as f64 > 0.75
+                && longer.contains(shorter)
+            {
+                return true;
+            }
+            // Jaccard word overlap
             let prev_words: std::collections::HashSet<&str> = prev.split_whitespace().collect();
             let cur_words: std::collections::HashSet<&str> = normalized.split_whitespace().collect();
             let intersection = prev_words.intersection(&cur_words).count();
             let union = prev_words.union(&cur_words).count();
             if union == 0 { return false; }
-            (intersection as f64 / union as f64) > 0.65
+            (intersection as f64 / union as f64) > 0.70
         });
 
         if !is_dup {
