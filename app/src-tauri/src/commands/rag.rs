@@ -1026,7 +1026,7 @@ fn neighbor_is_relevant(target_text: &str, neighbor_text: &str) -> bool {
         .filter(|w| w.len() > 4)
         .collect();
     let shared = target_words.intersection(&neighbor_words).count();
-    shared >= 3
+    shared >= 5 // Raised from 3 to reduce noise from tangentially related neighbors
 }
 
 /// Truncate text to a budget without cutting mid-word or mid-sentence.
@@ -1042,9 +1042,11 @@ fn compress_chunk_text(text: &str) -> String {
         if trimmed.chars().all(|c| c == '_' || c == '-' || c == '=' || c == '.') { continue; }
         if trimmed.starts_with("Page ") && trimmed.len() < 15 { continue; }
         if trimmed.starts_with("page ") && trimmed.len() < 15 { continue; }
-        // Skip lines that are just repeated characters (decorators)
+        // Skip lines that are just repeated non-alphanumeric characters (decorators).
+        // Keep lines with digits or letters even if only 2 unique chars (e.g., "10101").
         let unique_chars: std::collections::HashSet<char> = trimmed.chars().collect();
-        if unique_chars.len() <= 2 && trimmed.len() > 5 { continue; }
+        if unique_chars.len() <= 2 && trimmed.len() > 5
+            && !trimmed.chars().any(|c| c.is_alphanumeric()) { continue; }
         // Collapse multiple spaces
         let compressed: String = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
         if !result.is_empty() {
@@ -1411,13 +1413,16 @@ pub async fn query(
         };
 
         // ── Form data injection (inside same lock) ───────────────────────────
+        // Use the top result's score as baseline instead of hardcoded 0.5
+        // so form chunks don't dominate the ranking when irrelevant.
+        let form_inject_score = results.first().map(|(s, _)| *s * 0.9).unwrap_or(0.02);
         let form_chunks: Vec<(f32, ChunkMetadata)> = s
             .embedded_chunks
             .iter()
             .filter(|e| e.meta.text.starts_with("FILLED FORM DATA"))
             .filter(|e| !results.iter().any(|(_, m)| m.id == e.meta.id))
             .take(2)
-            .map(|e| (0.5, e.meta.clone()))
+            .map(|e| (form_inject_score, e.meta.clone()))
             .collect();
 
         // ── Single-pass neighbor map (inside same lock) ──────────────────────
@@ -1624,40 +1629,12 @@ pub async fn query(
             context.push_str(&format!("KEY FACTS:\n{}\n\n", fact_parts.join("\n")));
         }
 
-        // ── Document map: brief summary of each loaded document ──────────
-        // Gives the LLM awareness of what documents exist and their scope,
-        // so it can correctly attribute information and say "not found" when
-        // the right document isn't loaded.
-        let mut doc_lines: Vec<String> = Vec::new();
-        for fi in s.file_registry.values() {
-            if fi.case_id.as_ref() == case_id.as_ref() {
-                let role_label = match fi.role {
-                    DocumentRole::ClientDocument => "Client Doc",
-                    DocumentRole::LegalAuthority => "Legal Authority",
-                    DocumentRole::Evidence => "Evidence",
-                    DocumentRole::Reference => "Reference",
-                };
-                doc_lines.push(format!(
-                    "- {} ({}, {} pages, {} words, role: {})",
-                    fi.file_name,
-                    if fi.file_name.contains('.') {
-                        fi.file_name.rsplit('.').next().unwrap_or("file").to_uppercase()
-                    } else {
-                        "FILE".to_string()
-                    },
-                    fi.total_pages,
-                    fi.word_count,
-                    role_label
-                ));
-            }
-        }
-        if !doc_lines.is_empty() {
-            context.push_str(&format!("LOADED DOCUMENTS:\n{}\n\n", doc_lines.join("\n")));
-        }
+        // Document map removed — compact document list is added inline with chunks.
+        // The verbose LOADED DOCUMENTS section wasted ~200-400 chars of context budget.
     }
 
-    // Cap metadata at 25% of budget so at least 75% remains for document chunks
-    let max_metadata = max_context_chars / 4;
+    // Hard cap metadata at 800 chars — most value comes from document chunks, not metadata
+    let max_metadata = 800usize.min(max_context_chars / 4);
     if context.len() > max_metadata {
         context.truncate(max_metadata);
         // Avoid cutting mid-line
@@ -1682,69 +1659,47 @@ pub async fn query(
     let chunk_budgets = allocate_chunk_budgets(&scores, primary_budget, 200);
 
     // Build per-chunk formatted strings with budget-aware truncation
-    // Track file_name for per-document grouping
-    let formatted_chunks: Vec<(String, String)> = results
+    // Format chunks with compact source labels to save token budget.
+    // Qwen3-8B has strong long-context attention — no need for round-robin
+    // interleaving (that was a workaround for 7B "lost in the middle" bias).
+    // Chunks are kept in relevance order (highest-scoring first).
+    let mut context_parts: Vec<String> = results
         .iter()
         .enumerate()
         .map(|(i, (_, meta))| {
             let section = extract_section_header(&meta.text);
-            let source_label = match section {
+            let header = match section {
                 Some(ref hdr) => format!(
-                    "[Source: {}, p. {}, Section: {}]",
-                    meta.file_name, meta.page_number, hdr
+                    "[{}: {}, p. {}, §{}]\n",
+                    i + 1, meta.file_name, meta.page_number, hdr
                 ),
                 None => format!(
-                    "[Source: {}, p. {}]",
-                    meta.file_name, meta.page_number
+                    "[{}: {}, p. {}]\n",
+                    i + 1, meta.file_name, meta.page_number
                 ),
             };
-            let header = format!("SOURCE {} — {}\n", i + 1, source_label);
-            let footer = "\n---";
-            let overhead = header.len() + footer.len();
+            let overhead = header.len();
             let text_budget = chunk_budgets.get(i).copied().unwrap_or(200).saturating_sub(overhead);
             let compressed = compress_chunk_text(&meta.text);
             let truncated_text = truncate_to_budget(&compressed, text_budget);
-            (meta.file_name.clone(), format!("{}{}{}", header, truncated_text, footer))
+            format!("{}{}", header, truncated_text)
         })
         .collect();
 
-    // ── Round-robin interleave by document ─────────────────────────────────
-    // 7B models are recency-biased ("lost in the middle") — they attend most to
-    // content at the END of the context (closest to the question). Dumping all
-    // chunks from doc1 then doc2 means doc2 gets ignored. Round-robin interleaving
-    // ensures every document gets "prime real estate" in the context window.
-    let mut doc_order: Vec<String> = Vec::new();
-    let mut chunks_by_doc: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    for (file_name, text) in &formatted_chunks {
-        if !chunks_by_doc.contains_key(file_name) {
-            doc_order.push(file_name.clone());
-        }
-        chunks_by_doc.entry(file_name.clone()).or_default().push(text.clone());
-    }
-
-    // Add source checklist at the top — primes the model to expect all documents
-    if doc_order.len() > 1 {
-        let checklist: Vec<String> = doc_order.iter().enumerate()
-            .map(|(i, name)| format!("[{}] {}", i + 1, name))
-            .collect();
-        context.push_str(&format!(
-            "DOCUMENTS PROVIDED ({} total):\n{}\nYou MUST reference ALL documents listed above.\n\n",
-            doc_order.len(),
-            checklist.join("\n")
-        ));
-    }
-
-    // Round-robin: take one chunk from each doc in turn
-    let mut context_parts: Vec<String> = Vec::new();
-    let max_rounds = chunks_by_doc.values().map(|v| v.len()).max().unwrap_or(0);
-    for round in 0..max_rounds {
-        for doc_name in &doc_order {
-            if let Some(chunks) = chunks_by_doc.get(doc_name) {
-                if let Some(chunk) = chunks.get(round) {
-                    context_parts.push(chunk.clone());
-                }
+    // For multi-document queries, add a brief document list header
+    {
+        let mut seen_docs: Vec<String> = Vec::new();
+        for (_, meta) in &results {
+            if !seen_docs.contains(&meta.file_name) {
+                seen_docs.push(meta.file_name.clone());
             }
+        }
+        if seen_docs.len() > 1 {
+            let doc_list = seen_docs.iter().enumerate()
+                .map(|(i, name)| format!("[{}] {}", i + 1, name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            context.push_str(&format!("Documents: {}\n\n", doc_list));
         }
     }
 
@@ -1813,11 +1768,25 @@ pub async fn query(
     let answer_lower = answer.to_lowercase();
     // Only mark as truly not-found for the model's explicit "not found" signal.
     // Avoid matching partial phrases that appear in valid answers.
+    // Mark as not_found only when the model explicitly gave up.
+    // Require the "not found" signal to dominate the response (>60% of length)
+    // to avoid false positives on answers that mention missing info alongside real content.
+    let not_found_phrases = [
+        "i could not find information",
+        "could not find information about this",
+        "not present in the provided documents",
+        "not mentioned in the provided documents",
+        "the documents do not contain",
+        "the documents do not discuss",
+        "there is no mention of",
+        "there is no reference to",
+        "no information about",
+        "i cannot find",
+    ];
+    let has_not_found_signal = not_found_phrases.iter().any(|p| answer_lower.contains(p));
     let not_found = answer.is_empty()
-        || answer_lower.contains("i could not find information")
-        || answer_lower.contains("could not find information about this")
-        || answer_lower.starts_with("the documents do not contain")
-        || (answer_lower.contains("documents do not contain") && answer.len() < 150);
+        || (has_not_found_signal && answer.len() < 200)
+        || (answer_lower.starts_with("this information is not") && answer.len() < 250);
 
     // Always build citations from the retrieved chunks — even on not_found,
     // showing the sources lets the user investigate the document directly.
@@ -2033,47 +2002,47 @@ fn extract_section_header(text: &str) -> Option<String> {
 }
 
 /// Detect and remove excessive hedging when >50% of sentences hedge.
+/// Strip hedging phrases from sentences instead of removing entire sentences.
+/// Legal answers often need qualifiers — we remove the filler words, not the content.
 fn strip_excessive_hedging(answer: &str) -> String {
-    let hedging_phrases = [
-        "it appears that",
-        "it seems that",
-        "it may be",
-        "it might be",
-        "it could be",
-        "it is possibly",
-        "this is possibly",
-        "perhaps it",
-        "perhaps the",
-        "it is unclear",
-        "it is uncertain",
-        "this may not",
-        "this might not",
+    let hedging_prefixes = [
+        "it appears that ",
+        "it seems that ",
+        "it may be that ",
+        "it might be that ",
+        "it could be that ",
+        "it is possibly ",
+        "this is possibly ",
+        "perhaps ",
+        "it is unclear whether ",
+        "it is uncertain whether ",
     ];
 
-    let sentences: Vec<&str> = answer.split(". ").collect();
-    let hedge_count = sentences
-        .iter()
-        .filter(|s| {
-            let lower = s.to_lowercase();
-            hedging_phrases.iter().any(|h| lower.contains(h))
-        })
-        .count();
-
-    // If >50% of sentences hedge, strip the hedging sentences (keep only grounded ones)
-    if sentences.len() > 2 && hedge_count as f64 / sentences.len() as f64 > 0.5 {
-        let grounded: Vec<&str> = sentences
-            .iter()
-            .filter(|s| {
-                let lower = s.to_lowercase();
-                !hedging_phrases.iter().any(|h| lower.contains(h))
-            })
-            .copied()
-            .collect();
-        if !grounded.is_empty() {
-            return grounded.join(". ") + ".";
+    let mut result = answer.to_string();
+    for prefix in &hedging_prefixes {
+        // Case-insensitive replacement: strip the hedge prefix from sentence starts
+        let lower = result.to_lowercase();
+        while let Some(pos) = lower.find(prefix) {
+            // Only strip if it's at a sentence boundary (start of string, after ". ", or after newline)
+            let at_boundary = pos == 0
+                || result[..pos].ends_with(". ")
+                || result[..pos].ends_with(".\n")
+                || result[..pos].ends_with('\n')
+                || result[..pos].ends_with("- ");
+            if at_boundary {
+                // Capitalize the first letter after stripping
+                let after = &result[pos + prefix.len()..];
+                let capitalized = if let Some(first) = after.chars().next() {
+                    format!("{}{}", first.to_uppercase(), &after[first.len_utf8()..])
+                } else {
+                    after.to_string()
+                };
+                result = format!("{}{}", &result[..pos], capitalized);
+            }
+            break; // Re-scan from start on next iteration
         }
     }
-    answer.to_string()
+    result
 }
 
 /// Collapse repeated sentences, near-duplicate sentences, and repeated bullet points.

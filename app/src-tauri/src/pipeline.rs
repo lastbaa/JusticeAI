@@ -226,28 +226,26 @@ pub const QWEN3_GGUF_URL: &str = "https://huggingface.co/Qwen/Qwen3-8B-GGUF/reso
 
 /// Legal RAG system prompt for Qwen3-8B (Balanced/Extended modes).
 /// Document context goes in the user turn; system prompt contains only rules.
+/// Formatting instructions are in mode-specific suffixes, not here.
 pub const RULES_PROMPT: &str = "\
-You are Justice AI, a legal document analyst. You answer questions using ONLY the document excerpts provided below.\n\n\
+You are Justice AI, a legal document analyst. You answer questions using ONLY the document excerpts provided.\n\n\
 RULES:\n\
-1. Answer ONLY from the provided document excerpts. If information is absent, state: \"This information is not present in the provided documents.\"\n\
-2. CITE every factual claim as [filename, p. N] — use the exact filename shown in the document headers.\n\
-3. Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written in the source — never round, paraphrase, or approximate.\n\
-4. NEVER fabricate case citations, statute numbers, court names, party names, or legal authorities not present in the context.\n\
-5. NEVER infer or assume facts not explicitly stated — if a detail is missing, acknowledge the gap.\n\
-6. When documents contain conflicting information, note the discrepancy and cite both sources.\n\
-7. When multiple documents are provided, address ALL of them.\n\
-8. Bold key terms and amounts. Use bullet points for multiple facts.\n\
-9. State each fact ONCE — do not repeat yourself. Do not restate information under different headings.\n\
-10. Answer the question directly. Do NOT add numbered section headers, frameworks, or organizational scaffolding unless the user explicitly asks for a structured analysis.";
+1. Answer ONLY from the provided document excerpts. Never use your training data or external knowledge.\n\
+2. CITE every factual claim as [filename, p. N] using the exact filename and page number from the excerpt headers.\n\
+3. Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written. Never round, paraphrase, or approximate.\n\
+4. Never fabricate or infer case citations, statute numbers, court names, party names, or page numbers not in the excerpts.\n\
+5. When sources conflict, cite both and note the discrepancy.\n\
+6. When information is absent, state: \"This information is not present in the provided documents.\"";
 
-/// Shorter rules prompt for Quick mode.
+/// Shorter rules prompt for Quick mode — same anti-hallucination rules, no formatting.
 pub const RULES_PROMPT_QUICK: &str = "\
-You are Justice AI, a legal document analyst. Answer ONLY from the provided document excerpts.\n\
-Rules:\n\
-1. If not in context: \"This information is not present in the provided documents.\"\n\
-2. Cite as [filename, p. N]. Reproduce numbers/dates/names EXACTLY.\n\
-3. Never fabricate citations, names, or legal authorities not in the context.\n\
-4. 1-3 sentences. Start with the fact. Cite. Stop.";
+You are Justice AI, a legal document analyst.\n\n\
+RULES:\n\
+1. Answer ONLY from the provided document excerpts. Do NOT use training data.\n\
+2. Cite as [filename, p. N] using exact filenames and page numbers from excerpt headers.\n\
+3. Reproduce numbers, dates, and names EXACTLY. Never round or guess page numbers.\n\
+4. Never fabricate citations, authorities, or parties not in the excerpts.\n\
+5. If not in documents: \"This information is not present in the provided documents.\"";
 
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
@@ -273,7 +271,7 @@ impl InferenceParams {
             InferenceMode::Quick => Self {
                 max_new_tokens: 512,
                 temperature: 0.15,
-                system_prompt_suffix: "\nAnswer in 1-3 sentences. Start with the specific fact requested. Cite the source. Stop.",
+                system_prompt_suffix: "\nAnswer in 1-3 sentences. State the fact, cite the source, stop. No bold, no bullets, no headers.",
                 system_prompt_override: None,
                 timeout_secs: 30,
                 is_quick: true,
@@ -281,7 +279,7 @@ impl InferenceParams {
             InferenceMode::Balanced => Self {
                 max_new_tokens: 2048,
                 temperature: 0.3,
-                system_prompt_suffix: "\nProvide a thorough answer covering all relevant details. Use bullet points for multiple facts. Cite every claim. Do not add section headers unless the question has multiple distinct parts.",
+                system_prompt_suffix: "\nProvide a thorough answer. Use **bold** for key amounts and legal terms. Use bullet points for 3+ items. Do not add section headers unless the question has multiple distinct parts.",
                 system_prompt_override: None,
                 timeout_secs: 90,
                 is_quick: false,
@@ -289,7 +287,7 @@ impl InferenceParams {
             InferenceMode::Extended => Self {
                 max_new_tokens: 3072,
                 temperature: 0.4,
-                system_prompt_suffix: "\nProvide a detailed legal analysis. Cross-reference documents where applicable. Cite every claim. Use section headers only when the question has 3+ distinct sub-topics.",
+                system_prompt_suffix: "\nProvide a detailed legal analysis. Cross-reference documents where applicable. Use **bold** for key terms, bullet points for lists, and section headers only for 3+ distinct sub-topics.",
                 system_prompt_override: None,
                 timeout_secs: 180,
                 is_quick: false,
@@ -328,8 +326,8 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 5_500,
                 mmr_lambda: 0.85,
                 cosine_floor: 0.20,
-                jaccard_threshold: 0.90,
-                adaptive_k_gap: 0.01,
+                jaccard_threshold: 0.75,
+                adaptive_k_gap: 0.015,
             },
             InferenceMode::Balanced => Self {
                 top_k: 6,
@@ -338,8 +336,8 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 11_000,
                 mmr_lambda: 0.70,
                 cosine_floor: 0.15,
-                jaccard_threshold: 0.92,
-                adaptive_k_gap: 0.008,
+                jaccard_threshold: 0.80,
+                adaptive_k_gap: 0.012,
             },
             InferenceMode::Extended => Self {
                 top_k: 10,
@@ -348,8 +346,8 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 11_000,
                 mmr_lambda: 0.55,
                 cosine_floor: 0.12,
-                jaccard_threshold: 0.95,
-                adaptive_k_gap: 0.005,
+                jaccard_threshold: 0.85,
+                adaptive_k_gap: 0.008,
             },
         }
     }
@@ -1270,14 +1268,21 @@ Answer using ONLY these excerpts.\n\
 
 const FILLER_PATTERNS: &[&str] = &[
     "I hope this helps",
+    "I hope this has been helpful",
     "Let me know if you have",
+    "Let me know if you need",
     "Please let me know if",
     "If you have any further",
+    "If there's anything else",
     "Feel free to ask",
+    "Feel free to reach out",
     "Is there anything else",
+    "Happy to help",
+    "Thank you for asking",
     "Please note that this is not legal advice",
     "Please consult a licensed attorney",
     "I recommend consulting",
+    "Best regards",
 ];
 
 /// Strip conversational filler from the tail of the response.
@@ -1330,10 +1335,10 @@ fn truncate_incomplete_sentence(text: &str) -> String {
         return cleaned.to_string();
     }
 
-    // Find last sentence boundary
+    // Find last sentence boundary — only truncate if we keep >80% of content
     let boundary = cleaned.rfind(|c: char| matches!(c, '.' | '!' | '?'));
     if let Some(pos) = boundary {
-        if pos > cleaned.len() / 2 {
+        if pos > cleaned.len() * 4 / 5 {
             return cleaned[..=pos].to_string();
         }
     }
@@ -1802,8 +1807,11 @@ impl Bm25Index {
     /// Score a single document against a query. Returns BM25 score.
     /// `doc_idx` is the index into the original texts slice.
     pub fn score(&self, query_terms: &[String], doc_idx: usize) -> f32 {
-        const K1: f32 = 1.2;
-        const B: f32 = 0.75;
+        // Tuned for legal text: lower k1 reduces diminishing returns on dense
+        // repeated terminology; lower b reduces length normalization penalty
+        // (legal documents are naturally long but length ≠ noise).
+        const K1: f32 = 0.9;
+        const B: f32 = 0.5;
 
         let doc_tokens = &self.doc_tokens[doc_idx];
         let dl = self.doc_lens[doc_idx] as f32;
@@ -2713,10 +2721,11 @@ impl RetrievalBackend for HybridBm25Cosine {
         // keyword matches (which matter more when the query is just a few words).
         let query_word_count = query_text.split_whitespace().count();
         let hybrid = if query_word_count <= 5 {
-            // Short query: BM25 uses k=40 (keyword-heavy), cosine uses k=60
+            // Short query: lower k amplifies top ranks. BM25 k=20 boosts exact
+            // keyword matches; cosine k=40 gives semantic similarity more weight.
             rrf_scores_with_k(
                 &[cosine_scores, bm25_scores],
-                &[60.0, 40.0],
+                &[40.0, 20.0],
                 &corpus.texts,
                 effective_form_boost,
                 &corpus.chunk_indices,
