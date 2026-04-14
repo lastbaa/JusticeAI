@@ -1296,6 +1296,31 @@ pub async fn query(
         query_vec
     };
 
+    // ── Multi-query embedding (Balanced/Extended only) ────────────────────
+    // Generate query variants via synonym substitution and question→statement
+    // transforms, embed each separately. During retrieval, run each variant
+    // and merge results via Reciprocal Rank Fusion for broader recall.
+    let extra_query_vecs: Vec<(String, Vec<f32>)> =
+        if settings.inference_mode != crate::state::InferenceMode::Quick {
+            let variants = pipeline::expand_query(&retrieval_query);
+            let mut vecs = Vec::new();
+            // Skip first variant (it's the original query, already embedded)
+            for variant in variants.into_iter().skip(1) {
+                match embed_text(&variant, true, &model_dir).await {
+                    Ok(v) => {
+                        log::info!("Multi-query variant: '{}'", &variant);
+                        vecs.push((variant, v));
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to embed query variant '{}': {}", &variant, e);
+                    }
+                }
+            }
+            vecs
+        } else {
+            Vec::new()
+        };
+
     let retrieval_params = pipeline::RetrievalModeParams::from_mode(&settings.inference_mode);
     let inference_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
     let candidate_k = retrieval_params.candidate_pool_k;
@@ -1435,16 +1460,59 @@ pub async fn query(
             jaccard_threshold: retrieval_params.jaccard_threshold,
             adaptive_k_gap: retrieval_params.adaptive_k_gap,
         };
-        let ranked = backend.retrieve(&question, &query_vec, &corpus, &config);
+        // ── Multi-query retrieval with RRF merge ────────────────────────────
+        // Run retrieval for the primary query and each variant, then merge
+        // results via Reciprocal Rank Fusion for broader recall.
+        let primary_ranked = backend.retrieve(&question, &query_vec, &corpus, &config);
 
-        // Map ScoredResult indices back via global_indices to (score, ChunkMetadata).
-        let mut results: Vec<(f32, ChunkMetadata)> = ranked
-            .into_iter()
-            .map(|r| {
-                let global_idx = global_indices[r.chunk_index];
-                (r.score, s.embedded_chunks[global_idx].meta.clone())
-            })
-            .collect();
+        let mut results: Vec<(f32, ChunkMetadata)> = if extra_query_vecs.is_empty() {
+            // Quick mode or no variants — single retrieval, no RRF overhead
+            primary_ranked
+                .into_iter()
+                .map(|r| {
+                    let global_idx = global_indices[r.chunk_index];
+                    (r.score, s.embedded_chunks[global_idx].meta.clone())
+                })
+                .collect()
+        } else {
+            // Collect ranked lists from all query variants
+            let mut all_rankings: Vec<Vec<pipeline::ScoredResult>> = vec![primary_ranked];
+            for (variant_text, variant_vec) in &extra_query_vecs {
+                let variant_ranked = backend.retrieve(variant_text, variant_vec, &corpus, &config);
+                all_rankings.push(variant_ranked);
+            }
+
+            // RRF merge: score(chunk) = sum over rankings of 1/(k + rank)
+            // k=60 is standard; smooths out rank differences
+            let rrf_k: f32 = 60.0;
+            let mut rrf_scores: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+            for ranking in &all_rankings {
+                for (rank, result) in ranking.iter().enumerate() {
+                    *rrf_scores.entry(result.chunk_index).or_insert(0.0)
+                        += 1.0 / (rrf_k + rank as f32 + 1.0);
+                }
+            }
+
+            // Sort by RRF score descending, take top_k
+            let mut merged: Vec<(usize, f32)> = rrf_scores.into_iter().collect();
+            merged.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            merged.truncate(config.top_k);
+
+            log::info!(
+                "Multi-query RRF: {} variants, {} unique chunks → top {}",
+                all_rankings.len(),
+                merged.len(),
+                config.top_k
+            );
+
+            merged
+                .into_iter()
+                .map(|(chunk_idx, rrf_score)| {
+                    let global_idx = global_indices[chunk_idx];
+                    (rrf_score, s.embedded_chunks[global_idx].meta.clone())
+                })
+                .collect()
+        };
 
         // ── Document diversity guarantee (inside same lock) ─────────────────
         // Ensure every loaded document contributes at least one chunk to the
