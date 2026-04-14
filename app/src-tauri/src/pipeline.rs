@@ -1201,7 +1201,7 @@ Answer using ONLY these excerpts.\n\
                             .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
                         let norm_earlier: String = earlier_part.to_lowercase()
                             .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
-                        if norm_last.len() > 40 && norm_earlier.contains(&norm_last) {
+                        if norm_last.len() > 60 && norm_earlier.contains(&norm_last) {
                             log::warn!("Duplicate sentence detected — halting generation.");
                             break;
                         }

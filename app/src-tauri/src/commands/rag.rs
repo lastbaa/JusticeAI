@@ -1887,6 +1887,9 @@ pub async fn query(
     final_answer = collapse_repetitions(&final_answer);
     final_answer = strip_excessive_hedging(&final_answer);
     final_answer = repair_citations(&final_answer);
+    // Normalize excessive whitespace: collapse 3+ newlines to 2
+    let newline_re = regex::Regex::new(r"\n{3,}").unwrap();
+    final_answer = newline_re.replace_all(&final_answer, "\n\n").trim().to_string();
 
     // ── Confidence scoring ───────────────────────────────────────────────────
     // Confidence is based purely on answer-quality heuristics (keyword overlap,
@@ -2074,14 +2077,14 @@ fn collapse_repetitions(answer: &str) -> String {
             continue;
         }
 
-        // Check for near-duplicates using word overlap (Jaccard > 0.92)
+        // Check for near-duplicates using word overlap (Jaccard > 0.80)
         let is_dup = seen_normalized.iter().any(|prev| {
             let prev_words: std::collections::HashSet<&str> = prev.split_whitespace().collect();
             let cur_words: std::collections::HashSet<&str> = normalized.split_whitespace().collect();
             let intersection = prev_words.intersection(&cur_words).count();
             let union = prev_words.union(&cur_words).count();
             if union == 0 { return false; }
-            (intersection as f64 / union as f64) > 0.92
+            (intersection as f64 / union as f64) > 0.80
         });
 
         if !is_dup {
@@ -2131,7 +2134,7 @@ fn collapse_repetitions(answer: &str) -> String {
             let intersection = prev_words.intersection(&cur_words).count();
             let union = prev_words.union(&cur_words).count();
             if union == 0 { return false; }
-            (intersection as f64 / union as f64) > 0.90
+            (intersection as f64 / union as f64) > 0.80
         });
 
         if !is_dup {
@@ -2148,9 +2151,8 @@ fn repair_citations(answer: &str) -> String {
     let mut result = answer.to_string();
 
     // Fix unclosed brackets: "[file, p. 3" → "[file, p. 3]"
-    // Rust regex crate does not support lookahead, so we match the pattern
-    // and only add a closing bracket when the match isn't already closed.
-    let re = regex::Regex::new(r"\[([^\]]+,\s*p\.\s*\d+)").unwrap();
+    // Handles both "p." (single page) and "pp." (page range) formats.
+    let re = regex::Regex::new(r"\[([^\]]+,\s*pp?\.\s*\d+(?:-\d+)?)").unwrap();
     let mut last_end = 0;
     let mut repaired = String::with_capacity(result.len());
     for mat in re.find_iter(&result) {

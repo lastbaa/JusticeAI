@@ -39,12 +39,14 @@ const STOPWORDS: &[&str] = &[
     "only", "very", "just", "still", "here", "both", "same", "while",
 ];
 
-/// Extract key content words from text: words > 4 chars that are not stopwords.
+/// Extract key content words from text: words > 3 chars that are not stopwords.
+/// Uses > 3 (min 4 chars) to retain important legal terms like "tort", "lien",
+/// "deed", "writ", "void", "suit", "jury", "fact", "rule".
 fn extract_key_words(text: &str) -> HashSet<String> {
     let stopset: HashSet<&str> = STOPWORDS.iter().copied().collect();
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() > 4 && !stopset.contains(w))
+        .filter(|w| w.len() > 3 && !stopset.contains(w))
         .map(|w| w.to_string())
         .collect()
 }
@@ -536,7 +538,7 @@ pub fn compute_confidence(answer: &str, chunks: &[String]) -> f64 {
 
     // Content grounding against chunks
     let answer_words: HashSet<&str> = lower.split_whitespace()
-        .filter(|w| w.len() > 4)
+        .filter(|w| w.len() > 3)
         .collect();
     if !answer_words.is_empty() && !chunks.is_empty() {
         let chunk_text = chunks.join(" ").to_lowercase();
@@ -1011,12 +1013,15 @@ mod tests {
 
     #[test]
     fn extract_key_words_filters_short_words() {
-        let words = extract_key_words("the big red fox ran over");
-        assert!(!words.contains("big"), "'big' is <= 4 chars");
-        assert!(!words.contains("red"), "'red' is <= 4 chars");
-        assert!(!words.contains("fox"), "'fox' is <= 4 chars");
-        assert!(!words.contains("ran"), "'ran' is <= 4 chars");
-        assert!(!words.contains("over"), "'over' is <= 4 chars");
+        let words = extract_key_words("the big red fox ran over tort lien");
+        assert!(!words.contains("big"), "'big' is <= 3 chars");
+        assert!(!words.contains("red"), "'red' is <= 3 chars");
+        assert!(!words.contains("fox"), "'fox' is <= 3 chars");
+        assert!(!words.contains("ran"), "'ran' is <= 3 chars");
+        assert!(!words.contains("over"), "'over' is a stopword");
+        // Legal terms with 4 chars should be included
+        assert!(words.contains("tort"), "'tort' is > 3 chars and not a stopword");
+        assert!(words.contains("lien"), "'lien' is > 3 chars and not a stopword");
     }
 
     // ── compute_confidence_with_grading tests ─────────────────────────────
