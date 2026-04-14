@@ -2116,6 +2116,8 @@ pub async fn query(
     final_answer = collapse_repetitions(&final_answer);
     final_answer = strip_excessive_hedging(&final_answer);
     final_answer = repair_citations(&final_answer);
+    // Remove label-only bullets: lines like "- Age:" or "* Schedule:" with no content
+    final_answer = strip_label_only_bullets(&final_answer);
     // Normalize excessive whitespace: collapse 3+ newlines to 2
     let newline_re = regex::Regex::new(r"\n{3,}").unwrap();
     final_answer = newline_re.replace_all(&final_answer, "\n\n").trim().to_string();
@@ -2396,6 +2398,26 @@ fn collapse_repetitions(answer: &str) -> String {
     }
 
     unique.join(". ")
+}
+
+/// Remove label-only bullets: lines like "- **Age:**" or "* Schedule:" that
+/// contain just a heading/label without any actual content. These create visual
+/// clutter and empty structure in the output.
+fn strip_label_only_bullets(answer: &str) -> String {
+    let label_re = regex::Regex::new(
+        r"^[\s]*[-*•]\s*\*{0,2}[A-Za-z\s]{2,30}:?\*{0,2}\s*:?\s*$"
+    ).unwrap();
+    let lines: Vec<&str> = answer.lines().collect();
+    let mut result: Vec<&str> = Vec::new();
+    for line in &lines {
+        let trimmed = line.trim();
+        // Skip empty label bullets (e.g., "- Age:", "* **Schedule:**", "• Internship schedule:")
+        if label_re.is_match(trimmed) && !trimmed.contains('[') {
+            continue;
+        }
+        result.push(line);
+    }
+    result.join("\n")
 }
 
 /// Fix incomplete or malformed citations in the output.

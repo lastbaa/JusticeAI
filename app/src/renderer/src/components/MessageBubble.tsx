@@ -464,6 +464,13 @@ function renderMarkdown(text: string, ctx?: MarkdownCtx): JSX.Element {
       continue
     }
 
+    // Skip orphaned citation fragments (e.g., "1].", "23]") and label-only bullets
+    const trimmed = line.trim()
+    if (/^\d+\]\s*\.?\s*$/.test(trimmed)) {
+      i++
+      continue
+    }
+
     // Normal paragraph line
     elements.push(
       <p key={i} style={{ margin: 0 }}>{inlineMarkdown(line, ctx)}</p>

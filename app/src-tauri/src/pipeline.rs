@@ -231,22 +231,28 @@ pub const RULES_PROMPT: &str = "\
 You are Justice AI, a legal document analyst. You answer questions using ONLY the document excerpts provided below. The excerpts are your sole source of truth — your training knowledge is irrelevant.\n\n\
 RULES:\n\
 1. Answer ONLY from the provided document excerpts. If information is absent, state: \"This information is not present in the provided documents.\" Do NOT guess or infer.\n\
-2. CITE every factual claim as [filename, p. N] using the exact filename and page number from the excerpt headers.\n\
+2. CITE every factual claim as [filename, p. N] using the exact filename and page number from the excerpt headers. Place citations INLINE at the end of the sentence, never on a separate line.\n\
 3. Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written — never round, paraphrase, or approximate.\n\
 4. Never fabricate case citations, statute numbers, court names, party names, or page numbers not explicitly in the excerpts.\n\
 5. When sources conflict, cite both and note the discrepancy.\n\
-6. State each fact ONCE. Never repeat a bullet point, sentence, or paragraph.\n\
+6. State each fact ONCE. Never repeat a bullet point, sentence, or paragraph — even if it appears in multiple excerpts.\n\
 7. When multiple documents are provided, address EACH document. Organize by document or by topic.\n\
-8. Excerpts are ranked by relevance (★★★ = highest, ★ = lowest). Prioritize higher-ranked excerpts when information overlaps.";
+8. Excerpts are ranked by relevance (★★★ = highest, ★ = lowest). Prioritize higher-ranked excerpts when information overlaps.\n\n\
+FORMAT:\n\
+- Start with a direct answer sentence, then elaborate if needed.\n\
+- Use bullet points only for listing 3+ distinct items. Each bullet must contain a complete fact with its citation — never a label alone.\n\
+- Never use empty label bullets like \"Age:\" or \"Schedule:\" on their own line. Integrate the label into the fact: \"**Age:** 18 years old [doc, p. 1]\".\n\
+- Use **bold** for key terms, amounts, dates, and party names.\n\
+- Keep the response concise and well-organized. Do not repeat the same information under different headings.";
 
 /// Shorter rules prompt for Quick mode — same anti-hallucination rules, no formatting.
 pub const RULES_PROMPT_QUICK: &str = "\
 You are Justice AI, a legal document analyst. Answer ONLY from the provided excerpts.\n\n\
 RULES:\n\
 1. If not in excerpts: \"This information is not present in the provided documents.\"\n\
-2. Cite as [filename, p. N]. Reproduce numbers, dates, and names EXACTLY.\n\
-3. Never fabricate citations, authorities, or parties not in the excerpts.\n\
-4. State each fact ONCE. Never repeat.";
+2. Cite inline as [filename, p. N]. Never put citations on a separate line.\n\
+3. Reproduce numbers, dates, and names EXACTLY. Never fabricate.\n\
+4. State each fact ONCE. 1-3 sentences. Start with the answer. No headers, no bullets.";
 
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
@@ -283,7 +289,7 @@ impl InferenceParams {
             InferenceMode::Balanced => Self {
                 max_new_tokens: 2048,
                 temperature: 0.6,
-                system_prompt_suffix: "\nProvide a thorough answer. Use **bold** for key amounts and legal terms. Use bullet points for 3+ items. Do not add section headers unless the question has multiple distinct parts.",
+                system_prompt_suffix: "\nProvide a thorough answer. Lead with the direct answer, then add supporting details. Use **bold** for key terms and amounts. Use a flat bullet list for 3+ items — each bullet must be a complete fact with a citation, not just a label. No nested bullets. No repeated sections.",
                 system_prompt_override: None,
                 timeout_secs: 90,
                 is_quick: false,
@@ -291,7 +297,7 @@ impl InferenceParams {
             InferenceMode::Extended => Self {
                 max_new_tokens: 3072,
                 temperature: 0.7,
-                system_prompt_suffix: "\nProvide a detailed legal analysis. Cross-reference documents where applicable. Use **bold** for key terms, bullet points for lists, and section headers only for 3+ distinct sub-topics.",
+                system_prompt_suffix: "\nProvide a detailed legal analysis. Lead with a summary, then elaborate. Cross-reference documents where applicable. Use **bold** for key terms. Use flat bullet lists for multiple items — each bullet must contain a complete fact with citation. Use ### headers only to separate 3+ distinct topics. Never nest bullets or repeat information.",
                 system_prompt_override: None,
                 timeout_secs: 180,
                 is_quick: false,
@@ -1449,23 +1455,42 @@ fn deduplicate_lines(text: &str) -> String {
     result.join("\n")
 }
 
-/// Fix orphaned citation fragments like "text. 1]" or "text 23]" that result from
-/// truncated generation. Removes the orphan `N]` pattern when there's no matching `[`.
+/// Fix orphaned citation fragments that result from line-break splits.
+///
+/// Handles several patterns observed in LLM output:
+/// 1. Lines that are just "N]." or "N]" — orphaned closing fragments
+/// 2. Lines ending with "N]." where there's no matching "[" — remove the fragment
+/// 3. Citations split across lines: "text [file, p.\n1]." — rejoin them
 fn fix_orphaned_citations(text: &str) -> String {
-    // Match patterns like ". 1]" or " 1]" at end of line where there's no preceding "["
-    let re = Regex::new(r"(?m)\s+\d+\]$").unwrap();
+    // Phase 1: Rejoin citations split across line breaks.
+    // Pattern: line ends with "[..., p." or "[..., p. " and next line starts with "N]"
+    let rejoin_re = Regex::new(r"(\[[^\]]*,\s*p\.)\s*\n\s*(\d+\].?)").unwrap();
+    let text = rejoin_re.replace_all(text, "$1 $2").to_string();
+
+    // Phase 2: Remove lines that are ONLY an orphaned fragment like "1]." or "1]"
+    let orphan_line_re = Regex::new(r"^\s*\d+\]\s*\.?\s*$").unwrap();
+    // Phase 3: Remove trailing orphaned "N]." from lines without matching "["
+    let trailing_re = Regex::new(r"\s+\d+\]\s*\.?\s*$").unwrap();
+
     let lines: Vec<&str> = text.lines().collect();
     let mut result: Vec<String> = Vec::new();
 
     for line in lines {
-        // Check if line ends with orphaned "N]" without a matching "["
-        if let Some(m) = re.find(line) {
+        // Skip lines that are entirely an orphan fragment
+        if orphan_line_re.is_match(line) {
+            continue;
+        }
+
+        // Check for trailing orphaned "N]." without matching "["
+        if let Some(m) = trailing_re.find(line) {
             let before = &line[..m.start()];
-            // Count brackets: if more "]" than "[", the last one is orphaned
-            let open_count = before.matches('[').count() + line[m.start()..].matches('[').count();
-            let close_count = before.matches(']').count() + line[m.start()..].matches(']').count();
+            let open_count = line.matches('[').count();
+            let close_count = line.matches(']').count();
             if close_count > open_count {
-                result.push(before.trim_end().to_string());
+                let cleaned = before.trim_end();
+                if !cleaned.is_empty() {
+                    result.push(cleaned.to_string());
+                }
                 continue;
             }
         }
