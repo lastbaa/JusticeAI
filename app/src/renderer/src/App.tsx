@@ -58,6 +58,7 @@ export default function App(): JSX.Element {
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => uuidv4())
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [showModelSetup, setShowModelSetup] = useState(false)
+  const [modelUpgradeAvailable, setModelUpgradeAvailable] = useState(false)
   const [chatMode, setChatMode] = useState(false)
   const [sessionCreatedAt, setSessionCreatedAt] = useState<number>(() => Date.now())
   const [isLoading, setIsLoading] = useState(false)
@@ -189,7 +190,8 @@ export default function App(): JSX.Element {
       }
       try {
         const modelStatus = await window.api.checkModels()
-        if (!modelStatus.llmReady) setShowModelSetup(true)
+        if (!modelStatus.llmReady || modelStatus.upgradeAvailable) setShowModelSetup(true)
+        setModelUpgradeAvailable(!!modelStatus.upgradeAvailable)
       } catch {
         addToast('error', 'Failed to check model status')
       }
@@ -1151,7 +1153,10 @@ export default function App(): JSX.Element {
       </PanelErrorBoundary>
 
       {showModelSetup && (
-        <ModelSetup onComplete={() => setShowModelSetup(false)} />
+        <ModelSetup
+          upgradeAvailable={modelUpgradeAvailable}
+          onComplete={() => { setShowModelSetup(false); setModelUpgradeAvailable(false) }}
+        />
       )}
 
       {view === 'settings' && (

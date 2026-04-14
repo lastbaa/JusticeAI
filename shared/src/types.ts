@@ -103,6 +103,7 @@ export interface ModelStatus {
   downloadRequiredGb: number
   ocrReady: boolean
   ocrMessage?: string
+  upgradeAvailable?: boolean
 }
 
 export interface ChatMessage {

@@ -274,6 +274,7 @@ pub fn run() {
             commands::ollama::check_ollama,
             commands::rag::check_models,
             commands::rag::download_models,
+            commands::rag::delete_old_model,
             commands::rag::set_can_close,
             commands::rag::load_files,
             commands::rag::get_files,

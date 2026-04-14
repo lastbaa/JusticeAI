@@ -25,6 +25,7 @@ export const api = {
 
   checkModels: (): Promise<ModelStatus> => invoke('check_models'),
   downloadModels: (): Promise<void> => invoke('download_models'),
+  deleteOldModel: (): Promise<void> => invoke('delete_old_model'),
 
   onDownloadProgress: (cb: (p: DownloadProgress) => void): Promise<() => void> =>
     listen('download-progress', (e) => cb(e.payload as DownloadProgress)),

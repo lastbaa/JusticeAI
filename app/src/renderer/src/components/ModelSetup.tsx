@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 
 interface Props {
+  upgradeAvailable?: boolean
   onComplete: () => void
 }
 
-export default function ModelSetup({ onComplete }: Props): JSX.Element {
+type Phase = 'prompt' | 'downloading' | 'cleanup'
+
+export default function ModelSetup({ upgradeAvailable, onComplete }: Props): JSX.Element {
   const [percent, setPercent] = useState(0)
   const [downloadedGb, setDownloadedGb] = useState(0)
   const [totalGb, setTotalGb] = useState(5.0)
@@ -14,14 +17,21 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
   const [isDownloading, setIsDownloading] = useState(false)
   // Incrementing this triggers a fresh download attempt via useEffect dependency.
   const [attempt, setAttempt] = useState(0)
+  // Phase: upgrade prompt -> downloading -> cleanup (if upgrade)
+  const [phase, setPhase] = useState<Phase>(upgradeAvailable ? 'prompt' : 'downloading')
+  const [deletingOld, setDeletingOld] = useState(false)
 
   // High-water marks and throttle state (refs to avoid re-render churn)
   const highWaterPct = useRef(0)
   const highWaterBytes = useRef(0)
   const lastUiUpdate = useRef(0)
   const speedSamples = useRef<{ time: number; bytes: number }[]>([])
+  // Track whether this was an upgrade for the cleanup phase
+  const wasUpgrade = useRef(!!upgradeAvailable)
 
   useEffect(() => {
+    if (phase !== 'downloading') return
+
     let isMounted = true
     let unlisten: (() => void) | null = null
     let rafId: number | null = null
@@ -79,7 +89,12 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
             pendingEta = ''
             flushToUi()
             if (unlisten) unlisten()
-            onComplete()
+            // If this was an upgrade, show cleanup prompt; otherwise complete
+            if (wasUpgrade.current) {
+              setPhase('cleanup')
+            } else {
+              onComplete()
+            }
             return
           }
 
@@ -140,8 +155,179 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
       if (unlisten) unlisten()
       if (rafId !== null) cancelAnimationFrame(rafId)
     }
-  }, [attempt])
+  }, [attempt, phase])
 
+  const handleDeleteOldModel = async (): Promise<void> => {
+    setDeletingOld(true)
+    try {
+      await window.api.deleteOldModel()
+    } catch {
+      // Non-critical — old model stays on disk
+    }
+    setDeletingOld(false)
+    onComplete()
+  }
+
+  // Gold button style helper
+  const goldBtnStyle = {
+    background: '#c9a84c',
+    color: 'var(--text-on-gold)',
+    boxShadow: '0 4px 16px rgba(201,168,76,0.25)',
+    transition: 'background 0.15s ease, box-shadow 0.15s ease',
+  }
+  const goldBtnHover = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    const el = e.currentTarget
+    el.style.background = '#e8c97e'
+    el.style.boxShadow = '0 6px 20px rgba(201,168,76,0.35)'
+  }
+  const goldBtnLeave = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    const el = e.currentTarget
+    el.style.background = '#c9a84c'
+    el.style.boxShadow = '0 4px 16px rgba(201,168,76,0.25)'
+  }
+
+  // ── Upgrade prompt phase ───────────────────────────────────────────────────
+  if (phase === 'prompt') {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+        style={{ background: 'var(--bg)' }}
+      >
+        <div
+          className="w-full max-w-md px-8 flex flex-col items-center"
+          style={{ animation: 'scaleIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both' }}
+        >
+          {/* Logo mark */}
+          <div
+            className="w-16 h-16 rounded-2xl flex items-center justify-center mb-8"
+            style={{
+              background: 'rgba(201,168,76,0.08)',
+              border: '1px solid rgba(201,168,76,0.22)',
+              boxShadow: '0 8px 32px rgba(201,168,76,0.1)',
+            }}
+          >
+            <svg width="30" height="30" viewBox="0 0 28 28" fill="none">
+              <circle cx="14" cy="5" r="1.5" fill="#c9a84c" />
+              <rect x="13.25" y="5" width="1.5" height="16" fill="#c9a84c" />
+              <rect x="9" y="21" width="10" height="1.5" rx="0.75" fill="#c9a84c" />
+              <rect x="12" y="22.5" width="4" height="1.5" rx="0.75" fill="#c9a84c" />
+              <rect x="5" y="8.25" width="18" height="1.5" rx="0.75" fill="#c9a84c" />
+              <line x1="7" y1="9.75" x2="5.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
+              <line x1="21" y1="9.75" x2="22.5" y2="17" stroke="#c9a84c" strokeWidth="1.2" strokeLinecap="round" />
+              <path d="M3 17 Q5.5 20 8 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+              <path d="M20 17 Q22.5 20 25 17" stroke="#c9a84c" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+            </svg>
+          </div>
+
+          <h1 className="text-[26px] font-bold text-white mb-2.5 text-center tracking-[-0.03em] leading-tight">
+            A newer, more capable AI model is available
+          </h1>
+          <p className="text-[13.5px] text-center mb-4 leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
+            Justice AI now uses Qwen3-8B, which provides significantly improved accuracy,
+            better multi-document analysis, and fewer errors compared to the previous model.
+          </p>
+          <p className="text-[12.5px] text-center mb-8 leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.35)' }}>
+            This is a one-time ~5 GB download. Your documents and chat history are preserved.
+          </p>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPhase('downloading')}
+              className="rounded-xl px-8 py-3 text-[13.5px] font-semibold"
+              style={goldBtnStyle}
+              onMouseEnter={goldBtnHover}
+              onMouseLeave={goldBtnLeave}
+            >
+              Upgrade Now
+            </button>
+            <button
+              onClick={onComplete}
+              className="rounded-xl px-6 py-3 text-[13.5px] font-medium"
+              style={{
+                background: 'transparent',
+                color: 'rgb(var(--ov) / 0.45)',
+                border: '1px solid rgb(var(--ov) / 0.12)',
+                transition: 'border-color 0.15s ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgb(var(--ov) / 0.25)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgb(var(--ov) / 0.12)' }}
+            >
+              Remind Me Later
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Cleanup phase (after upgrade download) ─────────────────────────────────
+  if (phase === 'cleanup') {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+        style={{ background: 'var(--bg)' }}
+      >
+        <div
+          className="w-full max-w-md px-8 flex flex-col items-center"
+          style={{ animation: 'scaleIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both' }}
+        >
+          {/* Success check */}
+          <div
+            className="w-16 h-16 rounded-2xl flex items-center justify-center mb-8"
+            style={{
+              background: 'rgba(63,185,80,0.08)',
+              border: '1px solid rgba(63,185,80,0.22)',
+            }}
+          >
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+              <path d="M5 13l4 4L19 7" stroke="#3fb950" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+
+          <h1 className="text-[26px] font-bold text-white mb-2.5 text-center tracking-[-0.03em] leading-tight">
+            Upgrade complete
+          </h1>
+          <p className="text-[13.5px] text-center mb-8 leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
+            The previous model (saul.gguf) is no longer needed. Free up 4.5 GB?
+          </p>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleDeleteOldModel}
+              disabled={deletingOld}
+              className="rounded-xl px-8 py-3 text-[13.5px] font-semibold"
+              style={{
+                ...goldBtnStyle,
+                opacity: deletingOld ? 0.6 : 1,
+                cursor: deletingOld ? 'wait' : 'pointer',
+              }}
+              onMouseEnter={deletingOld ? undefined : goldBtnHover}
+              onMouseLeave={deletingOld ? undefined : goldBtnLeave}
+            >
+              {deletingOld ? 'Deleting...' : 'Delete'}
+            </button>
+            <button
+              onClick={onComplete}
+              disabled={deletingOld}
+              className="rounded-xl px-6 py-3 text-[13.5px] font-medium"
+              style={{
+                background: 'transparent',
+                color: 'rgb(var(--ov) / 0.45)',
+                border: '1px solid rgb(var(--ov) / 0.12)',
+                transition: 'border-color 0.15s ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgb(var(--ov) / 0.25)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgb(var(--ov) / 0.12)' }}
+            >
+              Keep
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Download phase ─────────────────────────────────────────────────────────
   return (
     <div
       className="fixed inset-0 z-50 flex flex-col items-center justify-center"
@@ -175,7 +361,7 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
         </div>
 
         <h1 className="text-[26px] font-bold text-white mb-2.5 text-center tracking-[-0.03em] leading-tight">
-          Setting up Justice AI
+          {wasUpgrade.current ? 'Upgrading AI Model' : 'Setting up Justice AI'}
         </h1>
         <p className="text-[13.5px] text-center mb-10 leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.35)' }}>
           Downloading the Qwen3-8B language model (~5 GB).
@@ -206,22 +392,9 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
               onClick={() => setAttempt((n) => n + 1)}
               aria-label="Retry download"
               className="rounded-xl px-8 py-3 text-[13.5px] font-semibold"
-              style={{
-                background: '#c9a84c',
-                color: 'var(--text-on-gold)',
-                boxShadow: '0 4px 16px rgba(201,168,76,0.25)',
-                transition: 'background 0.15s ease, box-shadow 0.15s ease',
-              }}
-              onMouseEnter={(e) => {
-                const el = e.currentTarget as HTMLButtonElement
-                el.style.background = '#e8c97e'
-                el.style.boxShadow = '0 6px 20px rgba(201,168,76,0.35)'
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget as HTMLButtonElement
-                el.style.background = '#c9a84c'
-                el.style.boxShadow = '0 4px 16px rgba(201,168,76,0.25)'
-              }}
+              style={goldBtnStyle}
+              onMouseEnter={goldBtnHover}
+              onMouseLeave={goldBtnLeave}
             >
               Try Again
             </button>
@@ -270,10 +443,10 @@ export default function ModelSetup({ onComplete }: Props): JSX.Element {
                       )}
                     </>
                   ) : (
-                    'Finalizing…'
+                    'Finalizing...'
                   )
                 ) : (
-                  'Starting…'
+                  'Starting...'
                 )}
               </span>
               <span className="flex items-center gap-2">

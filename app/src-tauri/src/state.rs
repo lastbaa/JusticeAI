@@ -183,6 +183,7 @@ pub struct ModelStatus {
     pub ocr_ready: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ocr_message: Option<String>,
+    pub upgrade_available: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

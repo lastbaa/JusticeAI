@@ -77,15 +77,16 @@ pub async fn check_models(
     let ocr_ready = ocr_dir.join("text-detection.rten").metadata().map(|m| m.len() > 1024).unwrap_or(false)
         && ocr_dir.join("text-recognition.rten").metadata().map(|m| m.len() > 1024).unwrap_or(false);
 
-    // Clean up old Saul model if Qwen3 is ready — no need to keep both.
+    // Check whether the old Saul model exists (upgrade scenario).
     let saul_path = model_dir.join("saul.gguf");
-    if size > GGUF_MIN_SIZE && saul_path.exists() {
-        log::info!("Qwen3 ready — deleting old saul.gguf to free disk space.");
-        let _ = std::fs::remove_file(&saul_path);
-    }
+    let saul_exists = saul_path.exists();
+    let qwen3_ready = size > GGUF_MIN_SIZE;
+
+    // upgrade_available: old model present but new model not yet downloaded
+    let upgrade_available = saul_exists && !qwen3_ready;
 
     Ok(ModelStatus {
-        llm_ready: size > GGUF_MIN_SIZE,
+        llm_ready: qwen3_ready,
         llm_size_gb: size as f32 / 1e9,
         download_required_gb: 5.0,
         ocr_ready,
@@ -94,7 +95,25 @@ pub async fn check_models(
         } else {
             Some("OCR models will be downloaded during setup.".to_string())
         },
+        upgrade_available,
     })
+}
+
+#[tauri::command]
+pub async fn delete_old_model(
+    state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
+) -> Result<(), String> {
+    let model_dir = {
+        let s = state.lock().await;
+        s.model_dir.clone()
+    };
+    let saul_path = model_dir.join("saul.gguf");
+    if saul_path.exists() {
+        std::fs::remove_file(&saul_path)
+            .map_err(|e| format!("Failed to delete saul.gguf: {e}"))?;
+        log::info!("Deleted old model: saul.gguf");
+    }
+    Ok(())
 }
 
 #[tauri::command]
