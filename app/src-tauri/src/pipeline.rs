@@ -326,8 +326,8 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 5_500,
                 mmr_lambda: 0.85,
                 cosine_floor: 0.20,
-                jaccard_threshold: 0.75,
-                adaptive_k_gap: 0.015,
+                jaccard_threshold: 0.85,
+                adaptive_k_gap: 0.008,
             },
             InferenceMode::Balanced => Self {
                 top_k: 6,
@@ -336,8 +336,8 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 11_000,
                 mmr_lambda: 0.70,
                 cosine_floor: 0.15,
-                jaccard_threshold: 0.80,
-                adaptive_k_gap: 0.012,
+                jaccard_threshold: 0.88,
+                adaptive_k_gap: 0.003,
             },
             InferenceMode::Extended => Self {
                 top_k: 10,
@@ -346,8 +346,8 @@ impl RetrievalModeParams {
                 max_context_chars_no_jur: 11_000,
                 mmr_lambda: 0.55,
                 cosine_floor: 0.12,
-                jaccard_threshold: 0.85,
-                adaptive_k_gap: 0.008,
+                jaccard_threshold: 0.90,
+                adaptive_k_gap: 0.004,
             },
         }
     }
@@ -1380,6 +1380,8 @@ pub struct TempChunk {
     pub chunk_index: usize,
     pub text: String,
     pub token_count: usize,
+    pub start_char_offset: usize,
+    pub end_char_offset: usize,
 }
 
 #[derive(PartialEq)]
@@ -1430,21 +1432,28 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
         let mut current = String::new();
         let mut sentence_buf: Vec<&str> = Vec::new();
         let mut pending_header: Option<String> = None;
+        let mut page_char_offset: usize = 0;
 
         let flush = |current: &str,
                      global_idx: &mut usize,
                      chunks: &mut Vec<TempChunk>,
-                     page_num: u32| {
+                     page_num: u32,
+                     page_char_offset: &mut usize| {
             let trimmed = current.trim();
             if !trimmed.is_empty() {
+                let start = *page_char_offset;
+                let end = start + trimmed.len();
                 chunks.push(TempChunk {
                     id: Uuid::new_v4().to_string(),
                     page_number: page_num,
                     chunk_index: *global_idx,
                     text: trimmed.to_string(),
                     token_count: (trimmed.len() / 3).max(1),
+                    start_char_offset: start,
+                    end_char_offset: end,
                 });
                 *global_idx += 1;
+                *page_char_offset = end;
             }
         };
 
@@ -1454,7 +1463,7 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
 
                 if is_orphan {
                     if !current.is_empty() {
-                        flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                        flush(&current, &mut global_idx, &mut chunks, page.page_number, &mut page_char_offset);
                         current.clear();
                         sentence_buf.clear();
                     }
@@ -1466,7 +1475,7 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
                 }
 
                 if !current.is_empty() {
-                    flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                    flush(&current, &mut global_idx, &mut chunks, page.page_number, &mut page_char_offset);
                     current.clear();
                     sentence_buf.clear();
                 }
@@ -1481,7 +1490,7 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
                 };
                 for sub in pb_subs {
                     if !current.is_empty() && current.len() + sub.len() + 1 > settings.chunk_size {
-                        flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                        flush(&current, &mut global_idx, &mut chunks, page.page_number, &mut page_char_offset);
                         current.clear();
                         sentence_buf.clear();
                     }
@@ -1495,7 +1504,7 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
             // Normal fragment: apply any parked header first
             if let Some(h) = pending_header.take() {
                 if !current.is_empty() {
-                    flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                    flush(&current, &mut global_idx, &mut chunks, page.page_number, &mut page_char_offset);
                     current.clear();
                     sentence_buf.clear();
                 }
@@ -1511,7 +1520,7 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
 
             for sub in sub_sentences {
                 if !current.is_empty() && current.len() + sub.len() + 1 > settings.chunk_size {
-                    flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                    flush(&current, &mut global_idx, &mut chunks, page.page_number, &mut page_char_offset);
 
                     // Sliding overlap: carry trailing sentences from the previous chunk
                     // into the next one so retrieval doesn't miss facts near chunk boundaries.
@@ -1540,12 +1549,12 @@ pub fn chunk_document(pages: &[DocumentPage], settings: &AppSettings) -> Vec<Tem
         // Flush remainder; if a lone header is pending, emit it as its own chunk
         if let Some(h) = pending_header {
             if !current.is_empty() {
-                flush(&current, &mut global_idx, &mut chunks, page.page_number);
+                flush(&current, &mut global_idx, &mut chunks, page.page_number, &mut page_char_offset);
                 current.clear();
             }
             current.push_str(&h);
         }
-        flush(&current, &mut global_idx, &mut chunks, page.page_number);
+        flush(&current, &mut global_idx, &mut chunks, page.page_number, &mut page_char_offset);
 
         if !chunks.is_empty() {
             let avg_tokens = chunks.iter().map(|c| c.token_count).sum::<usize>()
@@ -2102,7 +2111,10 @@ pub fn is_party_identity_query(query: &str) -> bool {
     let lower = query.to_lowercase();
     let has_signal = IDENTITY_SIGNALS.iter().any(|s| lower.contains(s));
     let has_role = PARTY_ROLES.iter().any(|r| lower.contains(r));
-    has_signal && has_role
+    // "parties to" / "parties in" is self-sufficient — no role word needed
+    let is_generic_parties = lower.contains("parties to") || lower.contains("parties in")
+        || lower.contains("parties of");
+    (has_signal && has_role) || is_generic_parties
 }
 
 // ── Retrieval helpers ─────────────────────────────────────────────────────────
@@ -2248,12 +2260,10 @@ pub fn mmr_select(
             }
         }
 
-        // Early exit: if the best remaining MMR score is negligible relative
-        // to the first selected candidate, the remaining candidates add no value.
-        // Use a relative threshold since RRF scores are much smaller than raw cosine.
-        if !selected.is_empty() && best_mmr_score < 0.1 * candidates.first().map(|(s, _, _)| *s).unwrap_or(0.0) {
-            break;
-        }
+        // Note: No early exit on MMR score — RRF scores are small (~0.03) so the
+        // similarity penalty easily makes MMR scores negative. Cutting early would
+        // return only 1 chunk for most queries. Let the caller control result count
+        // via top_k / adaptive_k.
 
         if let Some(idx) = best_idx {
             let norm = candidate_norms.remove(idx);
@@ -2320,6 +2330,7 @@ pub fn expand_query(query: &str) -> Vec<String> {
         ("contract", "agreement"),
         ("payment", "compensation"),
         ("penalty", "liquidated damages"),
+        ("penalties", "limitation of liability"),
         ("terminate", "cancel"),
         ("breach", "violation"),
         ("property", "premises"),
@@ -2452,17 +2463,49 @@ pub fn rewrite_followup_query(query: &str, history: &[(String, String)]) -> Stri
         .filter(|w| w.len() > 2 && !skip_words.contains(w))
         .collect();
 
-    // Also extract top keywords from the assistant's last response (limit to 4)
+    // Also extract top keywords from the assistant's last response (limit to 8)
     let asst_terms: Vec<&str> = last_asst_lower
         .split_whitespace()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .filter(|w| w.len() > 3 && !skip_words.contains(w))
         .filter(|w| !user_terms.contains(w)) // avoid duplicates with user terms
-        .take(4)
+        .take(8)
         .collect();
+
+    // Extract multi-word noun phrases (2-word sequences of capitalized words)
+    // from the original (non-lowered) assistant response, e.g. "David Johnson", "Metro Transit"
+    let asst_noun_phrases: Vec<String> = {
+        let words: Vec<&str> = last_assistant.split_whitespace().collect();
+        let mut phrases = Vec::new();
+        let mut i = 0;
+        while i + 1 < words.len() {
+            let w1 = words[i].trim_matches(|c: char| !c.is_alphanumeric());
+            let w2 = words[i + 1].trim_matches(|c: char| !c.is_alphanumeric());
+            if w1.len() >= 2
+                && w2.len() >= 2
+                && w1.chars().next().map_or(false, |c| c.is_uppercase())
+                && w2.chars().next().map_or(false, |c| c.is_uppercase())
+                // Exclude sentence-start patterns: skip if w1 follows a period
+                && (i == 0 || !words[i - 1].ends_with('.'))
+            {
+                let phrase = format!("{} {}", w1, w2);
+                let phrase_lower = phrase.to_lowercase();
+                if !phrases.iter().any(|p: &String| p.to_lowercase() == phrase_lower) {
+                    phrases.push(phrase);
+                }
+                i += 2; // skip past both words
+                continue;
+            }
+            i += 1;
+        }
+        phrases
+    };
 
     let mut all_terms = user_terms;
     all_terms.extend(asst_terms);
+    // Append noun phrases as additional context terms
+    let phrase_refs: Vec<&str> = asst_noun_phrases.iter().map(|s| s.as_str()).collect();
+    all_terms.extend(phrase_refs);
 
     if all_terms.is_empty() {
         return query.to_string();
@@ -2556,8 +2599,8 @@ impl Default for RetrievalConfig {
             score_threshold: SCORE_THRESHOLD,
             mmr_lambda: 0.7,
             expand_keywords: true,
-            jaccard_threshold: 0.80,
-            adaptive_k_gap: 0.008,
+            jaccard_threshold: 0.88,
+            adaptive_k_gap: 0.003,
         }
     }
 }
@@ -2780,7 +2823,12 @@ impl RetrievalBackend for HybridBm25Cosine {
 
         // B4: Adaptive top-K — instead of a fixed cutoff, find the largest score gap
         // in the ranked list and cut there. This naturally separates relevant from irrelevant.
-        let adaptive_k = {
+        // Use top_k directly (no adaptive cutting) when corpus is small (≤ top_k chunks),
+        // since small documents don't have enough candidates for meaningful gap detection.
+        let adaptive_k = if indexed.len() <= config.top_k {
+            // Small corpus: return all surviving chunks, no cutting needed
+            indexed.len()
+        } else {
             let max_k = config.top_k.min(indexed.len());
             let mut cut = max_k;
             let mut largest_gap = 0.0f32;
@@ -2840,6 +2888,8 @@ impl RetrievalBackend for HybridBm25Cosine {
                         text: corpus.texts[idx].to_string(),
                         token_count: 0,
                         role: crate::state::DocumentRole::default(),
+                        start_char_offset: None,
+                        end_char_offset: None,
                     };
                     (score, meta, corpus.vectors[idx].to_vec())
                 })
@@ -3143,6 +3193,8 @@ mod tests {
             text: id.to_string(),
             token_count: 10,
             role: crate::state::DocumentRole::default(),
+            start_char_offset: None,
+            end_char_offset: None,
         }
     }
 
@@ -3337,6 +3389,9 @@ mod tests {
         assert!(super::is_party_identity_query("Identify the borrower"));
         assert!(super::is_party_identity_query("Who signed as the lessee?"));
         assert!(super::is_party_identity_query("Parties to the agreement as buyer"));
+        // Generic "parties to" without a specific role
+        assert!(super::is_party_identity_query("Who are the parties to this NDA?"));
+        assert!(super::is_party_identity_query("Parties to this contract"));
     }
 
     #[test]

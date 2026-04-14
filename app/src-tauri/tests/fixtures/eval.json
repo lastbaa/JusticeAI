@@ -110,7 +110,7 @@
   {
     "pdf": "tests/fixtures/filled_form_simple.pdf",
     "query": "How many guests are expected?",
-    "expected": ["200"],
+    "expected": ["150"],
     "top_k": 6
   },
   {

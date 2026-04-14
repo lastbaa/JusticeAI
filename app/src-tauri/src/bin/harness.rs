@@ -323,6 +323,8 @@ async fn embed_and_retrieve(
                 text: chunk.text.clone(),
                 token_count: chunk.token_count,
                 role: DocumentRole::default(),
+                start_char_offset: Some(chunk.start_char_offset),
+                end_char_offset: Some(chunk.end_char_offset),
             };
             (r.score, meta, r.chunk_index)
         })
@@ -368,6 +370,8 @@ fn retrieve_with_cached_embeddings(
                 text: chunk.text.clone(),
                 token_count: chunk.token_count,
                 role: DocumentRole::default(),
+                start_char_offset: Some(chunk.start_char_offset),
+                end_char_offset: Some(chunk.end_char_offset),
             };
             (r.score, meta, r.chunk_index)
         })
@@ -523,7 +527,9 @@ async fn run_eval_cases(
             candidate_pool_k: retrieval_params.candidate_pool_k,
             score_threshold: 0.0,
             expand_keywords: true,
-            ..Default::default()
+            mmr_lambda: retrieval_params.mmr_lambda,
+            jaccard_threshold: retrieval_params.jaccard_threshold,
+            adaptive_k_gap: retrieval_params.adaptive_k_gap,
         };
 
         let scored = retrieve_with_cached_embeddings(
@@ -535,6 +541,7 @@ async fn run_eval_cases(
         let chunk_texts: Vec<String> = scored.iter()
             .map(|(_, m, _)| m.text.to_lowercase())
             .collect();
+
 
         let top_scores: Vec<(f32, usize)> = scored.iter().map(|(s, _, idx)| (*s, *idx)).collect();
 

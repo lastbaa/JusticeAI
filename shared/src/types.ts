@@ -49,6 +49,8 @@ export interface Citation {
   excerpt: string
   summary: string
   score: number
+  startCharOffset?: number
+  endCharOffset?: number
 }
 
 export type AssertionType =

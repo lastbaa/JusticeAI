@@ -622,13 +622,14 @@ fn prepend_form_summary(fields: &[(String, String)], pages: &mut [DocumentPage])
         return;
     }
 
-    // Deduplicate: filter out fields whose values already appear verbatim in page text
-    let page_text = &pages[0].text;
-    let fields = deduplicate_form_fields(fields, page_text);
+    // Note: do NOT deduplicate against page text. Even when form field values
+    // appear in the body text, they get buried in boilerplate (e.g., IRS W-9 has
+    // "Liam Neild" on line 23 amid 6 pages of instructions). The FILLED FORM DATA
+    // block gives these values a dedicated, high-signal chunk for retrieval.
 
     let mut lines = Vec::new();
 
-    for (label, value) in &fields {
+    for (label, value) in fields {
         // Quality filter: skip garbage form fields (checkbox states, short fragments)
         let v = value.trim();
         if v.is_empty() || v.len() < 2 {
@@ -706,10 +707,19 @@ fn extract_global_acroform_fields(doc: &lopdf::Document) -> Vec<(String, String)
         Ok(lopdf::Object::Array(arr)) => arr.clone(),
         Ok(obj) => match doc.dereference(obj) {
             Ok((_, lopdf::Object::Array(arr))) => arr.clone(),
-            _ => return results,
+            _ => { eprintln!("FORM_DBG: Fields deref failed"); return results; },
         },
-        Err(_) => return results,
+        Err(_) => {
+            // XFA forms may use /XFA instead of /Fields
+            log::debug!("AcroForm: no /Fields key");
+            if acroform.has(b"XFA") {
+                log::debug!("AcroForm: has /XFA — falling back to page annotations");
+            }
+            return results;
+        },
     };
+
+    log::debug!("AcroForm: found {} top-level fields", fields.len());
 
     // Walk field tree (no inherited /FT at the root level)
     for field_ref in &fields {
@@ -770,7 +780,7 @@ fn collect_acroform_field(
     }
 
     let value = match dict.get(b"V") {
-        Ok(lopdf::Object::String(bytes, _)) => String::from_utf8_lossy(bytes).trim().to_string(),
+        Ok(lopdf::Object::String(bytes, _)) => decode_pdf_string(bytes).trim().to_string(),
         _ => return,
     };
     if value.is_empty() {

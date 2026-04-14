@@ -125,6 +125,10 @@ pub struct Citation {
     #[serde(default)]
     pub summary: String,
     pub score: f32,
+    #[serde(default)]
+    pub start_char_offset: Option<usize>,
+    #[serde(default)]
+    pub end_char_offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +286,10 @@ pub struct ChunkMetadata {
     pub token_count: usize,
     #[serde(default)]
     pub role: DocumentRole,
+    #[serde(default)]
+    pub start_char_offset: Option<usize>,
+    #[serde(default)]
+    pub end_char_offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,6 +317,8 @@ pub struct RagState {
     pub bm25_cache: CachedBm25,
     /// Extracted entities from all loaded documents.
     pub entity_registry: Vec<EntityEntry>,
+    /// Maps file_path → content hash for incremental indexing (skip unchanged files).
+    pub file_hashes: HashMap<String, String>,
 }
 
 impl RagState {
@@ -328,6 +338,7 @@ impl RagState {
             llama_model: Arc::new(Mutex::new(None)),
             bm25_cache: CachedBm25::default(),
             entity_registry: Vec::new(),
+            file_hashes: HashMap::new(),
         }
     }
 
@@ -361,6 +372,22 @@ impl RagState {
         self.data_dir.join("file_registry.json")
     }
 
+    fn file_hashes_path(&self) -> PathBuf {
+        self.data_dir.join("file_hashes.json")
+    }
+
+    pub fn get_file_hash(&self, path: &str) -> Option<&String> {
+        self.file_hashes.get(path)
+    }
+
+    pub fn set_file_hash(&mut self, path: String, hash: String) {
+        self.file_hashes.insert(path, hash);
+    }
+
+    pub fn remove_file_hash(&mut self, path: &str) {
+        self.file_hashes.remove(path);
+    }
+
     pub async fn load_from_disk(&mut self) {
         // Load settings
         if let Ok(data) = tokio::fs::read(&self.settings_path()).await {
@@ -387,6 +414,13 @@ impl RagState {
         if let Ok(data) = tokio::fs::read(&self.embed_model_path()).await {
             if let Ok(s) = serde_json::from_slice::<String>(&data) {
                 self.embed_model = s;
+            }
+        }
+
+        // Load file hashes (incremental indexing cache)
+        if let Ok(data) = tokio::fs::read(&self.file_hashes_path()).await {
+            if let Ok(h) = serde_json::from_slice::<HashMap<String, String>>(&data) {
+                self.file_hashes = h;
             }
         }
 
@@ -527,6 +561,17 @@ impl RagState {
                 }
             }
             Err(e) => log::error!("Failed to serialize file_registry: {e}"),
+        }
+    }
+
+    pub async fn save_file_hashes(&self) {
+        match serde_json::to_vec(&self.file_hashes) {
+            Ok(data) => {
+                if let Err(e) = tokio::fs::write(&self.file_hashes_path(), data).await {
+                    log::error!("Failed to write file_hashes.json: {e}");
+                }
+            }
+            Err(e) => log::error!("Failed to serialize file_hashes: {e}"),
         }
     }
 

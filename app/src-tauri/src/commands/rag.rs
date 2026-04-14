@@ -551,6 +551,8 @@ pub async fn migrate_garbled_chunks(state: &mut RagState) {
                             text: chunk.text.clone(),
                             token_count: chunk.token_count,
                             role: DocumentRole::default(),
+                            start_char_offset: Some(chunk.start_char_offset),
+                            end_char_offset: Some(chunk.end_char_offset),
                         },
                     };
                     state.chunk_registry.insert(item_id.clone(), entry.meta.clone());
@@ -692,6 +694,8 @@ async fn process_file(
     total_files: usize,
 ) -> Result<FileInfo, String> {
     use super::doc_parser;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     let file_name_short = std::path::Path::new(file_path)
         .file_name()
@@ -710,6 +714,56 @@ async fn process_file(
         }
         let _ = window.emit("file-load-progress", payload);
     };
+
+    // ── Incremental indexing: skip re-embedding unchanged files ──
+    let file_bytes = std::fs::read(file_path)
+        .map_err(|e| format!("Failed to read file {}: {}", file_path, e))?;
+    let content_hash = {
+        let mut hasher = DefaultHasher::new();
+        file_bytes.hash(&mut hasher);
+        settings.chunk_size.hash(&mut hasher);
+        settings.chunk_overlap.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
+
+    {
+        let s = state.lock().await;
+        if s.get_file_hash(file_path) == Some(&content_hash) {
+            // Hash matches — check that chunks for this file still exist
+            let has_chunks = s.embedded_chunks.iter().any(|e| e.meta.file_path == file_path);
+            if has_chunks {
+                // File unchanged, return existing FileInfo
+                if let Some(info) = s.file_registry.values().find(|f| f.file_path == file_path) {
+                    log::info!("Skipping unchanged file: {}", file_name_short);
+                    emit_progress("complete", Some(info.chunk_count));
+                    return Ok(info.clone());
+                }
+            }
+        }
+    }
+
+    // If re-loading a changed file, remove stale chunks from the previous version
+    {
+        let mut s = state.lock().await;
+        let old_doc_ids: Vec<String> = s.file_registry.iter()
+            .filter(|(_, f)| f.file_path == file_path)
+            .map(|(id, _)| id.clone())
+            .collect();
+        if !old_doc_ids.is_empty() {
+            log::info!("File changed, removing old chunks for: {}", file_name_short);
+            for old_id in &old_doc_ids {
+                let item_ids: std::collections::HashSet<String> = s.doc_chunk_ids
+                    .get(old_id).cloned().unwrap_or_default().into_iter().collect();
+                for id in &item_ids {
+                    s.chunk_registry.remove(id);
+                }
+                s.embedded_chunks.retain(|e| !item_ids.contains(&e.id));
+                s.doc_chunk_ids.remove(old_id);
+                s.file_registry.remove(old_id);
+            }
+            s.invalidate_bm25_cache();
+        }
+    }
 
     emit_progress("parsing", None);
 
@@ -895,6 +949,8 @@ async fn process_file(
                 text: chunk.text.clone(),
                 token_count: chunk.token_count,
                 role: auto_role.clone(),
+                start_char_offset: Some(chunk.start_char_offset),
+                end_char_offset: Some(chunk.end_char_offset),
             },
         };
         new_entries.push((item_id, entry));
@@ -935,7 +991,10 @@ async fn process_file(
                 s.entity_registry.push(entity);
             }
         }
+        // Record content hash for incremental indexing
+        s.set_file_hash(file_path.to_string(), content_hash);
         s.save_chunks().await;
+        s.save_file_hashes().await;
     }
 
     emit_progress("complete", Some(chunk_count));
@@ -1181,7 +1240,8 @@ pub async fn query(
     // Resolve pronouns and implicit references so the embedding query is
     // self-contained. "What about the penalty?" → "What about the penalty? (regarding: lease rent)"
     let retrieval_query = pipeline::rewrite_followup_query(&question, &history);
-    if retrieval_query != question {
+    let is_followup = retrieval_query != question;
+    if is_followup {
         log::info!("Follow-up rewrite: '{}' → '{}'", &question, &retrieval_query);
     }
 
@@ -1189,6 +1249,33 @@ pub async fn query(
         .emit("query-status", serde_json::json!({"phase": "embedding"}))
         .ok();
     let query_vec = embed_text(&retrieval_query, true, &model_dir).await?;
+
+    // ── Context embedding blending for follow-up queries ─────────────────
+    // When the user asks a follow-up, blend the query embedding with the
+    // last assistant response embedding so retrieval stays anchored to the
+    // conversational context (80 % query, 20 % context).
+    let query_vec = if is_followup && !history.is_empty() {
+        let last_assistant = &history[history.len() - 1].1;
+        if !last_assistant.is_empty() {
+            let ctx_snippet: String = last_assistant.chars().take(200).collect();
+            match embed_text(&ctx_snippet, false, &model_dir).await {
+                Ok(ctx_vec) if ctx_vec.len() == query_vec.len() => {
+                    let blended: Vec<f32> = query_vec
+                        .iter()
+                        .zip(ctx_vec.iter())
+                        .map(|(q, c)| 0.8 * q + 0.2 * c)
+                        .collect();
+                    log::info!("Blended query embedding with assistant context (200 chars)");
+                    blended
+                }
+                _ => query_vec,
+            }
+        } else {
+            query_vec
+        }
+    } else {
+        query_vec
+    };
 
     let retrieval_params = pipeline::RetrievalModeParams::from_mode(&settings.inference_mode);
     let inference_params = pipeline::InferenceParams::from_mode(&settings.inference_mode);
@@ -1801,6 +1888,8 @@ pub async fn query(
             excerpt: RagState::best_excerpt(&meta.text, &question),
             summary: RagState::summarize_chunk(&meta.text),
             score: (score / 0.035).min(1.0),
+            start_char_offset: meta.start_char_offset,
+            end_char_offset: meta.end_char_offset,
         })
         .collect();
 
@@ -1890,6 +1979,29 @@ pub async fn query(
     // Normalize excessive whitespace: collapse 3+ newlines to 2
     let newline_re = regex::Regex::new(r"\n{3,}").unwrap();
     final_answer = newline_re.replace_all(&final_answer, "\n\n").trim().to_string();
+
+    // ── Confidence-gated response prefix ─────────────────────────────────────
+    // For low-confidence retrievals, prepend a qualifying phrase so the user
+    // knows the answer may be less reliable. Skip if already a not-found
+    // response or if the prefix would be redundant.
+    {
+        let dominated_by_not_found = final_answer.starts_with("This information is not present")
+            || final_answer.starts_with("I could not find")
+            || final_answer.starts_with("The provided documents do not");
+        if !dominated_by_not_found {
+            if best_cosine < 0.30 {
+                let prefix = "Based on limited matching in your documents: ";
+                if !final_answer.starts_with(prefix) {
+                    final_answer = format!("{}{}", prefix, final_answer);
+                }
+            } else if best_cosine < 0.55 {
+                let prefix = "Based on the available document excerpts: ";
+                if !final_answer.starts_with(prefix) {
+                    final_answer = format!("{}{}", prefix, final_answer);
+                }
+            }
+        }
+    }
 
     // ── Confidence scoring ───────────────────────────────────────────────────
     // Confidence is based purely on answer-quality heuristics (keyword overlap,
@@ -2193,6 +2305,8 @@ pub async fn remove_file(
     state: tauri::State<'_, Arc<AsyncMutex<RagState>>>,
 ) -> Result<(), String> {
     let mut s = state.lock().await;
+    // Look up file_path before removing, so we can clear the content hash
+    let file_path = s.file_registry.get(&file_id).map(|f| f.file_path.clone());
     let item_ids: std::collections::HashSet<String> = s.doc_chunk_ids.get(&file_id).cloned().unwrap_or_default().into_iter().collect();
     for id in &item_ids {
         s.chunk_registry.remove(id);
@@ -2201,7 +2315,11 @@ pub async fn remove_file(
     s.invalidate_bm25_cache();
     s.doc_chunk_ids.remove(&file_id);
     s.file_registry.remove(&file_id);
+    if let Some(fp) = &file_path {
+        s.remove_file_hash(fp);
+    }
     s.save_chunks().await;
+    s.save_file_hashes().await;
     Ok(())
 }
 
@@ -2359,6 +2477,11 @@ pub async fn delete_case(
         s.sessions.retain(|session| session.case_id.as_deref() != Some(&case_id));
 
         // Remove all files belonging to this case (and their chunks)
+        // Collect file paths for hash cleanup before removing from registry
+        let file_paths: Vec<String> = s.file_registry.iter()
+            .filter(|(_, f)| f.case_id.as_deref() == Some(&case_id))
+            .map(|(_, f)| f.file_path.clone())
+            .collect();
         let file_ids: Vec<String> = s.file_registry.iter()
             .filter(|(_, f)| f.case_id.as_deref() == Some(&case_id))
             .map(|(id, _)| id.clone())
@@ -2372,8 +2495,12 @@ pub async fn delete_case(
             s.doc_chunk_ids.remove(file_id);
             s.file_registry.remove(file_id);
         }
+        for fp in &file_paths {
+            s.remove_file_hash(fp);
+        }
         s.invalidate_bm25_cache();
         s.save_chunks().await;
+        s.save_file_hashes().await;
     } else {
         // Orphan sessions and files belonging to this case
         for session in &mut s.sessions {
