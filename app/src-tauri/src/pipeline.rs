@@ -235,7 +235,8 @@ RULES:\n\
 3. Reproduce numbers, dates, dollar amounts, and proper names EXACTLY as written. Never round, paraphrase, or approximate.\n\
 4. Never fabricate or infer case citations, statute numbers, court names, party names, or page numbers not in the excerpts.\n\
 5. When sources conflict, cite both and note the discrepancy.\n\
-6. When information is absent, state: \"This information is not present in the provided documents.\"";
+6. When information is absent, state: \"This information is not present in the provided documents.\"\n\
+7. State each fact ONCE. Never repeat a bullet point, sentence, or paragraph — even when rephrased.";
 
 /// Shorter rules prompt for Quick mode — same anti-hallucination rules, no formatting.
 pub const RULES_PROMPT_QUICK: &str = "\
@@ -245,7 +246,8 @@ RULES:\n\
 2. Cite as [filename, p. N] using exact filenames and page numbers from excerpt headers.\n\
 3. Reproduce numbers, dates, and names EXACTLY. Never round or guess page numbers.\n\
 4. Never fabricate citations, authorities, or parties not in the excerpts.\n\
-5. If not in documents: \"This information is not present in the provided documents.\"";
+5. If not in documents: \"This information is not present in the provided documents.\"\n\
+6. State each fact ONCE. Never repeat.";
 
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
@@ -1214,6 +1216,32 @@ Answer using ONLY these excerpts.\n\
                         break;
                     }
                 }
+                // Line-level duplicate detection: when a newline is emitted,
+                // check if the completed line duplicates any earlier line.
+                // This catches repeated bullet points (which end with `]` not `.`).
+                if response.ends_with('\n') && response.len() > 100 {
+                    let all_lines: Vec<&str> = response.trim_end().lines().collect();
+                    if all_lines.len() >= 2 {
+                        let last_line = all_lines.last().unwrap().trim();
+                        if last_line.len() > 40 {
+                            let norm_last: String = last_line.to_lowercase()
+                                .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+                            let has_dup = all_lines[..all_lines.len() - 1].iter().any(|prev| {
+                                let norm_prev: String = prev.trim().to_lowercase()
+                                    .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+                                norm_prev == norm_last
+                            });
+                            if has_dup {
+                                // Remove the duplicate line from the response
+                                if let Some(last_nl) = response[..response.len()-1].rfind('\n') {
+                                    response.truncate(last_nl + 1);
+                                }
+                                log::warn!("Duplicate line detected during generation — removed.");
+                                // Don't break — let the model continue with new content
+                            }
+                        }
+                    }
+                }
                 // Sentence-level duplicate detection: if a completed sentence
                 // has already appeared in the response, halt immediately.
                 if response.len() > 100 && response.ends_with('.') {
@@ -1284,6 +1312,12 @@ Answer using ONLY these excerpts.\n\
         // Truncate incomplete trailing sentence if generation hit token limit
         let answer = truncate_incomplete_sentence(&answer);
 
+        // Deduplicate repeated lines/bullets in the output
+        let answer = deduplicate_lines(&answer);
+
+        // Fix orphaned citation fragments like "text. 1]" → "text."
+        let answer = fix_orphaned_citations(&answer);
+
         Ok(answer)
     })
     .await
@@ -1332,6 +1366,61 @@ fn strip_trailing_filler(text: &str) -> String {
         }
     }
     trimmed.to_string()
+}
+
+/// Remove duplicate lines from the LLM response.
+/// Two lines are considered duplicates if their alphanumeric content matches after
+/// lowercasing. Preserves the first occurrence and removes subsequent duplicates.
+/// Only deduplicates lines that are substantive (>40 chars) to avoid removing
+/// legitimate short repeated patterns like bullet markers.
+fn deduplicate_lines(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut seen: Vec<String> = Vec::new();
+    let mut result: Vec<&str> = Vec::new();
+
+    for line in &lines {
+        let trimmed = line.trim();
+        // Only deduplicate substantive lines (bullets, sentences)
+        if trimmed.len() > 40 {
+            let normalized: String = trimmed
+                .to_lowercase()
+                .chars()
+                .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+                .collect();
+            if seen.contains(&normalized) {
+                log::info!("Dedup: removing duplicate line: {}", &trimmed[..trimmed.len().min(80)]);
+                continue;
+            }
+            seen.push(normalized);
+        }
+        result.push(line);
+    }
+    result.join("\n")
+}
+
+/// Fix orphaned citation fragments like "text. 1]" or "text 23]" that result from
+/// truncated generation. Removes the orphan `N]` pattern when there's no matching `[`.
+fn fix_orphaned_citations(text: &str) -> String {
+    // Match patterns like ". 1]" or " 1]" at end of line where there's no preceding "["
+    let re = Regex::new(r"(?m)\s+\d+\]$").unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut result: Vec<String> = Vec::new();
+
+    for line in lines {
+        // Check if line ends with orphaned "N]" without a matching "["
+        if let Some(m) = re.find(line) {
+            let before = &line[..m.start()];
+            // Count brackets: if more "]" than "[", the last one is orphaned
+            let open_count = before.matches('[').count() + line[m.start()..].matches('[').count();
+            let close_count = before.matches(']').count() + line[m.start()..].matches(']').count();
+            if close_count > open_count {
+                result.push(before.trim_end().to_string());
+                continue;
+            }
+        }
+        result.push(line.to_string());
+    }
+    result.join("\n")
 }
 
 /// Truncate incomplete trailing sentence when generation hits the token limit.
