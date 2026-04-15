@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 40px;
+  }
+  .container {
+    width: 1100px;
+    display: flex;
+    gap: 32px;
+  }
+  .panel {
+    flex: 1;
+    border-radius: 16px;
+    padding: 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  .panel-before {
+    background: #111111;
+    border: 1px solid rgba(255, 80, 80, 0.15);
+  }
+  .panel-after {
+    background: #111111;
+    border: 1px solid rgba(74, 222, 128, 0.2);
+  }
+  .panel-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .label-before { color: rgba(255, 80, 80, 0.6); }
+  .label-after { color: rgba(74, 222, 128, 0.7); }
+  .panel-model {
+    font-size: 12px;
+    color: rgba(255,255,255,0.3);
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .response-block {
+    font-size: 13.5px;
+    line-height: 1.75;
+    color: rgba(255,255,255,0.75);
+  }
+  .repeated-group {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(255, 80, 80, 0.03);
+    border-left: 2px solid rgba(255, 80, 80, 0.15);
+  }
+  .repeated-group.faded {
+    opacity: 0.4;
+  }
+  .repeated-group.faded-more {
+    opacity: 0.22;
+  }
+  .repeated-line {
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 4px;
+  }
+  .repeated-line .num {
+    color: rgba(255,255,255,0.3);
+    margin-right: 6px;
+  }
+  .blank {
+    color: rgba(255, 80, 80, 0.5);
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 3px;
+  }
+  .wrong {
+    color: rgba(255, 80, 80, 0.7);
+    background: rgba(255, 80, 80, 0.08);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .repeat-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255, 80, 80, 0.55);
+    background: rgba(255, 80, 80, 0.08);
+    border: 1px solid rgba(255, 80, 80, 0.12);
+    border-radius: 6px;
+    padding: 2px 8px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  /* After panel */
+  .answer-line {
+    color: rgba(255,255,255,0.9);
+    margin-bottom: 16px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .answer-line strong {
+    color: #4ade80;
+    font-weight: 600;
+  }
+  .doc-section {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(74, 222, 128, 0.03);
+    border-left: 2px solid rgba(74, 222, 128, 0.2);
+  }
+  .doc-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: #4ade80;
+    margin-bottom: 6px;
+    letter-spacing: 0.02em;
+  }
+  .doc-content {
+    font-size: 13px;
+    line-height: 1.75;
+    color: rgba(255,255,255,0.72);
+  }
+  .doc-content strong {
+    color: rgba(255,255,255,0.95);
+    font-weight: 600;
+  }
+  .cite {
+    color: rgba(74, 222, 128, 0.5);
+    font-size: 11.5px;
+  }
+  .verdict {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .verdict-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+  .verdict-bad {
+    background: rgba(255, 80, 80, 0.12);
+    color: rgba(255, 80, 80, 0.7);
+    border: 1px solid rgba(255, 80, 80, 0.2);
+  }
+  .verdict-good {
+    background: rgba(74, 222, 128, 0.12);
+    color: rgba(74, 222, 128, 0.8);
+    border: 1px solid rgba(74, 222, 128, 0.2);
+  }
+  .verdict-text {
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .verdict-text-bad { color: rgba(255, 80, 80, 0.55); }
+  .verdict-text-good { color: rgba(74, 222, 128, 0.6); }
+  .arrow-divider {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .arrow-divider svg {
+    opacity: 0.25;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <!-- BEFORE -->
+    <div class="panel panel-before">
+      <div class="panel-label label-before">Before</div>
+      <div class="panel-model">Saul-7B · 4K context · aggressive sampler</div>
+
+      <div class="response-block">
+        <div class="repeated-group">
+          <div class="repeated-line"><span class="num">1.</span> The event is scheduled for <span class="wrong">2/25/2026</span>.</div>
+          <div class="repeated-line"><span class="num">2.</span> The deposit fee of <span class="blank">$________</span> is due at signing.</div>
+          <div class="repeated-line"><span class="num">3.</span> The deposit is nonrefundable.</div>
+        </div>
+
+        <div class="repeated-group faded">
+          <div class="repeated-line"><span class="num">1.</span> The event is scheduled for <span class="wrong">2/25/2026</span>. <span class="repeat-badge">repeated</span></div>
+          <div class="repeated-line"><span class="num">2.</span> The deposit fee of <span class="blank">$________</span> is due...</div>
+          <div class="repeated-line"><span class="num">3.</span> The deposit is nonrefundable.</div>
+          <div class="repeated-line"><span class="num">4.</span> The event location is <span class="blank">_________</span>.</div>
+        </div>
+
+        <div class="repeated-group faded-more">
+          <div class="repeated-line"><span class="num">1.</span> The event is scheduled for <span class="wrong">2/25/2026</span>. <span class="repeat-badge">repeated</span></div>
+          <div class="repeated-line"><span class="num">2.</span> The deposit fee of <span class="blank">$________</span> is due...</div>
+          <div class="repeated-line"><span class="num">3.</span> The deposit is nonrefundable...</div>
+        </div>
+
+        <div class="verdict">
+          <div class="verdict-icon verdict-bad">✕</div>
+          <span class="verdict-text verdict-text-bad">Wrong date · blank fields · repeated 3×</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="arrow-divider">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14M13 6l6 6-6 6"/>
+      </svg>
+    </div>
+
+    <!-- AFTER -->
+    <div class="panel panel-after">
+      <div class="panel-label label-after">After</div>
+      <div class="panel-model">Qwen3-8B · 32K context · chunk dedup + structured prompt</div>
+
+      <div class="response-block">
+        <div class="answer-line">
+          The event is a <strong>Party</strong> on <strong>February 28, 2026</strong> from <strong>3–7pm</strong> at <strong>18 Eagle Row, Atlanta, GA</strong>, with a total fee of <strong>$275</strong>.
+        </div>
+
+        <div class="doc-section">
+          <div class="doc-name">Bartending Contract.pdf</div>
+          <div class="doc-content">
+            The client is <strong>Liam Neild</strong>, contracting with Forever Moore Ent (FME) for bartending services. Guest count is <strong>101–125</strong>. The full fee of <strong>$275</strong> is due at signing. Additional hours are billed at <strong>$50/hr</strong>.
+          </div>
+        </div>
+
+        <div class="doc-section">
+          <div class="doc-name">Contract Terms</div>
+          <div class="doc-content">
+            The deposit is <strong>nonrefundable</strong> but transferable with <strong>30-day notice</strong>. Governed by <strong>Georgia State Liquor laws</strong>. FME signed <strong>2/28/2026</strong>; client signed <strong>2/25/2026</strong>.
+          </div>
+        </div>
+
+        <div class="verdict">
+          <div class="verdict-icon verdict-good">✓</div>
+          <span class="verdict-text verdict-text-good">Correct date · exact figures · no repetition · per-section structure</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
