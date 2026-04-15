@@ -1579,7 +1579,7 @@ pub async fn query(
                         // to ensure they're interleaved, not buried at the tail.
                         let median_score = if !results.is_empty() {
                             let mut scores: Vec<f32> = results.iter().map(|(s, _)| *s).collect();
-                            scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                            scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                             scores[scores.len() / 2]
                         } else {
                             0.02

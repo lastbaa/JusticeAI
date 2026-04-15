@@ -31,7 +31,7 @@ export default function Footer() {
           <div className="flex flex-col items-start md:items-end gap-4">
             <div className="flex items-center gap-5">
               <a
-                href="https://github.com/lastbaa/CS-370-Justice-AI-Project"
+                href="https://github.com/lastbaa/JusticeAI"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="footer-link inline-flex items-center gap-1.5 text-xs"
@@ -42,7 +42,7 @@ export default function Footer() {
                 GitHub
               </a>
               <a
-                href="https://github.com/lastbaa/CS-370-Justice-AI-Project/blob/main/LICENSE"
+                href="https://github.com/lastbaa/JusticeAI/blob/main/LICENSE"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="footer-link text-xs"

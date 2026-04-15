@@ -707,7 +707,7 @@ fn extract_global_acroform_fields(doc: &lopdf::Document) -> Vec<(String, String)
         Ok(lopdf::Object::Array(arr)) => arr.clone(),
         Ok(obj) => match doc.dereference(obj) {
             Ok((_, lopdf::Object::Array(arr))) => arr.clone(),
-            _ => { eprintln!("FORM_DBG: Fields deref failed"); return results; },
+            _ => { log::debug!("AcroForm: Fields deref failed"); return results; },
         },
         Err(_) => {
             // XFA forms may use /XFA instead of /Fields
