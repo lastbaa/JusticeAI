@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #2d2d2d;
+    font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 50px 60px;
+    color: white;
+  }
+  .slide {
+    width: 1280px;
+    height: 720px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    padding: 48px 0 0;
+  }
+  .slide-title {
+    font-size: 40px;
+    font-weight: 400;
+    color: white;
+    margin-bottom: 56px;
+    letter-spacing: -0.02em;
+  }
+
+  /* Timeline container */
+  .timeline-wrapper {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* The horizontal connector line */
+  .line-row {
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    margin-bottom: 0;
+    position: relative;
+    height: 48px;
+  }
+  .line-bg {
+    position: absolute;
+    top: 50%;
+    left: 52px;
+    right: 52px;
+    height: 2px;
+    background: rgba(139,180,120,0.18);
+    transform: translateY(-50%);
+  }
+  .line-fill {
+    position: absolute;
+    top: 50%;
+    left: 52px;
+    right: 52px;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(139,180,120,0.15) 0%, rgba(139,180,120,0.55) 100%);
+    transform: translateY(-50%);
+  }
+
+  /* Dot row */
+  .dots-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 32px;
+    position: relative;
+    z-index: 2;
+    margin-top: -30px;
+  }
+  .dot-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 200px;
+  }
+  .dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #2d2d2d;
+    border: 2.5px solid rgba(139,180,120,0.4);
+    margin-bottom: 14px;
+  }
+  .dot-col.major .dot {
+    width: 18px;
+    height: 18px;
+    border: 3px solid #8bb478;
+    background: rgba(139,180,120,0.12);
+    box-shadow: 0 0 16px rgba(139,180,120,0.25), 0 0 4px rgba(139,180,120,0.15);
+  }
+
+  /* Labels under dots */
+  .meta {
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  .version {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(139,180,120,0.7);
+    font-family: 'SF Mono', 'Fira Mono', 'Menlo', monospace;
+    letter-spacing: 0.02em;
+  }
+  .dot-col.major .version {
+    color: #8bb478;
+    font-size: 16px;
+  }
+  .date {
+    font-size: 11px;
+    color: rgba(255,255,255,0.32);
+    margin-top: 3px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* Cards */
+  .cards-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 32px;
+    gap: 16px;
+  }
+  .card {
+    flex: 1;
+    border: 1.5px solid rgba(139,180,120,0.22);
+    border-radius: 10px;
+    padding: 18px 20px;
+    background: rgba(255,255,255,0.015);
+    transition: all 0.2s;
+  }
+  .card.major {
+    border-color: rgba(139,180,120,0.45);
+    background: rgba(139,180,120,0.04);
+  }
+  .card-title {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #8bb478;
+    margin-bottom: 12px;
+    letter-spacing: -0.01em;
+  }
+  .card ul {
+    list-style: none;
+    padding: 0;
+  }
+  .card li {
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: rgba(255,255,255,0.72);
+    padding-left: 14px;
+    position: relative;
+    margin-bottom: 2px;
+  }
+  .card li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8.5px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(139,180,120,0.3);
+  }
+  .card.major li {
+    color: rgba(255,255,255,0.82);
+  }
+  .card.major li::before {
+    background: rgba(139,180,120,0.55);
+  }
+
+  /* Subtle connector lines from dots to cards */
+  .connectors-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 32px;
+    height: 20px;
+  }
+  .connector {
+    width: 200px;
+    display: flex;
+    justify-content: center;
+  }
+  .connector-line {
+    width: 1px;
+    height: 100%;
+    background: rgba(139,180,120,0.12);
+  }
+  .dot-col.major + .connector .connector-line,
+  .connector.major .connector-line {
+    background: rgba(139,180,120,0.25);
+  }
+</style>
+</head>
+<body>
+  <div class="slide">
+    <h1 class="slide-title">Development Roadmap</h1>
+
+    <div class="timeline-wrapper">
+
+      <!-- Horizontal line -->
+      <div class="line-row">
+        <div class="line-bg"></div>
+        <div class="line-fill"></div>
+      </div>
+
+      <!-- Dots + version labels -->
+      <div class="dots-row">
+        <div class="dot-col">
+          <div class="dot"></div>
+          <div class="meta">
+            <div class="version">v1.0.0</div>
+            <div class="date">Dec 2025</div>
+          </div>
+        </div>
+        <div class="dot-col">
+          <div class="dot"></div>
+          <div class="meta">
+            <div class="version">v1.1.0</div>
+            <div class="date">Jan 2026</div>
+          </div>
+        </div>
+        <div class="dot-col">
+          <div class="dot"></div>
+          <div class="meta">
+            <div class="version">v1.2.0</div>
+            <div class="date">Feb 2026</div>
+          </div>
+        </div>
+        <div class="dot-col">
+          <div class="dot"></div>
+          <div class="meta">
+            <div class="version">v1.3–1.4</div>
+            <div class="date">Mar 2026</div>
+          </div>
+        </div>
+        <div class="dot-col major">
+          <div class="dot"></div>
+          <div class="meta">
+            <div class="version">v2.0.0</div>
+            <div class="date">Apr 2026</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cards -->
+      <div class="cards-row">
+        <div class="card">
+          <div class="card-title">Foundation</div>
+          <ul>
+            <li>Tauri 2 + Rust backend</li>
+            <li>Saul-7B local LLM</li>
+            <li>BGE-small embeddings</li>
+            <li>Hybrid BM25 + cosine</li>
+            <li>PDF viewer + citations</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-title">Stability</div>
+          <ul>
+            <li>MMR diversity reranking</li>
+            <li>Metal GPU offload</li>
+            <li>Fixed garbled output</li>
+            <li>PDF encoding fixes</li>
+            <li>Crash fixes (SIGABRT)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-title">Eval & Formats</div>
+          <ul>
+            <li>Streaming token output</li>
+            <li>77-case eval harness</li>
+            <li>DOCX, CSV, HTML, EML</li>
+            <li>OCR for images</li>
+            <li>Pluggable backends</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-title">Cases & Platform</div>
+          <ul>
+            <li>Case management</li>
+            <li>PDF highlighting</li>
+            <li>Jurisdiction detection</li>
+            <li>Windows + Linux builds</li>
+            <li>Citation confidence</li>
+          </ul>
+        </div>
+        <div class="card major">
+          <div class="card-title">Qwen3-8B + Quality</div>
+          <ul>
+            <li>Qwen3-8B (32K context)</li>
+            <li>Chunk content dedup</li>
+            <li>Structured prompts</li>
+            <li>Thinking mode</li>
+            <li>Response overhaul</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>
