@@ -19,7 +19,7 @@ const platforms: {
     key: 'mac',
     label: 'macOS',
     sub: 'Apple Silicon (native) · Intel via Rosetta 2 · macOS 12+',
-    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v1.4.0/Justice.AI-1.4.0-arm64.dmg',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v2.0.0/Justice.AI-2.0.0-arm64.dmg',
     available: true,
     installSteps: [
       'Open the .dmg and drag Justice AI into your Applications folder, then eject the disk image.',
@@ -37,7 +37,7 @@ const platforms: {
     key: 'windows',
     label: 'Windows',
     sub: 'Windows 10+ · x64 · Vulkan GPU recommended',
-    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v1.4.0/Justice.AI_1.4.0_x64-setup.exe',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v2.0.0/Justice.AI_2.0.0_x64-setup.exe',
     available: true,
     installSteps: [
       'Run the installer (.exe). Windows SmartScreen may warn about an unrecognized publisher — click "More info" → "Run anyway".',
@@ -55,10 +55,10 @@ const platforms: {
     key: 'linux',
     label: 'Linux',
     sub: 'Ubuntu 22.04+ / Fedora 38+ · x64 · AppImage',
-    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v1.4.0/Justice.AI_1.4.0_amd64.AppImage',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v2.0.0/Justice.AI_2.0.0_amd64.AppImage',
     available: true,
     installSteps: [
-      'Download the .AppImage file. Make it executable: chmod +x Justice.AI_1.4.0_amd64.AppImage, then double-click or run it from a terminal.',
+      'Download the .AppImage file. Make it executable: chmod +x Justice.AI_2.0.0_amd64.AppImage, then double-click or run it from a terminal.',
       'If your desktop environment supports it, you can right-click the AppImage → Properties → Permissions → "Allow executing file as program".',
       'On first launch the app downloads the Qwen3-8B language model (~5 GB). This is a one-time setup — no accounts or API keys needed. After that, everything runs fully offline.',
       'Drag in your PDFs or Word documents, ask any legal question in plain English, and get cited answers grounded in your own files.',
@@ -188,7 +188,7 @@ export default function Download() {
                     background: 'rgba(255,255,255,0.02)',
                   }}
                 >
-                  v1.5.0 · Open Source
+                  v2.0.0 · Open Source
                 </span>
               </div>
 

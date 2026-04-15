@@ -8,7 +8,7 @@ All processing runs locally on the user's device. No data is sent to external se
 
 ## Resource Efficiency
 
-- **On-demand model loading**: The LLM (Saul-7B, ~4.5 GB) and embedding model (~33 MB) are downloaded once and cached locally
+- **On-demand model loading**: The LLM (Qwen3-8B, ~5 GB) and embedding model (~33 MB) are downloaded once and cached locally
 - **Quantized inference**: Q4_K_M quantization reduces memory footprint by ~75% compared to full-precision models while maintaining quality
 - **Efficient retrieval**: Hybrid BM25 + cosine similarity with Reciprocal Rank Fusion avoids expensive reranking API calls
 - **No always-on services**: No background daemons, databases, or cloud subscriptions required

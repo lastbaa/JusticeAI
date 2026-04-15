@@ -5,7 +5,7 @@
 Tauri 2 + Rust desktop app. Pipeline:
 
 ```
-PDF/DOCX → parse → chunk → embed (BGE-small-en-v1.5) → cosine+MMR retrieve → Saul-7B-Instruct → answer
+PDF/DOCX → parse → chunk → embed (BGE-small-en-v1.5) → cosine+MMR retrieve → Qwen3-8B → answer
 ```
 
 All processing is local. No cloud calls except the original model download.
@@ -25,7 +25,7 @@ All processing is local. No cloud calls except the original model download.
 - `chunk_overlap`: 300 chars
 - `top_k`: 6
 - Embedding: BGE-small-en-v1.5 (fastembed, ~33MB ONNX)
-- LLM: Saul-Instruct-v1 Q4_K_M GGUF (~4.5GB), context 4096 tokens
+- LLM: Qwen3-8B Q4_K_M GGUF (~5GB), context 32K tokens (originally Saul-7B, upgraded April 2026)
 
 ---
 
@@ -79,8 +79,8 @@ The LLM response restarts numbered lists 4 times, repeating the same 3–4 facts
 ```
 
 **Suspected causes:**
-- MMR retrieval still returning near-identical chunks from the same single-page document (Saul summarizes each independently)
-- Or: Saul's repetition penalty isn't strong enough at low temperature to prevent loop behavior when context contains near-duplicate passages
+- MMR retrieval still returning near-identical chunks from the same single-page document (LLM summarizes each independently)
+- Or: repetition penalty isn't strong enough at low temperature to prevent loop behavior when context contains near-duplicate passages
 
 ---
 

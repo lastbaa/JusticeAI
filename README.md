@@ -11,7 +11,7 @@ Private, citation-grounded legal document research on your local machine.
 - **Privacy-first** — All processing happens on-device. Documents never leave your machine.
 - **Citation-grounded answers** — Every response includes file name, page number, and excerpt references.
 - **Hybrid retrieval** — BM25 keyword search + semantic cosine similarity, fused with Reciprocal Rank Fusion (RRF) for best-of-both-worlds accuracy.
-- **Local legal LLM** — Saul-7B-Instruct (Q4_K_M) runs entirely on your hardware via llama-cpp-2. No API keys, no cloud.
+- **Local legal LLM** — Qwen3-8B (Q4_K_M) runs entirely on your hardware via llama-cpp-2. No API keys, no cloud.
 - **Three inference modes** — Brief, Standard, and Discovery modes control answer depth and token budget per query.
 - **Case management** — Organize documents into cases with document roles (Client Document, Legal Authority, Evidence, Reference) and per-case context notes.
 - **Hallucination detection** — Automatic assertion checks verify citations, flag ungrounded claims, and detect fabricated entities.
@@ -36,7 +36,7 @@ Private, citation-grounded legal document research on your local machine.
 │              Rust Backend                        │
 │  Doc Parser │ Chunker │ Embedder │ Retriever     │
 │                  │                               │
-│          Saul-7B (llama-cpp-2)                   │
+│          Qwen3-8B (llama-cpp-2)                   │
 │          BGE-small (fastembed)                   │
 └─────────────────────────────────────────────────┘
 ```
@@ -44,7 +44,7 @@ Private, citation-grounded legal document research on your local machine.
 - **Frontend**: React + Vite + Tailwind CSS
 - **Backend**: Rust (Tauri 2) — handles parsing, chunking, embedding, retrieval, and LLM inference
 - **Embedding model**: BGE-small-en-v1.5 via fastembed (ONNX, ~33 MB)
-- **LLM**: Saul-7B-Instruct Q4_K_M GGUF via llama-cpp-2 (~4.5 GB)
+- **LLM**: Qwen3-8B Q4_K_M GGUF via llama-cpp-2 (~5 GB)
 - **Vector store**: In-memory with cosine similarity, persisted to disk
 
 ## System Requirements
@@ -68,7 +68,7 @@ Justice AI uses a **Retrieval-Augmented Generation (RAG)** pipeline:
    - **Cosine similarity** on embeddings
    - **Reciprocal Rank Fusion** merges both ranked lists
    - **MMR reranking** ensures diversity in results
-5. **Generate** — Top chunks are passed as context to Saul-7B-Instruct, which generates an answer with inline citations referencing specific files and pages.
+5. **Generate** — Top chunks are passed as context to Qwen3-8B, which generates an answer with inline citations referencing specific files and pages.
 
 ## Supported File Types
 
@@ -112,7 +112,7 @@ npm run app
 
 On first launch, the app will:
 
-1. Download the Saul-7B model (~4.5 GB, one-time)
+1. Download the Qwen3-8B model (~5 GB, one-time)
 2. Download the BGE-small embedding model (~33 MB, one-time)
 3. Check/install OCR runtime (Tesseract) for image text extraction when possible
 

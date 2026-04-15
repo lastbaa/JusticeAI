@@ -13,7 +13,7 @@
 - **Frontend:** React + TypeScript + Vite (`app/src/renderer`).
 - **Bridge/API:** Tauri `invoke` + event listeners (`app/src/renderer/src/api.ts`).
 - **Backend:** Rust commands and state management (`app/src-tauri/src/commands`, `state.rs`, `pipeline.rs`).
-- **RAG flow:** parse files -> chunk -> embed (`fastembed`) -> retrieve (hybrid backends) -> prompt Saul GGUF (`llama-cpp-2`) -> citations + streaming tokens/events.
+- **RAG flow:** parse files -> chunk -> embed (`fastembed`) -> retrieve (hybrid backends) -> prompt Qwen3-8B GGUF (`llama-cpp-2`) -> citations + streaming tokens/events.
 - **Persistence:** JSON state in app data directory (`chunks`, `settings`, `sessions`, embedding model marker).
 - **Viewer support:** local loopback file server for PDF rendering.
 
@@ -36,10 +36,10 @@
 - `package.json` - workspace root (`website`, `app`, `shared`) scripts.
 - `package-lock.json` - npm dependency lockfile.
 
-## Saul/ model helper scripts
+## Saul/ model helper scripts (legacy — Saul-7B was the first model tried, later replaced by Qwen3-8B)
 
-- `Saul/download_gguf.py` - downloads base GGUF model from HuggingFace.
-- `Saul/download_instruct.py` - downloads instruct GGUF model from HuggingFace.
+- `Saul/download_gguf.py` - legacy script that downloaded the original Saul-7B GGUF model.
+- `Saul/download_instruct.py` - legacy script that downloaded the original Saul-7B instruct model.
 
 ## Shared package
 
@@ -55,7 +55,7 @@
 ## App workspace: configs and build
 
 - `app/package.json` - app scripts/dependencies for Tauri + renderer.
-- `app/Modelfile.saul-instruct` - Ollama modelfile template for Saul instruct behavior.
+- `app/Modelfile.saul-instruct` - legacy Ollama modelfile for the original Saul-7B model (no longer used; Qwen3-8B replaced it).
 - `app/vite.config.ts` - active renderer Vite config for Tauri.
 - `app/electron.vite.config.ts` - legacy Electron build config.
 - `app/tailwind.config.ts` - renderer Tailwind theme config.
@@ -95,7 +95,7 @@
 - `app/src/main/services/docParser.ts` - legacy PDF/DOCX parsing path.
 - `app/src/main/services/ollama.ts` - legacy Ollama tags/embedding client.
 - `app/src/main/services/ragPipeline.ts` - legacy in-process RAG with Vectra.
-- `app/src/main/services/saul.ts` - legacy HF chat completion wrapper.
+- `app/src/main/services/saul.ts` - legacy HF chat completion wrapper for the original Saul-7B model (no longer used).
 - `app/src/preload/index.ts` - Electron contextBridge API exposure.
 
 ## App workspace: active Tauri backend

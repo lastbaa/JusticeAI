@@ -73,7 +73,7 @@ cargo run --bin harness -- --eval tests/fixtures/eval.json
 
 Justice AI uses **Tauri 2** with a Rust backend and React frontend. Key design decisions:
 
-- **Fully local**: No cloud APIs. The Saul-7B LLM runs on-device via `llama-cpp-2`. Embeddings use `fastembed` (BGE-Small, ONNX runtime). Documents never leave the machine.
+- **Fully local**: No cloud APIs. The Qwen3-8B LLM runs on-device via `llama-cpp-2`. Embeddings use `fastembed` (BGE-Small, ONNX runtime). Documents never leave the machine.
 - **Hybrid retrieval**: BM25 keyword search + cosine similarity over embeddings, fused with Reciprocal Rank Fusion (RRF). An optional cross-encoder reranker backend is also available.
 - **IPC via Tauri commands**: The frontend calls Rust functions through Tauri's `invoke()` API. All command definitions live in `app/src-tauri/src/commands/`. Shared types are in `shared/src/types.ts`.
 - **Vector storage**: In-memory `Vec<EmbeddedChunkEntry>` with cosine similarity, persisted to `chunks.json`. No external database.

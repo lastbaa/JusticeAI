@@ -1,6 +1,6 @@
 [package]
 name = "justice-ai"
-version = "1.0.0"
+version = "2.0.0"
 description = "Justice AI — Private Legal Research Desktop App"
 authors = ["Justice AI"]
 edition = "2021"

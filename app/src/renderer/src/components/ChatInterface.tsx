@@ -94,8 +94,8 @@ function InferenceModeDropdown({
         onMouseEnter={(e) => { if (!disabled && !open) (e.currentTarget as HTMLButtonElement).style.background = 'rgb(var(--ov) / 0.04)' }}
         onMouseLeave={(e) => { if (!open) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
       >
-        <span className="text-[13px] font-semibold tracking-[-0.01em]">Justice AI</span>
-        <span className="text-[10.5px] font-medium" style={{ color: 'rgba(201,168,76,0.7)' }}>{current.label}</span>
+        <span className="text-[13px] font-semibold tracking-[-0.01em] whitespace-nowrap">Justice AI</span>
+        <span className="text-[10.5px] font-medium whitespace-nowrap" style={{ color: 'rgba(201,168,76,0.7)' }}>{current.label}</span>
         <svg
           width="8" height="8" viewBox="0 0 10 10" fill="none"
           stroke="rgb(var(--ov) / 0.3)" strokeWidth="1.6" strokeLinecap="round"
@@ -211,9 +211,13 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
   const [phraseKey, setPhraseKey] = useState(0)
   const startRef = useRef(Date.now())
 
+  // Show rotating lawyer phrases during generation AND when no phase is set.
+  // Only show static phase text for non-generation phases (embedding, searching).
+  const useRotatingPhrases = !phase || phase === 'Generating answer'
+
   useEffect(() => {
     let phraseTimer: ReturnType<typeof setInterval> | undefined
-    if (!phase) {
+    if (useRotatingPhrases) {
       phraseTimer = setInterval(() => {
         setPhraseIdx((i) => (i + 1) % phrases.length)
         setPhraseKey((k) => k + 1)
@@ -227,10 +231,10 @@ function TypingIndicator({ phase }: { phase?: string }): JSX.Element {
       if (phraseTimer) clearInterval(phraseTimer)
       clearInterval(elapsedTimer)
     }
-  }, [phase])
+  }, [useRotatingPhrases])
 
-  const displayPhrase = phase || phrases[phraseIdx]
-  const displayKey = phase ? phase : phraseKey
+  const displayPhrase = useRotatingPhrases ? phrases[phraseIdx] : phase
+  const displayKey = useRotatingPhrases ? phraseKey : phase
 
   return (
     <div className="flex gap-3 max-w-4xl mx-auto w-full" style={{ animation: 'fadeUp 0.3s ease both' }} role="status" aria-live="polite">
@@ -740,24 +744,61 @@ export default function ChatInterface({
             ) : (
               /* Has docs — show template prompts + key facts */
               <>
-                <p className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.2em]" style={{ color: 'rgba(201,168,76,0.5)' }}>
+                {/* Court seal watermark — matches no-docs state */}
+                <svg
+                  width="260" height="260" viewBox="0 0 200 200" fill="none"
+                  className="absolute pointer-events-none select-none"
+                  style={{ opacity: 0.025, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+                >
+                  <circle cx="100" cy="100" r="95" stroke="currentColor" strokeWidth="2.5" />
+                  <circle cx="100" cy="100" r="82" stroke="currentColor" strokeWidth="1" />
+                  <circle cx="100" cy="52" r="3" fill="currentColor" />
+                  <rect x="98.5" y="52" width="3" height="48" fill="currentColor" />
+                  <rect x="86" y="100" width="28" height="3" rx="1.5" fill="currentColor" />
+                  <rect x="92" y="103" width="16" height="3" rx="1.5" fill="currentColor" />
+                  <rect x="70" y="58" width="60" height="3" rx="1.5" fill="currentColor" />
+                  <line x1="76" y1="61" x2="73" y2="82" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                  <line x1="124" y1="61" x2="127" y2="82" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                  <path d="M67 82 Q73 92 79 82" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+                  <path d="M121 82 Q127 92 133 82" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+                  <path d="M38 140 Q30 120 42 100" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M42 148 Q32 130 40 112" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M48 155 Q36 140 42 122" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M56 160 Q42 148 46 132" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M65 163 Q52 155 54 140" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M162 140 Q170 120 158 100" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M158 148 Q168 130 160 112" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M152 155 Q164 140 158 122" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M144 160 Q158 148 154 132" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <path d="M135 163 Q148 155 146 140" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  <text textAnchor="middle" fontSize="10" fontWeight="600" letterSpacing="4" fill="currentColor">
+                    <textPath href="#sealArcTop2" startOffset="50%">JUSTICE AI</textPath>
+                  </text>
+                  <defs>
+                    <path id="sealArcTop2" d="M30 100 A70 70 0 0 1 170 100" />
+                  </defs>
+                </svg>
+
+                <p className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.2em] relative z-10" style={{ color: 'rgba(201,168,76,0.5)' }}>
                   {files.length} {files.length === 1 ? 'exhibit' : 'exhibits'} on file
                 </p>
-                <h3 className="mb-5 text-[22px] font-semibold tracking-[-0.02em]" style={{ color: 'var(--text)' }}>
+                <h3 className="mb-5 text-[22px] font-semibold tracking-[-0.02em] relative z-10" style={{ color: 'var(--text)' }}>
                   Court is in session
                 </h3>
                 {chunkTexts && chunkTexts.length > 0 && (
-                  <div className="w-full max-w-lg mb-5">
+                  <div className="w-full max-w-lg mb-5 relative z-10">
                     <FactsPanel
                       chunkTexts={chunkTexts}
                       onClickFact={(q) => { setInput(q); textareaRef.current?.focus() }}
                     />
                   </div>
                 )}
-                <QueryTemplates
-                  practiceArea={practiceArea ?? null}
-                  onSelect={(q) => { setInput(q); textareaRef.current?.focus() }}
-                />
+                <div className="relative z-10">
+                  <QueryTemplates
+                    practiceArea={practiceArea ?? null}
+                    onSelect={(q) => { setInput(q); textareaRef.current?.focus() }}
+                  />
+                </div>
               </>
             )}
           </div>

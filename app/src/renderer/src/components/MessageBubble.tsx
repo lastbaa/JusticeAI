@@ -273,6 +273,64 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
+// ── Strip inline citations from display text ─────────────────────────────────
+// Citations are shown in the SOURCES section below; remove them from the body.
+// Preserves trailing periods (sentence-ending punctuation) when stripping.
+function stripInlineCitations(text: string): string {
+  let result = text
+    // [filename.pdf, p. 1], [doc, pp. 1-3] — preserve period if present after ]
+    .replace(/\s*\[[^\[\]]{1,150},\s*pp?\.\s*[\d,\s–-]+\](\.)?/g, (_, dot) => dot || '')
+    // [Source 3, p. 12], [Source 3] — preserve period if present after ]
+    .replace(/\s*\[Source\s+\d+[^\]]*\](\.)?/g, (_, dot) => dot || '')
+    .replace(/\s+([.,;])/g, '$1') // fix orphaned spaces before punctuation
+
+  // Rejoin orphan short lines (e.g. "U." / "S." / "00" broken across lines).
+  // If a line is ≤4 chars and non-empty, join it to the previous line.
+  const lines = result.split('\n')
+  const joined: string[] = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.length > 0 && trimmed.length <= 4 && joined.length > 0 && joined[joined.length - 1].trim().length > 0) {
+      joined[joined.length - 1] = joined[joined.length - 1].trimEnd() + trimmed
+    } else {
+      joined.push(line)
+    }
+  }
+  return joined.join('\n')
+}
+
+// ── Frontend dedup: last-line-of-defense against repeated bullets ─────────────
+// Strips citations before comparing so "[doc, p. 1]" vs "[doc, p.1]" match.
+function deduplicateLines(text: string): string {
+  const lines = text.split('\n')
+  const seen: string[] = []
+  const result: string[] = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) { result.push(line); continue }
+    // Strip citations and normalize for comparison
+    const noCites = trimmed.replace(/\s*\[[^\]]{0,200}\]/g, '')
+    const normalized = noCites.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim()
+    if (normalized.length > 25) {
+      // Exact match check
+      if (seen.includes(normalized)) continue
+      // Jaccard fuzzy match (>0.65 word overlap = duplicate)
+      const curWords = new Set(normalized.split(' '))
+      const isDup = seen.some(prev => {
+        const prevWords = new Set(prev.split(' '))
+        let inter = 0
+        for (const w of curWords) if (prevWords.has(w)) inter++
+        const union = new Set([...curWords, ...prevWords]).size
+        return union > 0 && inter / union > 0.65
+      })
+      if (isDup) continue
+      seen.push(normalized)
+    }
+    result.push(line)
+  }
+  return result.join('\n')
+}
+
 // ── Lightweight markdown renderer ─────────────────────────────────────────────
 function renderMarkdown(text: string, ctx?: MarkdownCtx): JSX.Element {
   const lines = text.split('\n')
@@ -740,25 +798,6 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
           >
             Justice AI
           </p>
-          {hovered && !isNotFound && !message.isStreaming && message.content.trim() && (
-            <div className="flex items-center gap-0.5">
-              <CopyButton text={message.content} />
-              {onDeleteMessage && (
-                <ActionButton title="Delete" onClick={(e) => { e.stopPropagation(); onDeleteMessage(message.id) }}>
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM6.5 1.75V3h3V1.75a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25ZM4.997 6.178a.75.75 0 1 0-1.493.144l.684 7.084A1.75 1.75 0 0 0 5.926 15h4.148a1.75 1.75 0 0 0 1.738-1.594l.684-7.084a.75.75 0 0 0-1.493-.144l-.684 7.084a.25.25 0 0 1-.245.228H5.926a.25.25 0 0 1-.245-.228L4.997 6.178Z" />
-                  </svg>
-                </ActionButton>
-              )}
-              {isLastAssistant && onRetryMessage && (
-                <ActionButton title="Regenerate" onClick={(e) => { e.stopPropagation(); onRetryMessage(message.id) }}>
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z" />
-                  </svg>
-                </ActionButton>
-              )}
-            </div>
-          )}
         </div>
 
         {isNotFound ? (
@@ -826,7 +865,7 @@ export default function MessageBubble({ message, files, onViewCitation, onDelete
             <div className="text-[13.5px] leading-[1.75]" style={{ color: 'var(--text)' }}>
               {message.content.trim()
                 ? <>
-                    {renderMarkdown(message.content, mdCtx)}
+                    {renderMarkdown(stripInlineCitations(deduplicateLines(message.content)), mdCtx)}
                     {message.isStreaming && (
                       <span
                         style={{

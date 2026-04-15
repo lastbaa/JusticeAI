@@ -80,7 +80,7 @@ const releases = [
     date: 'December 2025',
     items: [
       'Tauri 2 desktop app with Rust backend',
-      'Fully local LLM inference via Saul-7B-Instruct',
+      'Fully local LLM inference (originally Saul-7B-Instruct, later upgraded to Qwen3-8B)',
       'Local embeddings via fastembed (BGE-small-en-v1.5)',
       'Hybrid BM25 + cosine similarity retrieval with RRF',
       'Zero-config setup with automatic model download',

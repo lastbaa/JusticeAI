@@ -6,7 +6,7 @@ Justice AI is a privacy-first legal research desktop app. All document processin
 
 When you first launch Justice AI, a setup screen will appear to download the required models:
 
-1. **Saul-7B LLM** (~4.5 GB) -- powers answer generation
+1. **Qwen3-8B LLM** (~5 GB) -- powers answer generation
 2. **BGE-Small embedding model** (~33 MB) -- powers semantic search
 
 Click **Download Models** and wait for both downloads to complete. This is a one-time process; subsequent launches skip this step.
@@ -35,7 +35,7 @@ Type a question in the chat input and press **Enter**. Justice AI will:
 
 1. Search your uploaded documents using hybrid BM25 + semantic retrieval
 2. Retrieve the most relevant passages
-3. Generate a citation-grounded answer using the Saul-7B legal LLM
+3. Generate a citation-grounded answer using the Qwen3-8B legal LLM
 
 **Example questions:**
 - "What are the termination clauses in this contract?"
@@ -90,7 +90,7 @@ Access settings via the gear icon. Available options:
 Justice AI is designed with privacy as a core principle:
 
 - **Documents never leave your machine.** Parsing, chunking, and embedding all happen locally.
-- **LLM inference is local.** The Saul-7B model runs on-device via llama.cpp -- no cloud API calls.
+- **LLM inference is local.** The Qwen3-8B model runs on-device via llama.cpp -- no cloud API calls.
 - **No telemetry.** The app makes no network requests after the initial model download.
 - **Local storage only.** Chat history and settings are stored in your platform's app data directory.
 

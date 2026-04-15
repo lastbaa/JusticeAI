@@ -3,7 +3,7 @@
 ## Context
 
 I have a **desktop app** (Tauri 2 / Rust backend) that does local-only legal document RAG:
-- PDF/DOCX → chunk → embed (fastembed BGE-small-en-v1.5, 384 dims) → retrieve → LLM (Saul-7B GGUF via llama-cpp-2)
+- PDF/DOCX → chunk → embed (fastembed BGE-small-en-v1.5, 384 dims) → retrieve → LLM (Qwen3-8B GGUF via llama-cpp-2; originally Saul-7B, upgraded April 2026)
 - Everything runs on-device (macOS, Apple Silicon). No server, no cloud.
 - Corpus is small: typically 1–20 documents, 50–500 chunks total, all in-memory.
 - Current retrieval: hand-rolled BM25 + cosine similarity hybrid, MMR diversity selection. Works OK for keyword-heavy queries but fails on semantic gaps (e.g. "what is the person's name?" doesn't retrieve a chunk containing "Liam Neild 18 Eagle Row" because there's zero lexical overlap).
@@ -47,7 +47,7 @@ pub trait RetrievalBackend {
 pub struct HybridBm25Cosine { alpha: f32, form_boost: f32 }
 
 // Embedding: fastembed crate, BGE-small-en-v1.5 (ONNX, ~33MB)
-// LLM: llama-cpp-2 crate, Saul-7B Q4_K_M GGUF (~4.5GB)
+// LLM: llama-cpp-2 crate, Qwen3-8B Q4_K_M GGUF (~5GB)
 // Corpus: Vec<EmbeddedChunkEntry> { vector: Vec<f32>, meta: ChunkMetadata }
 ```
 

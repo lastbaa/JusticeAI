@@ -175,6 +175,41 @@ struct EvalResult {
     top_scores: Vec<(f32, usize)>,
     tags: Vec<String>,
     notes: String,
+    /// Repetition score: 0.0 = no repetition, 1.0 = all lines duplicated.
+    /// Computed from LLM answer when available.
+    repetition_score: f32,
+}
+
+/// Compute repetition score for an LLM answer.
+/// Normalizes each line (lowercase, strip punctuation/whitespace), then counts
+/// how many lines are duplicates of a previously seen line.
+/// Returns ratio: duplicate_lines / total_non_empty_lines.
+fn compute_repetition_score(answer: &str) -> f32 {
+    let lines: Vec<String> = answer
+        .lines()
+        .map(|l| {
+            l.trim()
+                .to_lowercase()
+                .chars()
+                .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+                .collect::<String>()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return 0.0;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut dupes = 0usize;
+    for line in &lines {
+        if !seen.insert(line.as_str()) {
+            dupes += 1;
+        }
+    }
+    dupes as f32 / lines.len() as f32
 }
 
 // == JSON report types (for --report / --diff / --json-out) ====================
@@ -203,6 +238,8 @@ struct CaseReport {
     missed: Vec<String>,
     must_not_violations: Vec<String>,
     tags: Vec<String>,
+    #[serde(default)]
+    repetition_score: f32,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -213,6 +250,8 @@ struct SummaryReport {
     mrr: f32,
     p_at_1: f32,
     avg_partial_score: f32,
+    #[serde(default)]
+    avg_repetition: f32,
 }
 
 /// Extended JSON output for --json-out flag.
@@ -273,6 +312,7 @@ impl EvalResult {
             missed: self.missed.clone(),
             must_not_violations: self.must_not_violations.clone(),
             tags: self.tags.clone(),
+            repetition_score: self.repetition_score,
         }
     }
 }
@@ -305,7 +345,10 @@ fn compute_summary(results: &[EvalResult]) -> SummaryReport {
     let avg_partial = if total > 0 {
         results.iter().map(|r| r.partial_score).sum::<f32>() / total as f32
     } else { 0.0 };
-    SummaryReport { total, passed, avg_recall, mrr, p_at_1, avg_partial_score: avg_partial }
+    let avg_repetition = if total > 0 {
+        results.iter().map(|r| r.repetition_score).sum::<f32>() / total as f32
+    } else { 0.0 };
+    SummaryReport { total, passed, avg_recall, mrr, p_at_1, avg_partial_score: avg_partial, avg_repetition }
 }
 
 fn compute_aggregate(results: &[EvalResult]) -> AggregateMetrics {
@@ -583,6 +626,7 @@ async fn run_eval_cases(
                     answer_rank: None, passed: false,
                     missed: case.expected.clone(), must_not_violations: vec![],
                     top_scores: vec![], tags: case.tags.clone(), notes: case.notes.clone(),
+                    repetition_score: 0.0,
                 });
                 continue;
             }
@@ -599,6 +643,7 @@ async fn run_eval_cases(
                     answer_rank: None, passed: false,
                     missed: case.expected.clone(), must_not_violations: vec![],
                     top_scores: vec![], tags: case.tags.clone(), notes: case.notes.clone(),
+                    repetition_score: 0.0,
                 });
                 continue;
             }
@@ -622,6 +667,7 @@ async fn run_eval_cases(
                         answer_rank: None, passed: false,
                         missed: case.expected.clone(), must_not_violations: vec![],
                         top_scores: vec![], tags: case.tags.clone(), notes: case.notes.clone(),
+                        repetition_score: 0.0,
                     });
                     continue;
                 }
@@ -692,6 +738,7 @@ async fn run_eval_cases(
                 top_scores,
                 tags: case.tags.clone(),
                 notes: case.notes.clone(),
+                repetition_score: 0.0,
             });
         } else {
             // -- Standard / multi-fact / cross-reference case -----------------
@@ -773,6 +820,7 @@ async fn run_eval_cases(
                 answer_rank: first_hit_rank, passed,
                 missed, must_not_violations, top_scores,
                 tags: case.tags.clone(), notes: case.notes.clone(),
+                repetition_score: 0.0,
             });
         }
     }
@@ -827,6 +875,7 @@ fn print_scorecard(eval_results: &[EvalResult], backend_name: &str) {
     println!("Precision@1:    {:.1}% ({}/{})", summary.p_at_1 * 100.0,
         eval_results.iter().filter(|r| r.precision_at_1).count(), summary.total);
     println!("Avg partial:    {:.1}%", summary.avg_partial_score * 100.0);
+    println!("Avg repetition: {:.1}%", summary.avg_repetition * 100.0);
 
     // -- Breakdown by difficulty -----------------------------------------------
     print_banner("BY DIFFICULTY");

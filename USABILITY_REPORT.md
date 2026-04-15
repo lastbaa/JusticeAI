@@ -183,7 +183,7 @@ Edit and delete session buttons are 16×16px. WCAG AAA recommends 44×44px. Even
 *(Source: #5)*
 
 **F3. Model names shown without explanation**
-"Saul-7B-Instruct" and "BGE-small-en-v1.5" appear in Settings with no user-facing context. These should be surfaced as "Legal AI Model (local)" and "Search Model (local)" with the technical name as a secondary label.
+"Qwen3-8B" and "BGE-small-en-v1.5" appear in Settings with no user-facing context. These should be surfaced as "Legal AI Model (local)" and "Search Model (local)" with the technical name as a secondary label.
 *(Source: #O9)*
 
 **F4. Export is invisible**

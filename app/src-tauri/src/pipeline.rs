@@ -228,16 +228,19 @@ pub const QWEN3_GGUF_URL: &str = "https://huggingface.co/Qwen/Qwen3-8B-GGUF/reso
 /// Document context goes in the user turn; system prompt contains only rules.
 /// Formatting instructions are in mode-specific suffixes, not here.
 pub const RULES_PROMPT: &str = "\
-You are Justice AI, a legal document analyst. Answer ONLY from the provided document excerpts.\n\n\
-RULES:\n\
-1. If the answer is not in the excerpts, say: \"This information is not present in the provided documents.\"\n\
-2. Cite every claim inline as [filename, p. N]. Never place citations on their own line.\n\
-3. Reproduce numbers, dates, and names EXACTLY as written. Never fabricate.\n\
-4. State each fact ONCE — never repeat a point even with different wording.\n\
-5. Lead with the direct answer, then provide supporting details.\n\
-6. Use **bold** for key terms and amounts. Integrate labels into facts: \"**Rent:** $1,850/month [doc, p. 1]\".\n\
-7. Use bullet points only for 3+ distinct facts. Each bullet must be a complete sentence with a citation.\n\
-8. When multiple documents are provided, address each one.";
+You are Justice AI, a legal document analyst. Answer ONLY from the provided document excerpts.
+
+RULES:
+1. If not in the excerpts: \"This information is not present in the provided documents.\"
+2. Cite every claim inline as [filename, p. N].
+3. Reproduce numbers, dates, and names EXACTLY. Never fabricate.
+4. State each fact ONCE. Never repeat information.
+5. Use **bold** for key terms and amounts.
+6. Lead with a direct answer, then organize facts by document.
+7. When multiple documents are provided, address EACH document with its own section.
+
+EXAMPLE (for \"What is the monthly rent?\"):
+The monthly rent is **$1,850/month**, due on the first of each month [Lease Agreement.pdf, p. 2]. A late fee of **$50** applies after the 5th [Lease Agreement.pdf, p. 3].";
 
 /// Shorter rules prompt for Quick mode — same anti-hallucination rules, no formatting.
 pub const RULES_PROMPT_QUICK: &str = "\
@@ -260,6 +263,9 @@ pub struct InferenceParams {
     pub timeout_secs: u64,
     /// Whether this is Quick mode (uses shorter RULES_PROMPT_QUICK).
     pub is_quick: bool,
+    /// Whether to enable Qwen3 thinking mode (Extended only).
+    /// When true, the model generates a `<think>` block before answering.
+    pub enable_thinking: bool,
 }
 
 impl InferenceParams {
@@ -279,22 +285,25 @@ impl InferenceParams {
                 system_prompt_override: None,
                 timeout_secs: 30,
                 is_quick: true,
+                enable_thinking: false,
             },
             InferenceMode::Balanced => Self {
                 max_new_tokens: 2048,
                 temperature: 0.6,
-                system_prompt_suffix: "\nBe thorough but concise. No nested bullets. Never repeat information.",
+                system_prompt_suffix: "\nKeep each document section to 2-4 sentences. Be concise.",
                 system_prompt_override: None,
                 timeout_secs: 90,
                 is_quick: false,
+                enable_thinking: false,
             },
             InferenceMode::Extended => Self {
-                max_new_tokens: 3072,
+                max_new_tokens: 3072,  // Total budget: ~1024 thinking + ~2048 visible
                 temperature: 0.7,
-                system_prompt_suffix: "\nProvide a detailed analysis. Cross-reference documents where applicable. Use ### headers for 3+ distinct topics. Never repeat information.",
+                system_prompt_suffix: "\nProvide thorough analysis per document. Cross-reference between documents where relevant.",
                 system_prompt_override: None,
                 timeout_secs: 180,
                 is_quick: false,
+                enable_thinking: true,
             },
         }
     }
@@ -964,12 +973,18 @@ Answer using ONLY these excerpts.\n\
 
     // Assemble ChatML prompt for Qwen3-8B.
     // History is injected as proper multi-turn ChatML before the current user turn.
-    // Empty <think></think> disables thinking mode (saves tokens, improves RAG speed).
+    // For Quick/Balanced: empty <think></think> disables thinking mode.
+    // For Extended: omit the block so the model thinks before answering.
+    let thinking_block = if inference_params.enable_thinking {
+        ""  // Model will generate its own <think>...</think> block
+    } else {
+        "<think>\n\n</think>\n\n"  // Disabled: empty think block
+    };
     let prompt = format!(
         "<|im_start|>system\n{sys_prompt}<|im_end|>\n\
          {history_prefix}\
          <|im_start|>user\n{user_content}<|im_end|>\n\
-         <|im_start|>assistant\n<think>\n\n</think>\n"
+         <|im_start|>assistant\n{thinking_block}"
     );
 
     tokio::task::spawn_blocking(move || {
@@ -1025,8 +1040,10 @@ Answer using ONLY these excerpts.\n\
 
         // Overhead: ChatML tags, newlines, think tags
         let overhead = 50;
-        // Reserve generation budget based on mode: Quick needs less, Extended needs more.
-        let gen_reserve = inference_params.max_new_tokens + 128; // +128 for safety margin
+        // Reserve generation budget based on mode. For thinking mode, reserve
+        // extra tokens for the <think> block (1024 tokens for reasoning).
+        let thinking_reserve = if inference_params.enable_thinking { 1024 } else { 0 };
+        let gen_reserve = inference_params.max_new_tokens + thinking_reserve + 128;
         let max_prompt_tokens = n_ctx_size as usize - gen_reserve;
         let component_cost = system_tokens.len() + question_tokens.len() + overhead;
 
@@ -1109,27 +1126,26 @@ Answer using ONLY these excerpts.\n\
         // Sampling chain for Qwen3 — follows official llama.cpp order:
         //   penalties → DRY → top-k → top-p → min-p → temp → dist
         //
-        // Qwen3 official guidance (non-thinking mode):
-        //   - repeat_penalty=1.0 (DISABLED — Qwen team says don't use it)
-        //   - presence_penalty=1.5 (primary anti-repetition mechanism)
-        //   - top_k=20, top_p=0.80 (official recommended values)
-        //
-        // DRY sampler catches phrase/sentence-level repetition that
-        // presence_penalty alone can't prevent (e.g., repeated bullet points).
+        // Moderate anti-repetition: chunk-level content dedup (Phase 1) handles
+        // the root cause of repetition. Sampler just provides a safety net.
+        //   - repeat_penalty=1.0 (disabled — Qwen team says don't use it)
+        //   - presence_penalty=1.5 (Qwen recommended; 2.0 caused incoherence)
+        //   - frequency_penalty=0.0 (removed — compounds with presence and caused garbled text)
+        //   - DRY multiplier=0.8 (moderate phrase-level anti-repetition)
         let mut sampler = LlamaSampler::chain_simple(vec![
             LlamaSampler::penalties(
-                128,   // last_n tokens to consider
+                256,   // last_n tokens to consider
                 1.0,   // repeat_penalty (1.0 = disabled per Qwen guidance)
-                0.0,   // frequency_penalty
-                1.5,   // presence_penalty (Qwen official recommendation)
+                0.0,   // frequency_penalty (removed — compounds with presence_penalty)
+                1.5,   // presence_penalty (Qwen recommended optimal value)
             ),
             LlamaSampler::dry(
                 model,
-                0.8,   // multiplier (strength)
+                0.8,   // multiplier (moderate — chunk dedup handles root cause)
                 1.75,  // base (exponential growth)
                 2,     // allowed_length (common 2-token phrases can repeat)
                 -1,    // penalty_last_n (-1 = full context scan)
-                ["\n", ":", "\"", "*", "-", "."],  // sequence breakers
+                ["\n", ":", "\"", "*", "-", ".", ",", ";"],  // sequence breakers
             ),
             LlamaSampler::top_k(20),         // Qwen3 official: 20
             LlamaSampler::top_p(0.80, 1),    // Qwen3 official: 0.80
@@ -1159,6 +1175,12 @@ Answer using ONLY these excerpts.\n\
         // This prevents the user from ever seeing duplicate bullets during streaming.
         let mut line_buffer = String::new();
         let mut completed_lines: Vec<String> = Vec::new(); // normalized completed lines
+        let mut consecutive_dups: usize = 0; // track consecutive duplicate lines for loop detection
+
+        // Track whether we're inside a <think> block (Extended thinking mode).
+        // While inside, tokens are buffered but NOT streamed to the UI.
+        let mut inside_think = false;
+        let mut think_buffer = String::new();
 
         for _ in 0..max_new_tokens {
             if pos >= n_ctx_size as usize {
@@ -1194,6 +1216,50 @@ Answer using ONLY these excerpts.\n\
                 break;
             }
 
+            // ── Think block suppression (Extended mode) ────────────
+            // When the model generates <think>...</think>, suppress those
+            // tokens from streaming output. Track open/close tags.
+            if inside_think {
+                think_buffer.push_str(&token_piece);
+                if think_buffer.contains("</think>") {
+                    inside_think = false;
+                    // Discard everything in the think buffer
+                    think_buffer.clear();
+                    log::info!("Think block completed — resuming visible output.");
+                }
+                // Continue to next token — don't stream think content
+                // Still need to decode for the model, so don't skip batch ops below
+                tokens_since_content = 0; // Don't trigger stall detector during thinking
+                batch.clear();
+                batch
+                    .add(token, pos as i32, &[0], true)
+                    .map_err(|e| format!("Gen batch add error: {e}"))?;
+                ctx.decode(&mut batch)
+                    .map_err(|e| format!("Gen decode error: {e}"))?;
+                pos += 1;
+                continue;
+            }
+            if token_piece.contains("<think>") {
+                inside_think = true;
+                think_buffer = token_piece.clone();
+                if think_buffer.contains("</think>") {
+                    // Edge case: empty think block in a single token
+                    inside_think = false;
+                    think_buffer.clear();
+                } else {
+                    log::info!("Think block started — suppressing from stream.");
+                    tokens_since_content = 0;
+                    batch.clear();
+                    batch
+                        .add(token, pos as i32, &[0], true)
+                        .map_err(|e| format!("Gen batch add error: {e}"))?;
+                    ctx.decode(&mut batch)
+                        .map_err(|e| format!("Gen decode error: {e}"))?;
+                    pos += 1;
+                    continue;
+                }
+            }
+
             if token_piece.is_empty() {
                 // Skip empty tokens
             } else if token_piece.contains('\n') {
@@ -1202,22 +1268,58 @@ Answer using ONLY these excerpts.\n\
                 let parts: Vec<&str> = token_piece.splitn(2, '\n').collect();
                 line_buffer.push_str(parts[0]);
 
-                // Check if the completed line is a duplicate
+                // Check if the completed line is a duplicate (strip citations before comparing).
+                // Uses both exact match and Jaccard fuzzy match to catch paraphrased repetition.
                 let trimmed_line = line_buffer.trim().to_string();
-                let is_dup = if trimmed_line.len() > 40 {
-                    let normalized: String = trimmed_line.to_lowercase()
-                        .chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
-                    let dup = completed_lines.iter().any(|prev| *prev == normalized);
-                    if dup {
-                        log::warn!("Duplicate line suppressed during streaming: {}",
-                            &trimmed_line[..trimmed_line.len().min(80)]);
+                let is_dup = {
+                    let normalized = normalize_for_dedup(&trimmed_line);
+                    if normalized.len() > 25 {
+                        // Exact match
+                        let exact_dup = completed_lines.iter().any(|prev| *prev == normalized);
+                        // Fuzzy match: Jaccard word overlap > 0.65 or substring containment
+                        let fuzzy_dup = if !exact_dup {
+                            let cur_words: std::collections::HashSet<&str> = normalized.split_whitespace().collect();
+                            completed_lines.iter().any(|prev| {
+                                // Substring containment
+                                let (shorter, longer) = if normalized.len() <= prev.len() {
+                                    (normalized.as_str(), prev.as_str())
+                                } else {
+                                    (prev.as_str(), normalized.as_str())
+                                };
+                                if shorter.len() > 20 && shorter.len() as f64 / longer.len() as f64 > 0.70
+                                    && longer.contains(shorter)
+                                {
+                                    return true;
+                                }
+                                // Jaccard
+                                let prev_words: std::collections::HashSet<&str> = prev.split_whitespace().collect();
+                                let inter = prev_words.intersection(&cur_words).count();
+                                let union = prev_words.union(&cur_words).count();
+                                union > 0 && (inter as f64 / union as f64) > 0.65
+                            })
+                        } else {
+                            false
+                        };
+                        let dup = exact_dup || fuzzy_dup;
+                        if dup {
+                            log::warn!("Duplicate line suppressed during streaming (exact={}, fuzzy={}): {}",
+                                exact_dup, fuzzy_dup, &trimmed_line[..trimmed_line.len().min(80)]);
+                            consecutive_dups += 1;
+                        } else {
+                            completed_lines.push(normalized);
+                            consecutive_dups = 0;
+                        }
+                        dup
                     } else {
-                        completed_lines.push(normalized);
+                        false
                     }
-                    dup
-                } else {
-                    false
                 };
+
+                // Loop breaker: if 3+ consecutive lines are duplicates, the model is stuck
+                if consecutive_dups >= 3 {
+                    log::warn!("Generation loop detected: {} consecutive duplicate lines. Halting.", consecutive_dups);
+                    break;
+                }
 
                 if !is_dup {
                     // Flush the completed line + newline to UI and response
@@ -1330,6 +1432,8 @@ Answer using ONLY these excerpts.\n\
             .trim()
             .trim_start_matches("Answer:")
             .trim_start_matches("answer:")
+            .trim_start_matches("A:")
+            .trim_start_matches("A: ")
             .trim()
             .trim_end_matches("</s>")
             .trim_end_matches("<|im_end|>")
@@ -1419,11 +1523,35 @@ fn strip_trailing_filler(text: &str) -> String {
     trimmed.to_string()
 }
 
+/// Strip inline citations like `[filename, p. 1]` from text for comparison purposes.
+/// This is critical for deduplication — the same fact with different citation formatting
+/// (e.g., "DeerpathCapital" vs "Deerpath Capital") must be recognized as a duplicate.
+fn strip_citations_for_compare(text: &str) -> String {
+    use std::sync::OnceLock;
+    static CITE_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = CITE_RE.get_or_init(|| regex::Regex::new(r"\s*\[[^\]]{0,200}\]").unwrap());
+    re.replace_all(text, "").to_string()
+}
+
+/// Normalize a line for dedup comparison: strip citations, lowercase, keep only
+/// alphanumeric + whitespace, collapse whitespace.
+fn normalize_for_dedup(line: &str) -> String {
+    let no_cites = strip_citations_for_compare(line);
+    no_cites
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Remove duplicate lines from the LLM response.
-/// Two lines are considered duplicates if their alphanumeric content matches after
-/// lowercasing. Preserves the first occurrence and removes subsequent duplicates.
-/// Only deduplicates lines that are substantive (>40 chars) to avoid removing
-/// legitimate short repeated patterns like bullet markers.
+/// Two lines are considered duplicates if their content matches after stripping
+/// citations, lowercasing, and removing punctuation. Preserves the first occurrence.
+/// Only deduplicates lines that are substantive (>30 chars normalized) to avoid
+/// removing legitimate short repeated patterns like bullet markers.
 fn deduplicate_lines(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let mut seen: Vec<String> = Vec::new();
@@ -1431,13 +1559,8 @@ fn deduplicate_lines(text: &str) -> String {
 
     for line in &lines {
         let trimmed = line.trim();
-        // Only deduplicate substantive lines (bullets, sentences)
-        if trimmed.len() > 40 {
-            let normalized: String = trimmed
-                .to_lowercase()
-                .chars()
-                .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-                .collect();
+        let normalized = normalize_for_dedup(trimmed);
+        if normalized.len() > 30 {
             if seen.contains(&normalized) {
                 log::info!("Dedup: removing duplicate line: {}", &trimmed[..trimmed.len().min(80)]);
                 continue;
@@ -3272,10 +3395,11 @@ mod tests {
     #[test]
     fn inference_params_extended() {
         let p = InferenceParams::from_mode(&InferenceMode::Extended);
-        assert_eq!(p.max_new_tokens, 3072);
+        assert_eq!(p.max_new_tokens, 3072); // ~1024 thinking + ~2048 visible
         assert!((p.temperature - 0.7).abs() < 0.01);
         assert!(!p.system_prompt_suffix.is_empty());
         assert_eq!(p.timeout_secs, 180);
+        assert!(p.enable_thinking);
     }
 
     #[test]
@@ -4553,5 +4677,44 @@ defers to state insurance regulation."#;
         let results = expand_query("Was there a breach of the terms?");
         assert!(results.iter().any(|q| q.contains("violation")),
             "Should substitute breach → violation: {:?}", results);
+    }
+
+    // ── Citation-blind dedup tests ──────────────────────────────────────────
+
+    #[test]
+    fn strip_citations_basic() {
+        assert_eq!(strip_citations_for_compare("text [doc, p. 1]"), "text");
+        assert_eq!(strip_citations_for_compare("no cite"), "no cite");
+    }
+
+    #[test]
+    fn normalize_for_dedup_ignores_citation_differences() {
+        let a = normalize_for_dedup("Rent is $1,850/month [Deerpath Capital, p. 1]");
+        let b = normalize_for_dedup("Rent is $1,850/month [DeerpathCapital, p. 1]");
+        let c = normalize_for_dedup("Rent is $1,850/month [Deerpath Capital Offer Letter LN.pdf, p. 1]");
+        assert_eq!(a, b);
+        assert_eq!(b, c);
+    }
+
+    #[test]
+    fn deduplicate_lines_catches_citation_variants() {
+        let input = "\
+- The rent is one thousand eight hundred fifty dollars per month [doc.pdf, p. 1]\n\
+- The rent is one thousand eight hundred fifty dollars per month [Doc.pdf, p. 1]\n\
+Different fact here";
+        let result = deduplicate_lines(input);
+        let lines: Vec<&str> = result.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 2, "Duplicate with different citation should be removed. Got:\n{result}");
+    }
+
+    #[test]
+    fn deduplicate_lines_preserves_unique() {
+        let input = "\
+- The rent is $1,850/month [doc.pdf, p. 1]\n\
+- The deposit is $3,700 [doc.pdf, p. 2]\n\
+- The lease term is 12 months [doc.pdf, p. 1]";
+        let result = deduplicate_lines(input);
+        let lines: Vec<&str> = result.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 3, "Unique lines must be preserved. Got:\n{result}");
     }
 }

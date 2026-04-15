@@ -77,13 +77,13 @@ pub async fn check_models(
     let ocr_ready = ocr_dir.join("text-detection.rten").metadata().map(|m| m.len() > 1024).unwrap_or(false)
         && ocr_dir.join("text-recognition.rten").metadata().map(|m| m.len() > 1024).unwrap_or(false);
 
-    // Check whether the old Saul model exists (upgrade scenario).
-    let saul_path = model_dir.join("saul.gguf");
-    let saul_exists = saul_path.exists();
+    // Check whether the legacy model exists (upgrade from original Saul-7B).
+    let legacy_path = model_dir.join("saul.gguf");
+    let legacy_exists = legacy_path.exists();
     let qwen3_ready = size > GGUF_MIN_SIZE;
 
-    // upgrade_available: old model present but new model not yet downloaded
-    let upgrade_available = saul_exists && !qwen3_ready;
+    // upgrade_available: legacy model present but Qwen3 not yet downloaded
+    let upgrade_available = legacy_exists && !qwen3_ready;
 
     Ok(ModelStatus {
         llm_ready: qwen3_ready,
@@ -107,11 +107,11 @@ pub async fn delete_old_model(
         let s = state.lock().await;
         s.model_dir.clone()
     };
-    let saul_path = model_dir.join("saul.gguf");
-    if saul_path.exists() {
-        std::fs::remove_file(&saul_path)
-            .map_err(|e| format!("Failed to delete saul.gguf: {e}"))?;
-        log::info!("Deleted old model: saul.gguf");
+    let legacy_path = model_dir.join("saul.gguf");
+    if legacy_path.exists() {
+        std::fs::remove_file(&legacy_path)
+            .map_err(|e| format!("Failed to delete legacy model: {e}"))?;
+        log::info!("Deleted legacy model (saul.gguf).");
     }
     Ok(())
 }
@@ -1028,6 +1028,35 @@ async fn process_file(
 
 // ── Context Assembly Helpers ───────────────────────────────────────────────────
 
+/// Remove near-duplicate chunks by word-level Jaccard similarity (>70%).
+/// Keeps the higher-scored (earlier) chunk when two overlap significantly.
+/// This eliminates redundant information BEFORE the model ever sees it,
+/// which is the primary root cause of repetitive responses.
+fn dedup_chunk_content(results: &mut Vec<(f32, ChunkMetadata)>) {
+    use std::collections::HashSet;
+    let mut keep = vec![true; results.len()];
+    for i in 0..results.len() {
+        if !keep[i] { continue; }
+        let words_i: HashSet<&str> = results[i].1.text.split_whitespace().collect();
+        if words_i.is_empty() { continue; }
+        for j in (i + 1)..results.len() {
+            if !keep[j] { continue; }
+            let words_j: HashSet<&str> = results[j].1.text.split_whitespace().collect();
+            let inter = words_i.intersection(&words_j).count();
+            let union = words_i.union(&words_j).count();
+            if union > 0 && (inter as f64 / union as f64) > 0.70 {
+                keep[j] = false; // Drop the lower-scored duplicate
+            }
+        }
+    }
+    let deduped_count = keep.iter().filter(|k| !**k).count();
+    if deduped_count > 0 {
+        log::info!("Content dedup removed {} near-duplicate chunks.", deduped_count);
+    }
+    let mut idx = 0;
+    results.retain(|_| { let k = keep[idx]; idx += 1; k });
+}
+
 /// Allocate context budget proportionally to chunk scores.
 /// Higher-scored chunks get more characters, lower-scored get fewer.
 fn allocate_chunk_budgets(
@@ -1721,6 +1750,12 @@ pub async fn query(
         }
     }
 
+    // ── Phase 1: Chunk content dedup ──────────────────────────────────────────
+    // Overlapping chunks from the same document often contain 60-80% identical
+    // text (due to chunk_overlap). The model sees duplicated facts and naturally
+    // repeats them. Remove near-duplicate chunks BEFORE context assembly.
+    dedup_chunk_content(&mut results);
+
     // ── Priority-weighted context assembly ────────────────────────────────────
     // Qwen3-8B has a 32K-token context. Budget is mode-dependent (see RetrievalModeParams).
     // When jurisdiction is active, reduce budget to account for extra prompt tokens.
@@ -1848,19 +1883,21 @@ pub async fn query(
         .iter()
         .enumerate()
         .map(|(i, (score, meta))| {
-            // Relevance label: normalize score to 1-5 stars so LLM knows
-            // which chunks are most trustworthy for answering.
+            // Relevance label: use "high/medium/low" instead of stars to prevent
+            // the model from copying star characters into citations.
+            // Header uses "--- Source N ---" format (not brackets) so the model
+            // won't confuse it with the [filename, p. N] citation format.
             let rel = if max_score > 0.0 { score / max_score } else { 0.0 };
-            let stars = if rel > 0.85 { "★★★" } else if rel > 0.60 { "★★" } else { "★" };
+            let relevance = if rel > 0.85 { "high" } else if rel > 0.60 { "medium" } else { "low" };
             let section = extract_section_header(&meta.text);
             let header = match section {
                 Some(ref hdr) => format!(
-                    "[{} {}: {}, p. {}, §{}]\n",
-                    i + 1, stars, meta.file_name, meta.page_number, hdr
+                    "--- Source {}: {} | p. {} | §{} | relevance: {} ---\n",
+                    i + 1, meta.file_name, meta.page_number, hdr, relevance
                 ),
                 None => format!(
-                    "[{} {}: {}, p. {}]\n",
-                    i + 1, stars, meta.file_name, meta.page_number
+                    "--- Source {}: {} | p. {} | relevance: {} ---\n",
+                    i + 1, meta.file_name, meta.page_number, relevance
                 ),
             };
             let overhead = header.len();
@@ -2107,18 +2144,17 @@ pub async fn query(
 
     // ── Layer 5: Output cleanup pipeline ─────────────────────────────────────
     // Strip sentences flagged as hallucinations/fabrications by assertions.
-    // This prevents showing content the model made up to the user.
     final_answer = strip_hallucinated_sentences(&final_answer, &final_assertions);
     // Strip sentences containing proper nouns or numbers not grounded in source chunks.
     let chunk_strings: Vec<String> = results.iter().map(|(_, m)| m.text.clone()).collect();
     final_answer = crate::assertions::strip_ungrounded_claims(&final_answer, &chunk_strings);
-    // Light cleanup: collapse repetitions, strip excessive hedging, repair citations.
+    // IMPORTANT: Repair citations and fix filenames BEFORE dedup so that
+    // citation format variations don't prevent duplicate detection.
+    final_answer = repair_citations(&final_answer);
+    final_answer = fix_mangled_filenames(&final_answer, &known_files);
+    // Now collapse repetitions — citations are normalized so dedup works correctly.
     final_answer = collapse_repetitions(&final_answer);
     final_answer = strip_excessive_hedging(&final_answer);
-    final_answer = repair_citations(&final_answer);
-    // Fix mangled filenames in citations — the LLM often truncates or corrupts
-    // long filenames. Match them back to the actual known filenames.
-    final_answer = fix_mangled_filenames(&final_answer, &known_files);
     // Remove label-only bullets: lines like "- Age:" or "* Schedule:" with no content
     final_answer = strip_label_only_bullets(&final_answer);
     // Strip structural labels the model may echo from the prompt (e.g., "Conclusion first:", "Caveats:")
@@ -2307,9 +2343,31 @@ fn strip_excessive_hedging(answer: &str) -> String {
     result
 }
 
+/// Strip inline citations like `[filename, p. 1]` for comparison purposes.
+fn strip_citations_for_compare(text: &str) -> String {
+    use std::sync::OnceLock;
+    static CITE_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = CITE_RE.get_or_init(|| regex::Regex::new(r"\s*\[[^\]]{0,200}\]").unwrap());
+    re.replace_all(text, "").to_string()
+}
+
+/// Normalize text for dedup: strip citations, lowercase, alphanumeric + space only, collapse whitespace.
+fn normalize_for_dedup(text: &str) -> String {
+    let no_cites = strip_citations_for_compare(text);
+    no_cites
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Collapse repeated sentences, near-duplicate sentences, and repeated bullet points.
+/// Citations are stripped BEFORE comparison so formatting variations don't prevent matching.
 fn collapse_repetitions(answer: &str) -> String {
-    // Phase 1: Split into logical units (sentences and bullet points)
+    // Phase 1: Line-level dedup with citation-blind comparison
     let lines: Vec<&str> = answer.lines().collect();
     let mut deduped_lines: Vec<String> = Vec::new();
     let mut seen_normalized: Vec<String> = Vec::new();
@@ -2321,32 +2379,23 @@ fn collapse_repetitions(answer: &str) -> String {
             continue;
         }
 
-        // Normalize: lowercase, strip punctuation, collapse whitespace
-        let normalized: String = trimmed
-            .to_lowercase()
-            .chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-            .collect::<String>()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let normalized = normalize_for_dedup(trimmed);
 
         if normalized.len() < 15 {
             deduped_lines.push(line.to_string());
             continue;
         }
 
-        // Check for near-duplicates using word overlap (Jaccard > 0.70).
-        // Also check substring containment for lines that are subsets of
-        // previously seen lines (common with repeated bullets).
         let is_dup = seen_normalized.iter().any(|prev| {
-            // Substring containment: if one is 80%+ of the other and contained in it
+            // Exact match (after citation stripping)
+            if *prev == normalized { return true; }
+            // Substring containment
             let (shorter, longer) = if normalized.len() <= prev.len() {
                 (normalized.as_str(), prev.as_str())
             } else {
                 (prev.as_str(), normalized.as_str())
             };
-            if shorter.len() > 15 && shorter.len() as f64 / longer.len() as f64 > 0.75
+            if shorter.len() > 15 && shorter.len() as f64 / longer.len() as f64 > 0.70
                 && longer.contains(shorter)
             {
                 return true;
@@ -2357,10 +2406,12 @@ fn collapse_repetitions(answer: &str) -> String {
             let intersection = prev_words.intersection(&cur_words).count();
             let union = prev_words.union(&cur_words).count();
             if union == 0 { return false; }
-            (intersection as f64 / union as f64) > 0.70
+            (intersection as f64 / union as f64) > 0.65
         });
 
-        if !is_dup {
+        if is_dup {
+            log::info!("collapse_repetitions: removed duplicate line: {}", &trimmed[..trimmed.len().min(80)]);
+        } else {
             seen_normalized.push(normalized);
             deduped_lines.push(line.to_string());
         }
@@ -2368,19 +2419,12 @@ fn collapse_repetitions(answer: &str) -> String {
 
     let result = deduped_lines.join("\n");
 
-    // Phase 2: Within remaining text, collapse near-duplicate sentences.
-    // Split on sentence boundaries (". " and ".\n") and use Jaccard similarity.
+    // Phase 2: Sentence-level dedup within remaining text
     let sentences: Vec<&str> = result.split(". ").collect();
     let mut seen_norms: Vec<String> = Vec::new();
     let mut unique = Vec::new();
     for sentence in &sentences {
-        let norm: String = sentence.trim().to_lowercase()
-            .chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-            .collect::<String>()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let norm = normalize_for_dedup(sentence.trim());
 
         if norm.len() < 10 {
             unique.push(*sentence);
@@ -2388,26 +2432,23 @@ fn collapse_repetitions(answer: &str) -> String {
         }
 
         let is_dup = seen_norms.iter().any(|prev| {
-            // Substring containment — only treat as duplicate if the shorter
-            // string is at least 80% of the longer one's length, so a short
-            // phrase cannot swallow a longer meaningful sentence.
+            if *prev == norm { return true; }
             let (shorter, longer) = if norm.len() <= prev.len() {
                 (norm.as_str(), prev.as_str())
             } else {
                 (prev.as_str(), norm.as_str())
             };
             if longer.contains(shorter)
-                && shorter.len() as f64 >= longer.len() as f64 * 0.80
+                && shorter.len() as f64 >= longer.len() as f64 * 0.75
             {
                 return true;
             }
-            // Jaccard similarity
             let prev_words: std::collections::HashSet<&str> = prev.split_whitespace().collect();
             let cur_words: std::collections::HashSet<&str> = norm.split_whitespace().collect();
             let intersection = prev_words.intersection(&cur_words).count();
             let union = prev_words.union(&cur_words).count();
             if union == 0 { return false; }
-            (intersection as f64 / union as f64) > 0.80
+            (intersection as f64 / union as f64) > 0.70
         });
 
         if !is_dup {
@@ -3562,5 +3603,57 @@ mod tests {
         let result = format_history(&history, false);
         assert!(result.contains("q1"));
         assert!(result.contains("q2"));
+    }
+
+    // ── Citation-blind dedup tests ──────────────────────────────────────────
+
+    #[test]
+    fn strip_citations_removes_inline_refs() {
+        assert_eq!(strip_citations_for_compare("Rent is $1,850 [doc, p. 1]"), "Rent is $1,850");
+        assert_eq!(strip_citations_for_compare("No citations here"), "No citations here");
+        assert_eq!(
+            strip_citations_for_compare("Fact one [a.pdf, p. 1] and fact two [b.pdf, p. 2]"),
+            "Fact one and fact two"
+        );
+    }
+
+    #[test]
+    fn normalize_for_dedup_strips_citations_and_punctuation() {
+        let a = normalize_for_dedup("- **Rent:** $1,850/month [Deerpath Capital, p. 1]");
+        let b = normalize_for_dedup("- **Rent:** $1,850/month [DeerpathCapital, p. 1]");
+        assert_eq!(a, b, "Same fact with different citation formatting must match");
+    }
+
+    #[test]
+    fn collapse_repetitions_catches_citation_variants() {
+        let input = "\
+- The monthly rent is $1,850 [Deerpath Capital Offer Letter LN.pdf, p. 1]\n\
+- The monthly rent is $1,850 [DeerpathCapital Offer Letter LN.pdf, p. 1]\n\
+- The monthly rent is $1,850 [Deerpath Capital Offer, p. 1]";
+        let result = collapse_repetitions(input);
+        let lines: Vec<&str> = result.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 1, "All three are the same fact — should collapse to 1. Got:\n{result}");
+    }
+
+    #[test]
+    fn collapse_repetitions_preserves_different_facts() {
+        let input = "\
+- The monthly rent is $1,850 [lease.pdf, p. 1]\n\
+- The security deposit is $3,700 [lease.pdf, p. 2]\n\
+- The lease term is 12 months [lease.pdf, p. 1]";
+        let result = collapse_repetitions(input);
+        let lines: Vec<&str> = result.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 3, "Three distinct facts should be preserved. Got:\n{result}");
+    }
+
+    #[test]
+    fn collapse_repetitions_near_duplicate_jaccard() {
+        // Model typically repeats the same bullet with minor word swaps
+        let input = "\
+- The tenant must pay rent of $1,850 per month by the first of each month [lease.pdf, p. 1]\n\
+- The tenant must pay rent of $1,850 monthly by the first of each month [lease.pdf, p. 2]";
+        let result = collapse_repetitions(input);
+        let lines: Vec<&str> = result.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 1, "Near-duplicate sentences should collapse. Got:\n{result}");
     }
 }

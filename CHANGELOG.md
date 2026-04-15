@@ -76,7 +76,7 @@ All notable changes to Justice AI are documented here.
 
 ### Added
 - Tauri 2 desktop app with Rust backend (migrated from Electron)
-- Fully local LLM inference via Saul-7B-Instruct Q4_K_M (llama-cpp-2)
+- Fully local LLM inference (originally Saul-7B-Instruct, later upgraded to Qwen3-8B Q4_K_M) via llama-cpp-2
 - Local embeddings via fastembed (BGE-small-en-v1.5)
 - Zero-config setup — no HuggingFace token or API keys required
 - First-launch model download with progress tracking

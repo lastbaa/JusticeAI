@@ -288,7 +288,7 @@ export default function ModelSetup({ upgradeAvailable, onComplete }: Props): JSX
             Upgrade complete
           </h1>
           <p className="text-[13.5px] text-center mb-8 leading-relaxed" style={{ color: 'rgb(var(--ov) / 0.5)' }}>
-            The previous model (saul.gguf) is no longer needed. Free up 4.5 GB?
+            The previous model is no longer needed. Free up 4.5 GB?
           </p>
 
           <div className="flex items-center gap-3">
