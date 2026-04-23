@@ -1,0 +1,45 @@
+SEED SUPPLIER CONFIDENTIALITY AND TRIAL DATA AGREEMENT
+
+This Seed Supplier Confidentiality and Trial Data Agreement (“Agreement”) is made on February 12, 2026, by and between DeKalb Urban Harvest Initiative (“Recipient”) and Southern Heirloom Seed Partners, LLC (“Disclosing Party”).
+
+1. Purpose
+Disclosing Party will provide Recipient with proprietary seed trial materials, planting schedules, germination data, and cultivar performance notes for limited use in a pilot vegetable demonstration program in DeKalb County, Georgia.
+
+2. Confidential Information
+For purposes of this Agreement, “Confidential Information” means nonpublic information disclosed by Disclosing Party, whether in written, electronic, photographic, or oral form, including but not limited to trial data, crop performance logs, supplier pricing, seed lineage notes, and planned commercial release schedules.
+
+3. Recipient Obligations
+Recipient shall:
+(a) use Confidential Information solely for evaluating seed performance in the pilot program;
+(b) restrict disclosure to employees, volunteers, or consultants who need the information for the pilot program and who are bound by confidentiality obligations at least as protective as those contained herein;
+(c) take reasonable steps to prevent unauthorized disclosure; and
+(d) not publish, post, or distribute the Confidential Information without prior written consent from Disclosing Party.
+
+4. Permitted Disclosures
+Recipient may disclose Confidential Information only:
+(a) to individuals working directly on the pilot program who have a legitimate need to know;
+(b) with the prior written consent of Disclosing Party; or
+(c) as required by law, subpoena, or court order, provided Recipient gives prompt notice to Disclosing Party when legally permitted to do so.
+
+5. Exceptions
+Confidential Information does not include information that Recipient can demonstrate:
+(a) was publicly known at the time of disclosure;
+(b) became publicly known through no wrongful act of Recipient;
+(c) was already lawfully known to Recipient without a duty of confidentiality;
+(d) was independently developed by Recipient without use of the Confidential Information; or
+(e) was lawfully received from a third party without restriction.
+
+6. No Transfer of Rights
+No license, ownership interest, or commercial distribution right is granted to Recipient by this Agreement.
+
+7. Term
+Recipient’s confidentiality obligations shall begin on the effective date and continue for three (3) years after the final disclosure of Confidential Information under this Agreement.
+
+8. Return or Destruction
+Upon written request by Disclosing Party, Recipient shall return or destroy all Confidential Information in its possession, except for one archival copy retained solely for compliance purposes.
+
+9. Governing Law
+This Agreement shall be governed by Georgia law.
+
+10. Entire Agreement
+This Agreement is the entire agreement between the parties concerning the subject matter herein.

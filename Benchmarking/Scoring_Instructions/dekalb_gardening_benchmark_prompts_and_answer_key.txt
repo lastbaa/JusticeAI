@@ -1,0 +1,654 @@
+DEKALB GARDENING LEGAL BENCHMARK
+24 TEST PROMPTS AND ANSWER KEY
+Companion file for the 10-document benchmark set
+
+====================================================================
+1. PURPOSE
+====================================================================
+
+This file provides a runnable 24-case benchmark for the DeKalb gardening
+legal-style document set. It is designed for bounded efficacy testing of
+a local legal document assistant. The benchmark focuses on:
+- relevant passage retrieval
+- grounded question answering
+- targeted summarization / extraction
+
+This benchmark is not intended to measure:
+- open-ended legal reasoning
+- legal advice quality
+- research-grade model comparison
+- comparison against cloud AI systems
+
+====================================================================
+2. SCORING FORMAT
+====================================================================
+
+Scoring labels:
+- Pass
+- Partial
+- Fail
+
+General guidance:
+- Retrieval: Pass if the correct or clearly relevant section appears in
+  the top returned results.
+- Grounded QA: Pass if the answer is materially correct and supported by
+  the source text.
+- Summarization / Extraction: Pass if the response is useful, grounded,
+  and includes the key facts without material fabrication.
+
+====================================================================
+3. TEST CASES AND ANSWER KEY
+====================================================================
+
+--------------------------------------------------
+TEST 1
+--------------------------------------------------
+Document:
+01_community_garden_maintenance_services_agreement.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the clause describing how either party may terminate the maintenance
+services agreement.
+
+Answer Key:
+Look for Section 8, "Termination."
+Key points:
+- Either party may terminate for convenience with 14 days' written notice
+- Client may terminate immediately for material breach
+- Contractor may terminate immediately for denied access over 10 consecutive
+  days or nonpayment after written notice
+
+Scoring Notes:
+Pass if Section 8 or its substance is retrieved.
+
+--------------------------------------------------
+TEST 2
+--------------------------------------------------
+Document:
+01_community_garden_maintenance_services_agreement.txt
+
+Task Type:
+Grounded QA
+
+Prompt:
+What payment schedule does the agreement require for routine garden
+maintenance services?
+
+Answer Key:
+- Flat fee of $600 per month
+- Contractor submits one invoice at the end of each calendar month
+- Payment due within 15 days after receipt of a proper invoice
+
+Scoring Notes:
+Pass if answer includes the monthly fee and invoice / payment timing.
+
+--------------------------------------------------
+TEST 3
+--------------------------------------------------
+Document:
+01_community_garden_maintenance_services_agreement.txt
+
+Task Type:
+Summarization / Extraction
+
+Prompt:
+Summarize the contractor's core maintenance obligations for the garden site.
+
+Answer Key:
+Expected summary should mention most of the following:
+- weekly weeding of planting beds and paths
+- monitoring irrigation lines for visible leaks or blockages
+- removing dead plant material and seasonal debris
+- trimming overgrowth along fence and shed area
+- reporting observed safety hazards
+- monthly seasonal cleanup
+- no pesticide / herbicide / fertilizer application unless authorized in writing
+
+Scoring Notes:
+Pass if the main service duties are captured accurately.
+
+--------------------------------------------------
+TEST 4
+--------------------------------------------------
+Document:
+02_seed_supplier_confidentiality_and_trial_data_agreement.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the section that lists exceptions to confidentiality.
+
+Answer Key:
+Look for Section 5, "Exceptions."
+Key exception categories:
+- publicly known at disclosure
+- later public through no wrongful act
+- already lawfully known without duty
+- independently developed
+- lawfully received from third party without restriction
+
+Scoring Notes:
+Pass if Section 5 or equivalent exception language is retrieved.
+
+--------------------------------------------------
+TEST 5
+--------------------------------------------------
+Document:
+02_seed_supplier_confidentiality_and_trial_data_agreement.txt
+
+Task Type:
+Grounded QA
+
+Prompt:
+Under what circumstances may confidential seed trial data be disclosed?
+
+Answer Key:
+Disclosure allowed:
+- to individuals working directly on the pilot program with a legitimate need
+  to know and protected by confidentiality obligations
+- with prior written consent of the disclosing party
+- when required by law, subpoena, or court order, with prompt notice if legally permitted
+
+Scoring Notes:
+Pass if answer includes the permitted disclosure categories.
+
+--------------------------------------------------
+TEST 6
+--------------------------------------------------
+Document:
+03_landscape_and_irrigation_contractor_agreement.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the indemnification provision in the irrigation contractor agreement.
+
+Answer Key:
+Look for Section 7, "Indemnification."
+Key points:
+- Contractor indemnifies and holds harmless Owner, officers, and volunteers
+- applies to claims, damages, or losses arising from Contractor's negligent
+  acts or omissions or those under Contractor's control
+- excludes preexisting site conditions not caused by Contractor
+
+Scoring Notes:
+Pass if Section 7 or equivalent language is retrieved.
+
+--------------------------------------------------
+TEST 7
+--------------------------------------------------
+Document:
+03_landscape_and_irrigation_contractor_agreement.txt
+
+Task Type:
+Grounded QA
+
+Prompt:
+Is the contractor required to maintain insurance, and if so what type of
+coverage is referenced?
+
+Answer Key:
+Yes.
+- commercial general liability insurance in commercially reasonable amounts
+- workers' compensation coverage if required by law
+- proof of coverage available on request before work begins
+
+Scoring Notes:
+Pass if answer identifies the insurance requirement and types.
+
+--------------------------------------------------
+TEST 8
+--------------------------------------------------
+Document:
+03_landscape_and_irrigation_contractor_agreement.txt
+
+Task Type:
+Summarization / Extraction
+
+Prompt:
+Extract the key contractor obligations related to timeline, installation
+responsibilities, and site cleanup.
+
+Answer Key:
+Expected extraction should mention:
+Timeline:
+- start no later than April 15, 2026
+- substantial completion by April 25, 2026
+- prompt notice if delay likely beyond two business days
+
+Installation:
+- furnish labor and ordinary installation tools
+- install lines per site plan
+- connect to designated water source
+- test zones for leaks and flow continuity
+- complete final walkthrough
+
+Cleanup:
+- remove installation debris
+- leave work areas reasonably clean
+
+Scoring Notes:
+Pass if the response accurately captures the major obligations.
+
+--------------------------------------------------
+TEST 9
+--------------------------------------------------
+Document:
+04_vacant_lot_community_garden_use_agreement.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the section that explains what the lot may be used for.
+
+Answer Key:
+Look for Section 2, "Permitted Use."
+Key points:
+- noncommercial community gardening
+- vegetables, flowers, pollinator habitat
+- enclosed-bin composting
+- volunteer workdays
+- educational activities
+- no retail sales, overnight heavy equipment storage, or permanent structures
+  without written consent
+
+Scoring Notes:
+Pass if the permitted use clause is retrieved.
+
+--------------------------------------------------
+TEST 10
+--------------------------------------------------
+Document:
+04_vacant_lot_community_garden_use_agreement.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the clause about renewal or expiration of the garden lot use agreement.
+
+Answer Key:
+Look for Section 3, "Term," and Section 4, "Renewal."
+Key points:
+- term begins February 1, 2026 and expires November 30, 2026
+- renewal must be in writing and signed by both parties at least 15 days
+  before expiration
+- absent renewal, movable tools, bins, and supplies must be removed by expiration
+
+Scoring Notes:
+Pass if Section 4 and usually Section 3 are retrieved.
+
+--------------------------------------------------
+TEST 11
+--------------------------------------------------
+Document:
+04_vacant_lot_community_garden_use_agreement.txt
+
+Task Type:
+Grounded QA
+
+Prompt:
+Who is responsible for routine upkeep of the lot under the agreement?
+
+Answer Key:
+- Garden Group is responsible for routine upkeep
+- includes trash removal, bed maintenance, mowing or trimming common areas,
+  and securing tools after volunteer activities
+- Owner remains responsible for structural conditions outside Garden Group's
+  reasonable control, including latent underground utility issues and
+  preexisting perimeter wall defects
+
+Scoring Notes:
+Pass if Garden Group is identified correctly, with at least some listed duties.
+
+--------------------------------------------------
+TEST 12
+--------------------------------------------------
+Document:
+05_deposition_of_garden_program_coordinator.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the testimony where the coordinator discusses who had access to the
+locked tool shed.
+
+Answer Key:
+Look for the question asking:
+"Who had access to the locked tool shed in March and April of 2026?"
+Expected names:
+- Maya Thompson
+- Luis Ramirez
+- Anita Brooks
+- Jerome Lee
+Regular volunteers did not receive the code.
+
+Scoring Notes:
+Pass if this testimony exchange or its equivalent is retrieved.
+
+--------------------------------------------------
+TEST 13
+--------------------------------------------------
+Document:
+05_deposition_of_garden_program_coordinator.txt
+
+Task Type:
+Grounded QA
+
+Prompt:
+What did the coordinator say about when volunteers were first warned about
+restricted storage areas?
+
+Answer Key:
+- first mentioned at the March 23 volunteer orientation
+- warning repeated in a follow-up email before the April 5 workday
+
+Scoring Notes:
+Pass if both the March 23 orientation and the later reminder are conveyed,
+or at minimum the first warning date and event are correct.
+
+--------------------------------------------------
+TEST 14
+--------------------------------------------------
+Document:
+05_deposition_of_garden_program_coordinator.txt
+
+Task Type:
+Summarization / Extraction
+
+Prompt:
+Summarize the coordinator's testimony about site access, volunteer
+supervision, and any prior warnings.
+
+Answer Key:
+Expected summary should mention:
+- tool shed access limited to coordinator, assistant coordinator, and two lead volunteers
+- regular volunteers did not get the code
+- general volunteer access without supervision was not permitted
+- lead volunteers sometimes opened the site before Maya arrived
+- restricted storage areas were discussed at March 23 orientation
+- reminder email sent before April 5 workday
+- storage concerns were reinforced after tools / supplies were mishandled
+
+Scoring Notes:
+Pass if the answer captures the access rules, supervision model, and warning timeline.
+
+--------------------------------------------------
+TEST 15
+--------------------------------------------------
+Document:
+06_deposition_of_property_owner_near_garden_site.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the testimony describing complaints about runoff or water flow.
+
+Answer Key:
+Look for testimony stating:
+- complaints made more than once in March and again in April
+- first clearly remembered complaint on March 12, 2026 by email
+- muddy water came toward side yard
+- pooling near fence line
+
+Scoring Notes:
+Pass if the runoff complaint testimony is retrieved.
+
+--------------------------------------------------
+TEST 16
+--------------------------------------------------
+Document:
+06_deposition_of_property_owner_near_garden_site.txt
+
+Task Type:
+Grounded QA
+
+Prompt:
+Did the property owner testify that notice was given before the fence
+installation, and to whom?
+
+Answer Key:
+- He testified that he was not personally given advance notice before the
+  temporary fence section went up
+- after installation, someone from the garden group explained the purpose
+- he later received an email in early April explaining the placement was temporary
+
+Scoring Notes:
+Pass if answer clearly says no advance personal notice was given and mentions
+the later explanation / email.
+
+--------------------------------------------------
+TEST 17
+--------------------------------------------------
+Document:
+07_volunteer_witness_affidavit.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the part of the affidavit discussing pesticide or chemical storage.
+
+Answer Key:
+Look for paragraphs 5 and 6.
+Key points:
+- witness saw a small plastic container of gardening chemicals or treatment products
+  on an upper shelf inside the shed
+- Anita told a newer volunteer not to move it
+- only approved volunteers were supposed to handle stored treatment products
+  and fertilizer
+
+Scoring Notes:
+Pass if those paragraphs or equivalent content are retrieved.
+
+--------------------------------------------------
+TEST 18
+--------------------------------------------------
+Document:
+07_volunteer_witness_affidavit.txt
+
+Task Type:
+Grounded QA
+
+Prompt:
+According to the affidavit, who was present during the weekend work
+activity described by the witness?
+
+Answer Key:
+Present when Sarah Kim arrived:
+- Jerome Lee
+- Anita Brooks
+- two newer volunteers named Marcus and Elena
+
+Scoring Notes:
+Pass if the names are identified correctly.
+
+--------------------------------------------------
+TEST 19
+--------------------------------------------------
+Document:
+08_complaint_regarding_damage_to_adjacent_property.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the allegations that describe how the neighboring property was
+allegedly damaged.
+
+Answer Key:
+Look especially at paragraphs 3, 4, and 7.
+Key points:
+- altered portions of the lot, placed materials near boundary, and installed
+  temporary fencing
+- muddy water and sediment crossed onto plaintiff's property
+- pooling near fence line
+- interference with use and enjoyment
+- alleged landscaping damage, cleanup costs, and fence stability concerns
+
+Scoring Notes:
+Pass if those factual allegations are retrieved.
+
+--------------------------------------------------
+TEST 20
+--------------------------------------------------
+Document:
+08_complaint_regarding_damage_to_adjacent_property.txt
+
+Task Type:
+Grounded QA
+
+Prompt:
+What relief does the complaint request from the court?
+
+Answer Key:
+Requested relief includes:
+- compensatory damages
+- preliminary and permanent injunctive relief
+- costs of litigation
+- any further relief the Court finds just and proper
+
+Scoring Notes:
+Pass if the requested remedies are materially correct.
+
+--------------------------------------------------
+TEST 21
+--------------------------------------------------
+Document:
+08_complaint_regarding_damage_to_adjacent_property.txt
+
+Task Type:
+Summarization / Extraction
+
+Prompt:
+Summarize the complaint's main factual allegations and requested relief.
+
+Answer Key:
+Expected summary:
+- plaintiff alleges garden operations and temporary fencing near the boundary
+  contributed to runoff and drainage problems
+- muddy water and sediment crossed onto plaintiff's property
+- plaintiff says notice was provided but correction was delayed
+- plaintiff claims landscaping damage, cleanup costs, and ongoing concerns
+  about fence stability
+- plaintiff seeks compensatory damages and injunctive relief, plus costs
+
+Scoring Notes:
+Pass if the main allegations and requested relief are covered accurately.
+
+--------------------------------------------------
+TEST 22
+--------------------------------------------------
+Document:
+09_motion_for_preliminary_relief_concerning_garden_site_access.txt
+
+Task Type:
+Retrieval
+
+Prompt:
+Find the section of the motion that explains why immediate relief is being
+requested.
+
+Answer Key:
+Look especially at paragraphs 4 and 5.
+Key points:
+- continued uncertainty threatens loss of seasonal crops
+- threatens cancellation of volunteer programming
+- threatens deterioration of irrigation and planting areas requiring routine attention
+- money damages alone would not adequately remedy time-sensitive disruption
+
+Scoring Notes:
+Pass if urgency / irreparable harm type reasoning is retrieved.
+
+--------------------------------------------------
+TEST 23
+--------------------------------------------------
+Document:
+09_motion_for_preliminary_relief_concerning_garden_site_access.txt
+
+Task Type:
+Summarization / Extraction
+
+Prompt:
+Summarize the motion's argument for preliminary relief in plain language.
+
+Answer Key:
+Expected summary should mention:
+- respondent restricted normal access through changes to locks and gate closures
+- this disrupted planting, maintenance, and volunteer programming
+- immediate relief is needed because the garden depends on timely physical access
+- seasonal crops and irrigation could be harmed by continued interruption
+- movant seeks an order preserving reasonable access while the dispute continues
+
+Scoring Notes:
+Pass if the core argument and requested interim relief are captured.
+
+--------------------------------------------------
+TEST 24
+--------------------------------------------------
+Document:
+10_dekalb_community_garden_safety_and_volunteer_procedures_manual.txt
+
+Task Type:
+Summarization / Extraction
+
+Prompt:
+Extract the key rules for incident reporting, tool storage, and volunteer
+supervision from the procedures manual.
+
+Answer Key:
+Expected extraction should include:
+Incident reporting:
+- injuries, unsafe conditions, damaged equipment, unauthorized entry, or
+  significant conflict must be reported to the site coordinator as soon as practicable
+- written incident entry due by end of same day if coordinator is present,
+  or by noon next day if identified later
+
+Tool storage:
+- tools returned to designated shed, locker, or secured area at end of work period
+- sharp tools not left unattended in common walkways
+- access codes or keys limited to coordinators and authorized lead volunteers
+
+Volunteer supervision:
+- general volunteers work under direction of site coordinator or authorized lead volunteer
+- site not opened for general work activity unless at least one authorized supervisor is present
+
+Scoring Notes:
+Pass if the response accurately covers all three categories.
+
+====================================================================
+4. QUICK RESULT SHEET TEMPLATE
+====================================================================
+
+Use the following format during testing:
+
+Test Number:
+Document:
+Task Type:
+Result: Pass / Partial / Fail
+Notes:
+
+Optional summary table:
+- Retrieval: ____ / 10 Pass
+- Grounded QA: ____ / 8 Pass
+- Summarization / Extraction: ____ / 6 Pass
+- Overall: ____ / 24 Pass
+
+====================================================================
+5. PRESENTATION-FRIENDLY INTERPRETATION
+====================================================================
+
+This benchmark is intended to show that the system works within the
+project's scope:
+- locating relevant clauses and evidence in legal-style documents
+- answering document-grounded questions
+- producing useful targeted summaries and fact extractions
+- supporting local legal document workflows on consumer hardware
