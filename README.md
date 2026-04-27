@@ -201,6 +201,7 @@ Ensure you have the required Tauri platform dependencies installed. See [Tauri p
 
 ## Documentation
 
+- [Technical Documentation](docs/TECHNICAL_DOCUMENTATION.md)
 - [User Guide](docs/USER_GUIDE.md)
 - [Installation Guide](docs/INSTALLATION.md)
 - [Contributing](docs/CONTRIBUTING.md)

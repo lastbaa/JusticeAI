@@ -1,115 +1,208 @@
 # Justice AI User Guide
 
-Justice AI is a privacy-first legal research desktop app. All document processing, embeddings, and LLM inference run entirely on your machine.
+Justice AI is a local-first legal document research assistant. It searches the documents you load into the app and answers questions with source citations.
 
-## Getting Started
+It is best used as a document-grounded research and review tool, not as a general legal oracle.
 
-When you first launch Justice AI, a setup screen will appear to download the required models:
+## Best Use Cases
 
-1. **Qwen3-8B LLM** (~5 GB) -- powers answer generation
-2. **BGE-Small embedding model** (~33 MB) -- powers semantic search
+Justice AI is a good fit when you want to:
 
-Click **Download Models** and wait for both downloads to complete. This is a one-time process; subsequent launches skip this step.
+- search a case file, contract set, policy set, or regulatory materials you already have
+- summarize a document or set of related documents
+- locate clauses, dates, parties, amounts, or obligations
+- compare loaded documents inside the same matter
+- ask document-grounded questions and verify the answer with citations
+- review OCR-able scans or image documents locally
 
-Once models are ready, you'll see the main interface: a sidebar on the left, a context panel, and the chat area.
+Examples:
 
-## Loading Documents
+- "Summarize the indemnification obligations in these contracts."
+- "What deadlines appear across the loaded lease documents?"
+- "Which document mentions termination for cause?"
+- "What evidence in these files supports the plaintiff's timeline?"
 
-Upload documents by clicking the **+** button in the sidebar or dragging files into the app.
+## Outside The Scope Of The App
 
-**Supported file types:**
+Justice AI is not designed to:
 
-| Category | Extensions |
-|----------|-----------|
-| Documents | PDF, DOCX, TXT, MD |
-| Data | CSV, XLSX, XML |
-| Email | EML, MHTML |
-| Web | HTML, HTM |
-| Images (OCR) | PNG, JPG, JPEG, TIF, TIFF |
+- replace a lawyer's judgment
+- provide legal advice on its own
+- guarantee that an answer is correct just because it sounds plausible
+- search the public web or pull current law that you have not loaded
+- act as a complete e-discovery platform for very large productions
+- reliably fix poor scans, missing pages, or unreadable source documents
+- make final compliance conclusions without human review
 
-Documents are parsed and chunked locally. Embeddings are generated on-device and stored in a local vector index.
+Important boundary:
 
-## Asking Questions
+If a rule, statute, contract, exhibit, or policy is not loaded into the app, Justice AI should not be treated as having authoritative access to it.
 
-Type a question in the chat input and press **Enter**. Justice AI will:
+## Hardware Recommendations
 
-1. Search your uploaded documents using hybrid BM25 + semantic retrieval
-2. Retrieve the most relevant passages
-3. Generate a citation-grounded answer using the Qwen3-8B legal LLM
+Recommended for smooth use:
 
-**Example questions:**
-- "What are the termination clauses in this contract?"
-- "Summarize the key obligations of the tenant in the lease."
-- "What is the indemnification provision?"
-- "Are there any non-compete restrictions?"
+- 16 GB RAM or more(16 GB will run well for shorter documents, but more RAM is highly reccomended for more demanding workflows)
+- Apple Silicon Mac or a modern 8+ core x86 CPU
+- 10 GB+ free disk space
+- SSD storage
 
-Answers include citations pointing to specific document chunks so you can verify every claim.
 
-## Managing Cases
 
-Cases let you organize documents and chat sessions by matter.
+What to expect:
 
-- **Create a case** from the sidebar to group related documents together
-- **Sessions** within a case keep separate lines of inquiry organized
-- Retrieval is scoped to the active case's documents, keeping results focused
-- **Delete a case** by right-clicking it in the sidebar. You'll be prompted to either keep the associated files and sessions (moved to the general workspace) or delete everything permanently.
-- **Rename a case** by double-clicking its name in the sidebar.
+- the first model download is large
+- the first query after launch is slower because the model must load into memory
+- larger documents and broader questions take longer than narrow, source-specific questions
 
-## Document Viewer
+## First Launch
 
-Click a citation in a chat response to open the **Document Viewer** panel on the right side. This shows the source passage highlighted in context, so you can quickly verify the AI's answer against the original document.
+On first launch, Justice AI will guide you through model setup.
 
-## Exporting
+The app downloads:
 
-- **Export chat**: Click the export icon in the chat header to save the conversation as a text file
-- **Export citations**: Click "Export" in the context panel to save retrieved source passages
+- the local LLM used for answer generation
+- the local embedding model used for search
+- OCR support when available
 
-## Settings
+This is usually a one-time setup.
 
-Access settings via the gear icon. Available options:
+## Document Ingestion
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| Chunk Size | Character count per document chunk | 1000 |
-| Chunk Overlap | Overlap between consecutive chunks | 150 |
-| Top-K | Number of retrieved passages per query | 6 |
-| Practice Area | Presets that tune retrieval for specific legal domains | General |
-| Jurisdiction | Auto-detected from documents or manually selectable — tailors prompts to jurisdiction-specific legal terminology | Auto |
-| Theme | Light or dark appearance | Dark |
+### Step 1: Load files
 
-## Keyboard Shortcuts
+Use the file picker or drag files into the app.
 
-| Shortcut | Action |
-|----------|--------|
-| `Enter` | Send message |
-| `Shift + Enter` | Insert newline in message |
-| `Esc` | Close settings / panels |
+Common supported inputs include:
 
-## Privacy & Security
+- PDF
+- DOCX
+- TXT / MD
+- CSV / XLSX
+- XML / HTML / EML
+- PNG / JPG / TIFF via OCR
 
-Justice AI is designed with privacy as a core principle:
+### Step 2: Wait for indexing
 
-- **Documents never leave your machine.** Parsing, chunking, and embedding all happen locally.
-- **LLM inference is local.** The Qwen3-8B model runs on-device via llama.cpp -- no cloud API calls.
-- **No telemetry.** The app makes no network requests after the initial model download.
-- **Local storage only.** Chat history and settings are stored in your platform's app data directory.
+During ingestion, the app:
 
-## Troubleshooting
+1. parses the file
+2. extracts text
+3. splits the text into chunks
+4. creates local embeddings for search
+5. stores the indexed result locally
 
-### Model download fails or stalls
-- Check your internet connection. The initial download requires ~4.5 GB.
-- Restart the app to resume the download. Progress is tracked automatically.
-- If downloads repeatedly fail, check that your firewall is not blocking outbound HTTPS.
+You should wait for ingestion to finish before asking document-dependent questions.
 
-### First query is slow
-- The LLM needs to load into memory on the first query after launch. Subsequent queries are faster.
-- On machines with 8 GB RAM, expect longer load times. 16 GB is recommended.
+### Step 3: Organize if needed
 
-### OCR / image documents
-- Image files (PNG, JPG, TIFF) are processed with OCR. Quality depends on image resolution and clarity.
-- For best results, use high-resolution scans with clear text.
+If you are working on a specific matter:
 
-### App won't start
-- Ensure your OS meets the minimum requirements (macOS 12+, Windows 10+, Ubuntu 22.04+).
-- On macOS, you may need to allow the app in **System Preferences > Security & Privacy** after first launch.
-- On Linux, ensure required system libraries are installed (see [Installation Guide](INSTALLATION.md)).
+- create or select a case
+- keep related files together
+- assign document roles when useful
+
+This improves organization and helps keep retrieval focused.
+
+## Prompting Guide
+
+Justice AI works best with focused, document-grounded prompts.
+
+### Good prompting habits
+
+- name the thing you want to find
+- mention the document set or issue directly
+- ask for support from the loaded documents
+- ask for comparison when multiple files matter
+- ask for citations when you need verification
+
+### Better prompt patterns
+
+Instead of:
+
+- "Tell me about this."
+
+Use:
+
+- "Summarize the termination provisions in the loaded contracts."
+- "Compare the two vendor agreements on indemnity and limitation of liability."
+- "What evidence in these files supports the payment dispute timeline?"
+- "Identify the sections of the loaded regulation that relate to chemical storage and runoff."
+
+### When multiple documents are loaded
+
+Be explicit about comparison.
+
+Examples:
+
+- "Compare Document A and Document B on notice requirements."
+- "Which loaded file contains the strongest evidence of breach?"
+- "List the differences between the compliant and non-compliant reports."
+
+## What A Good Session Looks Like
+
+1. Load the documents for one matter or one clear task.
+2. Confirm ingestion is complete.
+3. Start with a focused summary question.
+4. Drill down with narrower follow-up questions.
+5. Open citations and verify important claims in the source text.
+6. Export or save the conversation if needed.
+
+## How To Get Better Results
+
+- load the actual governing documents, not just related background material
+- avoid mixing unrelated matters into one case
+- ask narrower questions when a broad prompt returns noisy results
+- use good-quality scans when OCR is involved
+- verify citations for important conclusions
+
+For regulatory or compliance review:
+
+- load the exact regulation sections you want compared
+- load the business or factual documents separately
+- ask for obligation-specific analysis rather than generic "is this compliant?" prompts when possible
+
+## Privacy And Data Handling
+
+Justice AI is designed to run locally.
+
+- document parsing runs locally
+- embeddings are created locally
+- answer generation runs locally
+- documents are stored on your machine
+
+The main network-heavy step is initial model download and related setup.
+
+## Short Troubleshooting
+
+### The first query is slow
+
+This is normal. The model is loading into memory.
+
+### Search quality seems weak
+
+- check that the right documents are loaded
+- narrow the prompt
+- verify OCR quality if the source was an image or scan
+
+### A result sounds plausible but unhelpful
+
+Treat it as a draft, not a conclusion. Open the cited source text and verify it.
+
+### OCR documents perform poorly
+
+Use cleaner scans, higher resolution, and pages with readable contrast.
+
+## Final Reminder
+
+Justice AI is most useful when it is treated as:
+
+- a local document search assistant
+- a citation-grounded drafting and review tool
+- a way to accelerate review of materials you have already loaded
+
+It is least useful when treated as:
+
+- a substitute for legal analysis
+- a source of law that has not been loaded
+- a guarantee that an answer is complete or correct without source verification
