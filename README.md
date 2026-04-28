@@ -55,6 +55,7 @@ Private, citation-grounded legal document research on your local machine.
 | Disk | 6 GB free (for models) | 10 GB+ |
 | OS | macOS 12+, Windows 10+, Ubuntu 22.04+ | Latest stable |
 | CPU | 4 cores | 8+ cores (Apple Silicon or modern x86) |
+| GPU | Any (CPU fallback available) | 6 GB+ VRAM (NVIDIA/AMD via Vulkan, Apple Silicon via Metal) |
 
 ## How It Works
 
@@ -80,7 +81,7 @@ Justice AI uses a **Retrieval-Augmented Generation (RAG)** pipeline:
 | Spreadsheet | `.csv`, `.xlsx` | Row-based chunking |
 | Email | `.eml` | Header + body extraction |
 | Web | `.html`, `.htm`, `.mhtml`, `.xml` | Tag stripping, DTD/entity safety checks |
-| Image | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff` | OCR via Tesseract (quality depends on source) |
+| Image | `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff` | OCR via local neural model (ocrs + rten, quality depends on source) |
 
 > Note: All listed types can be ingested, but extraction quality depends on the source. OCR cannot rectify poor image quality.
 
@@ -91,6 +92,7 @@ Justice AI uses a **Retrieval-Augmented Generation (RAG)** pipeline:
 - **Node.js** 20+
 - **Rust toolchain** — install via [rustup.rs](https://rustup.rs/)
 - **Platform build tools** — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+- **Windows additional requirements** — [Vulkan SDK](https://vulkan.lunarg.com/sdk/home), Ninja (`choco install ninja`), and long path support enabled (`HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled = 1`)
 
 No external services, API keys, or accounts required.
 
@@ -179,13 +181,10 @@ cd app/src-tauri && cargo run --bin harness -- --eval tests/fixtures/eval.json  
 The LLM loads into memory on the first query after launch. Subsequent queries are much faster. On machines with 8 GB RAM, initial load may take 15-30 seconds.
 
 ### Model download fails or stalls
-Models download to `{app_data}/models/`. If a download is interrupted, delete the partial file and restart the app to re-trigger the download. Check your internet connection — this is the only time the app requires network access.
+Models download to `{app_data}/models/`. If a download is interrupted, delete the partial file and restart the app to re-trigger the download. On Windows this is `C:\Users\<username>\AppData\Roaming\com.justiceai.app\models\`. On macOS this is `~/Library/Application Support/com.justiceai.app/models/`.
 
 ### OCR not working for images
-Image text extraction requires Tesseract. The app attempts to install it automatically on first run. If auto-install fails:
-- **macOS**: `brew install tesseract`
-- **Ubuntu/Debian**: `sudo apt install tesseract-ocr`
-- **Windows**: Download from [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki)
+Image text extraction uses a bundled neural OCR model (ocrs + rten) that downloads automatically on first launch alongside the LLM. No manual installation is required. If OCR fails, delete the `ocr/` folder inside your app data models directory and restart the app to re-trigger the download.
 
 ### App crashes on launch
 Ensure you have the required Tauri platform dependencies installed. See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
@@ -197,7 +196,7 @@ Ensure you have the required Tauri platform dependencies installed. See [Tauri p
 - Documents never leave the machine
 - File parsing includes format validation and hardening checks
 - XML parser rejects unsafe DTD/entity constructs
-- OCR uses local Tesseract runtime
+- OCR uses a bundled local neural model with no external dependencies
 
 ## Documentation
 
