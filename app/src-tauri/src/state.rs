@@ -682,20 +682,27 @@ impl RagState {
             }
             if result.is_empty() {
                 result.push_str(text);
-            } else {
-                // Find longest suffix of result that equals a prefix of text.
-                // Cap search at 80 chars AND at text.len()-1 so skip never equals text.len().
-                let overlap_max = result.len().min(80).min(text.len().saturating_sub(1));
-                let mut skip = 0;
-                for n in (1..=overlap_max).rev() {
-                    if result.ends_with(&text[..n]) {
-                        skip = n;
-                        break;
-                    }
-                }
-                result.push(' ');
-                result.push_str(&text[skip..]);
-            }
+} else {
+    // Find longest suffix of result that equals a prefix of text.
+    // Cap search at 80 chars AND at text.len()-1 so skip never equals text.len().
+    let overlap_max = result.len().min(80).min(text.len().saturating_sub(1));
+    let mut skip = 0;
+    for n in (1..=overlap_max).rev() {
+        if !text.is_char_boundary(n) {
+            continue;
+        }
+        if result.ends_with(&text[..n]) {
+            skip = n;
+            break;
+        }
+    }
+    // Advance skip forward to the next char boundary if needed.
+    while skip < text.len() && !text.is_char_boundary(skip) {
+        skip += 1;
+    }
+    result.push(' ');
+    result.push_str(&text[skip..]);
+}
         }
         result
     }
