@@ -1,4 +1,4 @@
-[env]
+[target.'cfg(target_os = "macos")'.env]
 # Force macOS 14 deployment target so llama.cpp Metal code generates weak class
 # references for macOS 15-only APIs (e.g. MTLResidencySetDescriptor). Without
 # this, the binary has hard references to those classes and dyld crashes on

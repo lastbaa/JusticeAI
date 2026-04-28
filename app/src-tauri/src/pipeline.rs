@@ -231,13 +231,14 @@ pub const RULES_PROMPT: &str = "\
 You are Justice AI, a legal document analyst. Answer ONLY from the provided document excerpts.
 
 RULES:
-1. If not in the excerpts: \"This information is not present in the provided documents.\"
-2. Cite every claim inline as [filename, p. N].
-3. Reproduce numbers, dates, and names EXACTLY. Never fabricate.
-4. State each fact ONCE. Never repeat information.
-5. Use **bold** for key terms and amounts.
-6. Lead with a direct answer, then organize facts by document.
-7. When multiple documents are provided, address EACH document with its own section.
+1. Always respond in English only.
+2. If not in the excerpts: \"This information is not present in the provided documents.\"
+3. Cite every claim inline as [filename, p. N].
+4. Reproduce numbers, dates, and names EXACTLY. Never fabricate.
+5. State each fact ONCE. Never repeat information.
+6. Use **bold** for key terms and amounts.
+7. Lead with a direct answer, then organize facts by document.
+8. When multiple documents are provided, address EACH document with its own section.
 
 EXAMPLE (for \"What is the monthly rent?\"):
 The monthly rent is **$1,850/month**, due on the first of each month [Lease Agreement.pdf, p. 2]. A late fee of **$50** applies after the 5th [Lease Agreement.pdf, p. 3].";
@@ -246,10 +247,11 @@ The monthly rent is **$1,850/month**, due on the first of each month [Lease Agre
 pub const RULES_PROMPT_QUICK: &str = "\
 You are Justice AI, a legal document analyst. Answer ONLY from the provided excerpts.\n\n\
 RULES:\n\
-1. If not in excerpts: \"This information is not present in the provided documents.\"\n\
-2. Cite inline as [filename, p. N]. Never put a citation on its own line.\n\
-3. Reproduce numbers, dates, and names EXACTLY. Never fabricate.\n\
-4. Lead with the direct answer. 1-3 sentences. **Bold** key terms. No headers, no bullets.";
+1. Always respond in English.
+2. If not in excerpts: \"This information is not present in the provided documents.\"\n\
+3.Cite inline as [filename, p. N]. Never put a citation on its own line.\n\
+4. Reproduce numbers, dates, and names EXACTLY. Never fabricate.\n\
+5. Lead with the direct answer. 1-3 sentences. **Bold** key terms. No headers, no bullets.";
 
 // ── Inference Mode Params ────────────────────────────────────────────────────
 
@@ -899,6 +901,7 @@ pub async fn ask_llm(
     use std::num::NonZeroU32;
 
     let gguf_path = model_dir.join("qwen3.gguf");
+    let gguf_path = std::path::PathBuf::from(gguf_path.to_string_lossy().replace('\\', "/"));
 
     // Build history prefix (empty string when there are no prior turns).
     let history_prefix = if history.is_empty() {
@@ -1004,6 +1007,7 @@ Answer using ONLY these excerpts.\n\
             // Try GPU-accelerated first (Metal on macOS, Vulkan on Linux/Windows).
             // If GPU loading fails (e.g. no Vulkan driver), fall back to CPU-only.
             let model_params_gpu = LlamaModelParams::default().with_n_gpu_layers(100);
+            log::info!("Attempting to load model from: {:?}", gguf_path);
             let model = match LlamaModel::load_from_file(backend, &gguf_path, &model_params_gpu) {
                 Ok(m) => {
                     log::info!("Qwen3 model loaded with GPU acceleration.");
@@ -1023,7 +1027,7 @@ Answer using ONLY these excerpts.\n\
         let model = model_guard.as_ref()
             .ok_or_else(|| "Qwen3 model unavailable after initialization".to_string())?;
 
-        let n_ctx_size: u32 = 32768;
+        let n_ctx_size: u32 = 8192;
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(n_ctx_size));
         let mut ctx = model
@@ -1368,10 +1372,14 @@ Answer using ONLY these excerpts.\n\
                 }
             }
 
-            // Stop sequence detection
+// Stop sequence detection
             let check_text = format!("{}{}", response, line_buffer);
             if check_text.len() > 100 {
-                let tail = &check_text[check_text.len().saturating_sub(200)..];
+                let mut tail_start = check_text.len().saturating_sub(200);
+while tail_start < check_text.len() && !check_text.is_char_boundary(tail_start) {
+    tail_start += 1;
+}
+let tail = &check_text[tail_start..];
                 if tail.contains("<|im_start|>")
                     || tail.contains("<|im_end|>")
                     || tail.contains("<documents>")
@@ -1381,19 +1389,24 @@ Answer using ONLY these excerpts.\n\
                     log::warn!("Stop sequence detected in output — halting generation.");
                     break;
                 }
-                // Detect phrase-level repetition at multiple window sizes.
-                if check_text.len() > 200 {
-                    let caught = [80_usize, 100, 120].iter().any(|&window| {
-                        let check_len = window.min(check_text.len() / 3);
-                        if check_len < 60 { return false; }
-                        let last_chunk = &check_text[check_text.len() - check_len..];
-                        let earlier = &check_text[..check_text.len() - check_len];
-                        earlier.contains(last_chunk)
-                    });
-                    if caught {
-                        log::warn!("Repetition loop detected — halting generation.");
-                        break;
+            }
+            // Detect phrase-level repetition at multiple window sizes.
+            if check_text.len() > 200 {
+                let caught = [80_usize, 100, 120].iter().any(|&window| {
+                    let check_len = window.min(check_text.len() / 3);
+                    if check_len < 60 { return false; }
+                    let mut split = check_text.len() - check_len;
+                    while split > 0 && !check_text.is_char_boundary(split) {
+                        split -= 1;
                     }
+                    if split == 0 { return false; }
+                    let last_chunk = &check_text[split..];
+                    let earlier = &check_text[..split];
+                    earlier.contains(last_chunk)
+                });
+                if caught {
+                    log::warn!("Repetition loop detected — halting generation.");
+                    break;
                 }
             }
 
