@@ -1,0 +1,126 @@
+JUSTICE AI QUICK START GUIDE
+
+NOTE: Justice AI is designed to run locally. Your documents are parsed, indexed, and queried on your own machine. The main reason for this architecture is security and privacy: sensitive legal and business documents do not need to be sent to a cloud API during normal use.
+
+Recommended hardware:
+- 16 GB RAM or more
+- Apple Silicon Mac or modern 8+ core x86 CPU
+- 10 GB+ free disk space
+- SSD storage
+Please do not attempt to test with hardware below these specifications. 
+
+Justice AI is available for macOS and Windows. Installers for both platforms are available on the project's GitHub Releases page.
+
+Description:
+
+Justice AI is designed to run locally. Your documents are parsed, indexed, and
+queried on your own machine. The main reason for this architecture is security
+and privacy: sensitive legal and business documents do not need to be sent to a
+cloud API during normal use.
+
+Best use cases:
+- searching a set of contracts, pleadings, policies, reports, or regulations
+- summarizing loaded documents
+- locating dates, clauses, parties, amounts, and obligations
+- comparing two or more loaded documents
+- asking document-grounded questions and checking the cited source text
+
+Not a good use case:
+- general legal advice
+- internet research
+- questions about laws or documents that were not loaded into the app
+- final compliance conclusions without human review
+- fixing very poor scans or incomplete source files
+
+GETTING STARTED
+1. Launch the app.
+2. On first run, the app will walk you through model setup. This downloads the local language model and the embedding model used for search. The download only happens once and is cached for future launches.
+3. Wait for the local model and embedding model to finish downloading.
+4. Once setup is complete, load your documents.
+5. Wait for indexing to finish before asking document-based questions.
+
+How to load files:
+- Use the file picker in the app, or drag files into the app
+
+Common supported file types:
+- PDF
+- DOCX
+- TXT / MD
+- CSV / XLSX
+- PNG / JPG / TIFF via OCR
+
+What the app does during ingestion:
+1. reads and parses the file
+2. extracts the text
+3. splits the text into searchable chunks
+4. Creates local embeddings for search
+5. stores the indexed result locally
+
+Important:
+- Wait for ingestion/indexing to finish before asking questions
+- Cleaner source documents produce better results
+- OCR quality depends heavily on scan quality and readability
+
+PROMPTING BASICS
+Justice AI works best when you ask focused, document-grounded questions.
+
+Weak prompt:
+- Tell me about this.
+
+Better prompts:
+- Summarize the termination provisions in the loaded contracts.
+- Compare the two agreements on indemnity and limitation of liability.
+- What evidence in these files supports the payment dispute timeline?
+- Which loaded document mentions runoff, chemical storage, or spill controls?
+- List the deadlines mentioned across the uploaded lease documents.
+
+When multiple documents are loaded:
+- Compare Document A and Document B on notice requirements.
+- Which file contains the strongest evidence of breach?
+- What are the main differences between the compliant and non-compliant reports?
+
+
+
+CHOOSING A MODEL MODE 
+
+Justice AI offers three modes that trade speed for depth. You can switch between them at any time. 
+Discovery: fastest mode, lighter context window. Best for quick lookups across a large set of documents, or when you want to scan loaded files before drilling in.
+Brief: balanced mode. Best for most day to day questions, summaries, and comparisons across a moderate number of documents.
+Standard: deepest mode, largest context window. Best when you need the model to reason across longer passages or produce more detailed answers. Slower than the other modes. 
+
+If you are not sure which to pick, start with Standard or Discovery.
+
+SIMPLE WORKFLOW
+
+1. Load only the documents relevant to the matter you are working on.
+2. Confirm indexing is complete.
+3. Start with a narrow summary question.
+4. Ask follow-up questions that drill down into specific issues.
+5. Open citations and verify important claims in the source text.
+6. Save or export the results if needed.
+
+HOW TO GET BETTER RESULTS
+
+- load the actual governing documents, not just background material
+- avoid mixing unrelated matters into one document set
+- use narrower prompts if broad prompts produce noisy answers
+- use readable, high-quality scans for OCR documents
+- treat the answer as a research draft until you verify the cited sources
+
+TROUBLESHOOTING
+ 
+If the app feels slow:
+- Confirm your machine meets the hardware requirements
+- Reduce the number of unrelated files loaded at once
+- Ask narrower questions
+
+If search quality seems weak:
+- Confirm the right documents are loaded
+- Check whether OCR source quality is poor
+- Rephrase the question more specifically
+
+If an answer sounds plausible but unhelpful:
+- Open the citation and inspect the source passage
+- Narrow the prompt and ask again
+
+
