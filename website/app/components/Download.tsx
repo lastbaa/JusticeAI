@@ -112,7 +112,12 @@ export default function Download() {
 
   function handleDownload(platform: typeof platforms[0]) {
     setActivePlatform(platform.key)
-    window.open(platform.file, '_blank', 'noopener')
+    const a = document.createElement('a')
+    a.href = platform.file
+    a.download = ''
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
   }
 
   const shownSteps = activePlatform
