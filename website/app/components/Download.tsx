@@ -19,7 +19,7 @@ const platforms: {
     key: 'mac',
     label: 'macOS',
     sub: 'Apple Silicon (native) · Intel via Rosetta 2 · macOS 12+',
-    file: 'https://github.com/lastbaa/CS-370-Justice-AI-Project/releases/download/v2.0.0/Justice.AI_2.0.0_aarch64.dmg',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v2.0.0/Justice.AI_2.0.0_aarch64.dmg',
     available: true,
     installSteps: [
       'Open the .dmg and drag Justice AI into your Applications folder, then eject the disk image.',
@@ -37,7 +37,7 @@ const platforms: {
     key: 'windows',
     label: 'Windows',
     sub: 'Windows 10+ · x64 · Vulkan GPU recommended',
-    file: 'https://github.com/lastbaa/CS-370-Justice-AI-Project/releases/download/v2.0.0/Justice.AI_2.0.0_x64-setup.exe',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/download/v2.0.0/Justice.AI_2.0.0_x64-setup.exe',
     available: true,
     installSteps: [
       'Run the installer (.exe). Windows SmartScreen may warn about an unrecognized publisher — click "More info" → "Run anyway".',
@@ -55,7 +55,7 @@ const platforms: {
     key: 'linux',
     label: 'Linux',
     sub: 'Ubuntu 22.04+ / Fedora 38+ · x64 · AppImage',
-    file: 'https://github.com/lastbaa/CS-370-Justice-AI-Project/releases/tag/v2.0.0',
+    file: 'https://github.com/lastbaa/JusticeAI/releases/tag/v2.0.0',
     available: false,
     installSteps: [
       'Download the .AppImage file. Make it executable: chmod +x Justice.AI_2.0.0_amd64.AppImage, then double-click or run it from a terminal.',
